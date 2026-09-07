@@ -1,0 +1,322 @@
+// Lexer for the Veldt language
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Token {
+    // Literals
+    Int(i64),
+    Str(String),
+    Ident(String),
+    // Keywords
+    Let, Fn, If, Else, While, For, Return, Print, Grow, Struct, Test,
+    True, False, And, Or, Not,
+    // Type names
+    TypeInt, TypeStr, TypeBool, TypeList, TypeFn,
+    // Operators
+    Plus, Minus, Star, Slash, Percent,
+    Eq, EqEq, Neq, Lt, Gt, Le, Ge,
+    // Delimiters
+    LParen, RParen, LBrace, RBrace, LBracket, RBracket,
+    Comma, Colon, Semicolon, Dot,
+    // Variant marker: sort#2
+    Hash(u32),
+    // End of file
+    Eof,
+}
+
+pub struct Lexer {
+    src: Vec<char>,
+    pos: usize,
+    // Track if last token was an identifier AND no whitespace followed it
+    last_was_ident_no_space: bool,
+}
+
+impl Lexer {
+    pub fn new(src: &str) -> Self {
+        Lexer {
+            src: src.chars().collect(),
+            pos: 0,
+            last_was_ident_no_space: false,
+        }
+    }
+
+    fn peek(&self) -> Option<char> {
+        self.src.get(self.pos).copied()
+    }
+
+    fn peek_at(&self, offset: usize) -> Option<char> {
+        self.src.get(self.pos + offset).copied()
+    }
+
+    fn advance(&mut self) -> Option<char> {
+        let c = self.peek();
+        if c.is_some() {
+            self.pos += 1;
+        }
+        c
+    }
+
+    fn skip_whitespace(&mut self) {
+        let mut had_ws = false;
+        while let Some(c) = self.peek() {
+            if c.is_whitespace() {
+                self.advance();
+                had_ws = true;
+            } else {
+                break;
+            }
+        }
+        if had_ws {
+            self.last_was_ident_no_space = false;
+        }
+    }
+
+    fn read_string(&mut self) -> Result<String, String> {
+        self.advance(); // skip opening "
+        let mut s = String::new();
+        loop {
+            match self.advance() {
+                None => return Err("Unterminated string".into()),
+                Some('"') => break,
+                Some('\\') => {
+                    match self.advance() {
+                        Some('n') => s.push('\n'),
+                        Some('t') => s.push('\t'),
+                        Some('"') => s.push('"'),
+                        Some('\\') => s.push('\\'),
+                        Some(c) => s.push(c),
+                        None => return Err("Unterminated string".into()),
+                    }
+                }
+                Some(c) => s.push(c),
+            }
+        }
+        Ok(s)
+    }
+
+    fn read_number(&mut self) -> Result<i64, String> {
+        let start = self.pos;
+        while let Some(c) = self.peek() {
+            if c.is_ascii_digit() {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        let s: String = self.src[start..self.pos].iter().collect();
+        s.parse::<i64>().map_err(|e| e.to_string())
+    }
+
+    fn read_ident(&mut self) -> String {
+        let start = self.pos;
+        while let Some(c) = self.peek() {
+            if c.is_alphanumeric() || c == '_' {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        self.src[start..self.pos].iter().collect()
+    }
+
+    fn keyword_or_ident(&self, s: &str) -> Token {
+        match s {
+            "let" => Token::Let,
+            "fn" => Token::Fn,
+            "if" => Token::If,
+            "else" => Token::Else,
+            "while" => Token::While,
+            "for" => Token::For,
+            "return" => Token::Return,
+            "print" => Token::Print,
+            "grow" => Token::Grow,
+            "struct" => Token::Struct,
+            "test" => Token::Test,
+            "true" => Token::True,
+            "false" => Token::False,
+            "and" => Token::And,
+            "or" => Token::Or,
+            "not" => Token::Not,
+            "int" => Token::TypeInt,
+            "str" => Token::TypeStr,
+            "bool" => Token::TypeBool,
+            "list" => Token::TypeList,
+            "fn" => Token::TypeFn,
+            _ => Token::Ident(s.to_string()),
+        }
+    }
+
+    pub fn tokenize(&mut self) -> Result<Vec<Token>, String> {
+        let mut tokens = Vec::new();
+        loop {
+            self.skip_whitespace();
+            match self.peek() {
+                None => {
+                    tokens.push(Token::Eof);
+                    break;
+                }
+                Some('#') => {
+                    // # after identifier = variant marker, otherwise comment
+                    if self.last_was_ident_no_space {
+                        self.advance(); // skip #
+                        // read the number after #
+                        let n = self.read_number()?;
+                        tokens.push(Token::Hash(n as u32));
+                        self.last_was_ident_no_space = false;
+                    } else {
+                        // comment: skip to end of line
+                        while let Some(c) = self.peek() {
+                            if c == '\n' { break; }
+                            self.advance();
+                        }
+                    }
+                }
+                Some('"') => {
+                    let s = self.read_string()?;
+                    tokens.push(Token::Str(s));
+                    self.last_was_ident_no_space = false;
+                }
+                Some(c) if c.is_ascii_digit() => {
+                    let n = self.read_number()?;
+                    tokens.push(Token::Int(n));
+                    self.last_was_ident_no_space = false;
+                }
+                Some(c) if c.is_alphabetic() || c == '_' => {
+                    let s = self.read_ident();
+                    let tok = self.keyword_or_ident(&s);
+                    let is_ident = matches!(tok, Token::Ident(_));
+                    tokens.push(tok);
+                    self.last_was_ident_no_space = is_ident;
+                }
+                Some('+') => { self.advance(); tokens.push(Token::Plus); self.last_was_ident_no_space = false; }
+                Some('-') => { self.advance(); tokens.push(Token::Minus); self.last_was_ident_no_space = false; }
+                Some('*') => { self.advance(); tokens.push(Token::Star); self.last_was_ident_no_space = false; }
+                Some('/') => { self.advance(); tokens.push(Token::Slash); self.last_was_ident_no_space = false; }
+                Some('%') => { self.advance(); tokens.push(Token::Percent); self.last_was_ident_no_space = false; }
+                Some('(') => { self.advance(); tokens.push(Token::LParen); self.last_was_ident_no_space = false; }
+                Some(')') => { self.advance(); tokens.push(Token::RParen); self.last_was_ident_no_space = false; }
+                Some('{') => { self.advance(); tokens.push(Token::LBrace); self.last_was_ident_no_space = false; }
+                Some('}') => { self.advance(); tokens.push(Token::RBrace); self.last_was_ident_no_space = false; }
+                Some('[') => { self.advance(); tokens.push(Token::LBracket); self.last_was_ident_no_space = false; }
+                Some(']') => { self.advance(); tokens.push(Token::RBracket); self.last_was_ident_no_space = false; }
+                Some(',') => { self.advance(); tokens.push(Token::Comma); self.last_was_ident_no_space = false; }
+                Some(':') => { self.advance(); tokens.push(Token::Colon); self.last_was_ident_no_space = false; }
+                Some(';') => { self.advance(); tokens.push(Token::Semicolon); self.last_was_ident_no_space = false; }
+                Some('.') => { self.advance(); tokens.push(Token::Dot); self.last_was_ident_no_space = false; }
+                Some('=') => {
+                    self.advance();
+                    if self.peek() == Some('=') {
+                        self.advance();
+                        tokens.push(Token::EqEq);
+                    } else {
+                        tokens.push(Token::Eq);
+                    }
+                    self.last_was_ident_no_space = false;
+                }
+                Some('!') => {
+                    self.advance();
+                    if self.peek() == Some('=') {
+                        self.advance();
+                        tokens.push(Token::Neq);
+                        self.last_was_ident_no_space = false;
+                    } else {
+                        return Err("Unexpected '!'".into());
+                    }
+                }
+                Some('<') => {
+                    self.advance();
+                    if self.peek() == Some('=') {
+                        self.advance();
+                        tokens.push(Token::Le);
+                    } else {
+                        tokens.push(Token::Lt);
+                    }
+                    self.last_was_ident_no_space = false;
+                }
+                Some('>') => {
+                    self.advance();
+                    if self.peek() == Some('=') {
+                        self.advance();
+                        tokens.push(Token::Ge);
+                    } else {
+                        tokens.push(Token::Gt);
+                    }
+                    self.last_was_ident_no_space = false;
+                }
+                Some(c) => return Err(format!("Unexpected character: '{}'", c)),
+            }
+        }
+        Ok(tokens)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_basic_tokens() {
+        let mut lex = Lexer::new("let x = 5");
+        let tokens = lex.tokenize().unwrap();
+        assert_eq!(tokens[0], Token::Let);
+        assert_eq!(tokens[1], Token::Ident("x".into()));
+        assert_eq!(tokens[2], Token::Eq);
+        assert_eq!(tokens[3], Token::Int(5));
+    }
+
+    #[test]
+    fn test_string() {
+        let mut lex = Lexer::new("\"hello world\"");
+        let tokens = lex.tokenize().unwrap();
+        assert_eq!(tokens[0], Token::Str("hello world".into()));
+    }
+
+    #[test]
+    fn test_comment_ignored() {
+        let mut lex = Lexer::new("x # this is a comment\ny");
+        let tokens = lex.tokenize().unwrap();
+        assert_eq!(tokens[0], Token::Ident("x".into()));
+        assert_eq!(tokens[1], Token::Ident("y".into()));
+    }
+
+    #[test]
+    fn test_variant_marker() {
+        let mut lex = Lexer::new("sort#2");
+        let tokens = lex.tokenize().unwrap();
+        assert_eq!(tokens[0], Token::Ident("sort".into()));
+        assert_eq!(tokens[1], Token::Hash(2));
+    }
+
+    #[test]
+    fn test_operators() {
+        let mut lex = Lexer::new("== != <= >= < > + - * / %");
+        let tokens = lex.tokenize().unwrap();
+        assert_eq!(tokens[0], Token::EqEq);
+        assert_eq!(tokens[1], Token::Neq);
+        assert_eq!(tokens[2], Token::Le);
+        assert_eq!(tokens[3], Token::Ge);
+        assert_eq!(tokens[4], Token::Lt);
+        assert_eq!(tokens[5], Token::Gt);
+        assert_eq!(tokens[6], Token::Plus);
+        assert_eq!(tokens[7], Token::Minus);
+        assert_eq!(tokens[8], Token::Star);
+        assert_eq!(tokens[9], Token::Slash);
+        assert_eq!(tokens[10], Token::Percent);
+    }
+
+    #[test]
+    fn test_keywords() {
+        let mut lex = Lexer::new("fn let if else while for return print grow struct test");
+        let tokens = lex.tokenize().unwrap();
+        assert_eq!(tokens[0], Token::Fn);
+        assert_eq!(tokens[1], Token::Let);
+        assert_eq!(tokens[2], Token::If);
+        assert_eq!(tokens[3], Token::Else);
+        assert_eq!(tokens[4], Token::While);
+        assert_eq!(tokens[5], Token::For);
+        assert_eq!(tokens[6], Token::Return);
+        assert_eq!(tokens[7], Token::Print);
+        assert_eq!(tokens[8], Token::Grow);
+        assert_eq!(tokens[9], Token::Struct);
+        assert_eq!(tokens[10], Token::Test);
+    }
+}
