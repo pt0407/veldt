@@ -6,6 +6,7 @@ mod interpreter;
 mod lexer;
 mod parser;
 mod veldt;
+mod visual;
 
 use std::env;
 use std::process;
@@ -85,6 +86,23 @@ fn main() {
             veldt.save().unwrap_or_else(|e| eprintln!("Save error: {}", e));
             println!("The veldt has been cleared.");
         }
+        "visual" => {
+            let mut veldt = veldt::Veldt::new();
+            if let Err(e) = veldt.load() {
+                eprintln!("Error loading veldt: {}", e);
+                process::exit(1);
+            }
+            match visual::generate_visual(&veldt) {
+                Ok(path) => {
+                    println!("Visual generated at: {}", path);
+                    visual::open_in_browser(&path);
+                }
+                Err(e) => {
+                    eprintln!("Error generating visual: {}", e);
+                    process::exit(1);
+                }
+            }
+        }
         "help" | "--help" | "-h" => {
             print_usage();
         }
@@ -107,6 +125,7 @@ fn print_usage() {
     println!("  veldt lineage <name>         Show all variants of a function lineage");
     println!("  veldt prune <name#N>         Manually kill a specific variant");
     println!("  veldt clear                  Clear the entire veldt");
+    println!("  veldt visual                 Open visual ecosystem viewer in browser");
 }
 
 fn run_program(path: &str) {
