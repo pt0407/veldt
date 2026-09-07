@@ -47,6 +47,8 @@ pub enum Expr {
     FieldAccess(Box<Expr>, String),
     // struct literal: Name { field: val, ... }
     StructLit(String, Vec<(String, Expr)>),
+    // list indexing: expr[index]
+    Index(Box<Expr>, Box<Expr>),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

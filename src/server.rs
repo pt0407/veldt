@@ -10,7 +10,7 @@ use crate::veldt::{Health, Veldt};
 use axum::{
     extract::State,
     http::StatusCode,
-    response::Json,
+    response::{Html, Json},
     routing::{get, post},
     Router,
 };
@@ -359,9 +359,8 @@ fn garden_json(veldt: &Veldt) -> serde_json::Value {
 
 // --- IDE HTML ---
 
-async fn serve_ide() -> (StatusCode, String) {
-    let html = IDE_HTML.to_string();
-    (StatusCode::OK, html)
+async fn serve_ide() -> Html<&'static str> {
+    Html(IDE_HTML)
 }
 
 const IDE_HTML: &str = include_str!("ide.html");

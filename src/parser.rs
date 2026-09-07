@@ -282,6 +282,12 @@ impl Parser {
                         expr = Expr::FieldAccess(Box::new(expr), method);
                     }
                 }
+                Token::LBracket => {
+                    self.advance();
+                    let index = self.parse_expr()?;
+                    self.expect(&Token::RBracket, "]")?;
+                    expr = Expr::Index(Box::new(expr), Box::new(index));
+                }
                 _ => break,
             }
         }

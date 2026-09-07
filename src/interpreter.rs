@@ -195,8 +195,18 @@ impl Interpreter {
                 self.eval_expr(expr)?;
                 Ok(FlowControl::Normal)
             }
-            Stmt::Grow(_) => {
-                // Grow statements are collected by the caller, not executed here
+            Stmt::Grow(item) => {
+                // Register grown functions in the interpreter immediately
+                // so they can be called in the same run.
+                // The caller also collects them for garden planting.
+                if let GrowItem::Fn(name, params, body, _tests) = item {
+                    let def = FunctionDef {
+                        params: params.clone(),
+                        body: body.clone(),
+                    };
+                    let variant = FunctionVariant { id: 1, def };
+                    self.functions.entry(name.clone()).or_default().push(variant);
+                }
                 Ok(FlowControl::Normal)
             }
         }
@@ -292,6 +302,27 @@ impl Interpreter {
                 }
                 Ok(Value::Struct(name.clone(), field_map))
             }
+            Expr::Index(obj, index) => {
+                let obj_val = self.eval_expr(obj)?;
+                let idx_val = self.eval_expr(index)?;
+                match (&obj_val, &idx_val) {
+                    (Value::List(items), Value::Int(i)) => {
+                        if *i < 0 || *i as usize >= items.len() {
+                            Err(format!("Index {} out of bounds (len {})", i, items.len()))
+                        } else {
+                            Ok(items[*i as usize].clone())
+                        }
+                    }
+                    (Value::Str(s), Value::Int(i)) => {
+                        if *i < 0 || *i as usize >= s.len() {
+                            Err(format!("Index {} out of bounds (len {})", i, s.len()))
+                        } else {
+                            Ok(Value::Str(s.chars().nth(*i as usize).unwrap().to_string()))
+                        }
+                    }
+                    _ => Err("Cannot index this value".into()),
+                }
+            }
         }
     }
 
@@ -304,6 +335,11 @@ impl Interpreter {
                 (Value::Int(a), Value::Str(b)) => Ok(Value::Str(format!("{}{}", a, b))),
                 (Value::Str(a), Value::Bool(b)) => Ok(Value::Str(format!("{}{}", a, b))),
                 (Value::Bool(a), Value::Str(b)) => Ok(Value::Str(format!("{}{}", a, b))),
+                (Value::Str(a), Value::List(b)) => {
+                    let strs: Vec<String> = b.iter().map(|v| format!("{}", v)).collect();
+                    Ok(Value::Str(format!("{}[{}]", a, strs.join(", "))))
+                }
+                (Value::Str(a), Value::Null) => Ok(Value::Str(format!("{}null", a))),
                 _ => Err("Cannot add these types".into()),
             },
             BinOp::Sub => match (l, r) {
@@ -443,6 +479,44 @@ impl Interpreter {
                     _ => Err("len() expects a string or list".into()),
                 }
             }
+            "max" => {
+                if args.len() != 2 { return Err("max() expects 2 arguments".into()); }
+                match (&args[0], &args[1]) {
+                    (Value::Int(a), Value::Int(b)) => Ok(Some(Value::Int(*a.max(b)))),
+                    _ => Err("max() expects integers".into()),
+                }
+            }
+            "min" => {
+                if args.len() != 2 { return Err("min() expects 2 arguments".into()); }
+                match (&args[0], &args[1]) {
+                    (Value::Int(a), Value::Int(b)) => Ok(Some(Value::Int(*a.min(b)))),
+                    _ => Err("min() expects integers".into()),
+                }
+            }
+            "abs" => {
+                if args.len() != 1 { return Err("abs() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::Int(n) => Ok(Some(Value::Int(n.abs()))),
+                    _ => Err("abs() expects an integer".into()),
+                }
+            }
+            "str" => {
+                if args.len() != 1 { return Err("str() expects 1 argument".into()); }
+                Ok(Some(Value::Str(format!("{}", args[0]))))
+            }
+            "int" => {
+                if args.len() != 1 { return Err("int() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::Str(s) => {
+                        s.trim().parse::<i64>()
+                            .map(|n| Some(Value::Int(n)))
+                            .map_err(|_| format!("Cannot convert '{}' to int", s))
+                    }
+                    Value::Int(n) => Ok(Some(Value::Int(*n))),
+                    Value::Bool(b) => Ok(Some(Value::Int(if *b { 1 } else { 0 }))),
+                    _ => Err("int() expects a string or int".into()),
+                }
+            }
             _ => Ok(None),
         }
     }
@@ -511,6 +585,43 @@ impl Interpreter {
                         Ok(Value::Str(parts.join(sep)))
                     }
                     _ => Err("join() expects a string separator".into()),
+                }
+            }
+            (Value::List(items), "get") => {
+                if args.len() != 1 { return Err("get() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::Int(i) => {
+                        if *i < 0 || *i as usize >= items.len() {
+                            Ok(Value::Null)
+                        } else {
+                            Ok(items[*i as usize].clone())
+                        }
+                    }
+                    _ => Err("get() expects an integer index".into()),
+                }
+            }
+            (Value::List(items), "sort") => {
+                let mut sorted = items.clone();
+                sorted.sort_by(|a, b| match (a, b) {
+                    (Value::Int(a), Value::Int(b)) => a.cmp(b),
+                    (Value::Str(a), Value::Str(b)) => a.cmp(b),
+                    _ => std::cmp::Ordering::Equal,
+                });
+                Ok(Value::List(sorted))
+            }
+            (Value::List(items), "slice") => {
+                if args.len() != 2 { return Err("slice() expects 2 arguments".into()); }
+                match (&args[0], &args[1]) {
+                    (Value::Int(start), Value::Int(end)) => {
+                        let s = (*start as usize).min(items.len());
+                        let e = (*end as usize).min(items.len());
+                        if s <= e {
+                            Ok(Value::List(items[s..e].to_vec()))
+                        } else {
+                            Ok(Value::List(vec![]))
+                        }
+                    }
+                    _ => Err("slice() expects two integers".into()),
                 }
             }
             _ => Err(format!("No method '{}' on this value", method)),

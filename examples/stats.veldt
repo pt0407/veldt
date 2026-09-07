@@ -1,0 +1,199 @@
+# stats.veldt — a data analysis toolkit
+# Each function is grown into the garden with inline tests.
+# Run this once, then the functions persist for any future program.
+
+# === GROW: sum ===
+grow fn sum(nums: list<int>) test sum([1, 2, 3]) == 6 {
+    let total = 0
+    for n in nums {
+        total = total + n
+    }
+    return total
+}
+
+# === GROW: mean ===
+grow fn mean(nums: list<int>) test mean([1, 2, 3, 4, 5]) == 3 {
+    let total = 0
+    let count = 0
+    for n in nums {
+        total = total + n
+        count = count + 1
+    }
+    if count == 0 {
+        return 0
+    }
+    return total / count
+}
+
+# === GROW: max_of ===
+grow fn max_of(nums: list<int>) test max_of([3, 7, 2, 9, 1]) == 9 {
+    let best = nums[0]
+    for n in nums {
+        if n > best {
+            best = n
+        }
+    }
+    return best
+}
+
+# === GROW: min_of ===
+grow fn min_of(nums: list<int>) test min_of([3, 7, 2, 9, 1]) == 1 {
+    let best = nums[0]
+    for n in nums {
+        if n < best {
+            best = n
+        }
+    }
+    return best
+}
+
+# === GROW: count_words ===
+grow fn count_words(text: str) test count_words("the quick brown fox") == 4 {
+    let words = text.split(" ")
+    return len(words)
+}
+
+# === GROW: reverse_str ===
+grow fn reverse_str(s: str) test reverse_str("hello") == "olleh" {
+    let chars = s.chars()
+    let result = ""
+    let i = len(chars) - 1
+    while i >= 0 {
+        result = result + chars[i]
+        i = i - 1
+    }
+    return result
+}
+
+# === GROW: is_palindrome ===
+grow fn is_palindrome(s: str) test is_palindrome("racecar") == true, is_palindrome("hello") == false {
+    let chars = s.chars()
+    let n = len(chars)
+    let i = 0
+    while i < n / 2 {
+        if chars[i] != chars[n - 1 - i] {
+            return false
+        }
+        i = i + 1
+    }
+    return true
+}
+
+# === GROW: factorial ===
+grow fn factorial(n: int) test factorial(5) == 120, factorial(0) == 1 {
+    if n <= 1 {
+        return 1
+    }
+    let result = 1
+    let i = 2
+    while i <= n {
+        result = result * i
+        i = i + 1
+    }
+    return result
+}
+
+# === GROW: is_prime ===
+grow fn is_prime(n: int) test is_prime(7) == true, is_prime(4) == false, is_prime(2) == true {
+    if n < 2 {
+        return false
+    }
+    if n == 2 {
+        return true
+    }
+    let i = 2
+    while i * i <= n {
+        if n % i == 0 {
+            return false
+        }
+        i = i + 1
+    }
+    return true
+}
+
+# === GROW: fib ===
+grow fn fib(n: int) test fib(10) == 55, fib(0) == 0, fib(1) == 1 {
+    if n <= 1 {
+        return n
+    }
+    let a = 0
+    let b = 1
+    let i = 2
+    while i <= n {
+        let temp = a + b
+        a = b
+        b = temp
+        i = i + 1
+    }
+    return b
+}
+
+# === GROW: gcd ===
+grow fn gcd(a: int, b: int) test gcd(12, 8) == 4, gcd(17, 5) == 1 {
+    while b != 0 {
+        let temp = b
+        b = a % b
+        a = temp
+    }
+    return a
+}
+
+# === GROW: power ===
+grow fn power(base: int, exp: int) test power(2, 10) == 1024, power(3, 3) == 27 {
+    let result = 1
+    let i = 0
+    while i < exp {
+        result = result * base
+        i = i + 1
+    }
+    return result
+}
+
+# === GROW: count_primes ===
+grow fn count_primes(limit: int) test count_primes(10) == 4 {
+    let count = 0
+    let i = 2
+    while i < limit {
+        if is_prime(i) {
+            count = count + 1
+        }
+        i = i + 1
+    }
+    return count
+}
+
+# === USE THE TOOLKIT ===
+print("=== Veldt Data Analysis Toolkit ===")
+print("")
+
+let data = [42, 17, 89, 3, 56, 22, 78, 91, 15, 34]
+print("Dataset: " + data)
+print("Sum: " + sum(data))
+print("Mean: " + mean(data))
+print("Max: " + max_of(data))
+print("Min: " + min_of(data))
+print("Sorted: " + data.sort())
+print("")
+
+let text = "the quick brown fox jumps over the lazy dog"
+print("Text: " + text)
+print("Word count: " + count_words(text))
+print("")
+
+print("Factorial(10): " + factorial(10))
+print("Fibonacci(20): " + fib(20))
+print("Power(2, 16): " + power(2, 16))
+print("GCD(48, 36): " + gcd(48, 36))
+print("")
+
+print("Primes under 100: " + count_primes(100))
+print("Is 97 prime? " + is_prime(97))
+print("Is 100 prime? " + is_prime(100))
+print("")
+
+print("Reverse 'veldt': " + reverse_str("veldt"))
+print("Is 'racecar' palindrome? " + is_palindrome("racecar"))
+print("Is 'hello' palindrome? " + is_palindrome("hello"))
+print("")
+print("All functions grown into the garden.")
+print("Run 'veldt evolve' to mutate them and watch them compete!")
