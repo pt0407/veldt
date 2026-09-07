@@ -46,6 +46,9 @@ pub struct Interpreter {
     pub structs: HashMap<String, Vec<(String, Type)>>,
     // track which veldt functions were called during this run
     pub usage_log: Vec<(String, u32)>, // (name, variant_id)
+    // instruction counter — prevents infinite loops in mutants/trials
+    pub step_count: u64,
+    pub step_limit: u64,
 }
 
 pub struct FunctionVariant {
@@ -65,7 +68,23 @@ impl Interpreter {
             functions: HashMap::new(),
             structs: HashMap::new(),
             usage_log: Vec::new(),
+            step_count: 0,
+            step_limit: 100_000, // safety limit
         }
+    }
+
+    pub fn with_step_limit(limit: u64) -> Self {
+        let mut interp = Self::new();
+        interp.step_limit = limit;
+        interp
+    }
+
+    fn tick(&mut self) -> Result<(), String> {
+        self.step_count += 1;
+        if self.step_count > self.step_limit {
+            return Err("Execution limit exceeded (possible infinite loop)".into());
+        }
+        Ok(())
     }
 
     pub fn run(&mut self, stmts: &[Stmt]) -> Result<(), String> {
@@ -79,6 +98,7 @@ impl Interpreter {
     }
 
     fn exec_stmt(&mut self, stmt: &Stmt) -> Result<FlowControl, String> {
+        self.tick()?;
         match stmt {
             Stmt::Let(name, expr) => {
                 let val = self.eval_expr(expr)?;
@@ -270,7 +290,7 @@ impl Interpreter {
     fn eval_binop(&self, l: &Value, op: &BinOp, r: &Value) -> Result<Value, String> {
         match op {
             BinOp::Add => match (l, r) {
-                (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a + b)),
+                (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a.wrapping_add(*b))),
                 (Value::Str(a), Value::Str(b)) => Ok(Value::Str(format!("{}{}", a, b))),
                 (Value::Str(a), Value::Int(b)) => Ok(Value::Str(format!("{}{}", a, b))),
                 (Value::Int(a), Value::Str(b)) => Ok(Value::Str(format!("{}{}", a, b))),
@@ -279,21 +299,21 @@ impl Interpreter {
                 _ => Err("Cannot add these types".into()),
             },
             BinOp::Sub => match (l, r) {
-                (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a - b)),
+                (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a.wrapping_sub(*b))),
                 _ => Err("Cannot subtract non-integers".into()),
             },
             BinOp::Mul => match (l, r) {
-                (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a * b)),
+                (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a.wrapping_mul(*b))),
                 _ => Err("Cannot multiply non-integers".into()),
             },
             BinOp::Div => match (l, r) {
                 (Value::Int(_), Value::Int(0)) => Err("Division by zero".into()),
-                (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a / b)),
+                (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a.wrapping_div(*b))),
                 _ => Err("Cannot divide non-integers".into()),
             },
             BinOp::Mod => match (l, r) {
                 (Value::Int(_), Value::Int(0)) => Err("Modulo by zero".into()),
-                (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a % b)),
+                (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a.wrapping_rem(*b))),
                 _ => Err("Cannot modulo non-integers".into()),
             },
             BinOp::Eq => Ok(Value::Bool(self.values_eq(l, r))),
@@ -421,15 +441,69 @@ impl Interpreter {
 
     fn eval_method_call(&mut self, obj: Value, method: &str, args: Vec<Value>) -> Result<Value, String> {
         match (&obj, method) {
+            // String methods
             (Value::Str(s), "upper") => Ok(Value::Str(s.to_uppercase())),
             (Value::Str(s), "lower") => Ok(Value::Str(s.to_lowercase())),
+            (Value::Str(s), "trim") => Ok(Value::Str(s.trim().to_string())),
+            (Value::Str(s), "split") => {
+                if args.len() != 1 { return Err("split() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::Str(sep) => {
+                        let parts: Vec<Value> = s.split(sep).map(|p| Value::Str(p.to_string())).collect();
+                        Ok(Value::List(parts))
+                    }
+                    _ => Err("split() expects a string separator".into()),
+                }
+            }
+            (Value::Str(s), "contains") => {
+                if args.len() != 1 { return Err("contains() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::Str(sub) => Ok(Value::Bool(s.contains(sub))),
+                    _ => Err("contains() expects a string".into()),
+                }
+            }
+            (Value::Str(s), "replace") => {
+                if args.len() != 2 { return Err("replace() expects 2 arguments".into()); }
+                match (&args[0], &args[1]) {
+                    (Value::Str(old), Value::Str(new)) => Ok(Value::Str(s.replace(old, new))),
+                    _ => Err("replace() expects two strings".into()),
+                }
+            }
+            (Value::Str(s), "chars") => {
+                let chars: Vec<Value> = s.chars().map(|c| Value::Str(c.to_string())).collect();
+                Ok(Value::List(chars))
+            }
+            // List methods
             (Value::List(items), "push") => {
                 let mut new_items = items.clone();
-                if args.len() != 1 {
-                    return Err("push() expects 1 argument".into());
-                }
+                if args.len() != 1 { return Err("push() expects 1 argument".into()); }
                 new_items.push(args[0].clone());
                 Ok(Value::List(new_items))
+            }
+            (Value::List(items), "len") => Ok(Value::Int(items.len() as i64)),
+            (Value::List(items), "contains") => {
+                if args.len() != 1 { return Err("contains() expects 1 argument".into()); }
+                Ok(Value::Bool(items.contains(&args[0])))
+            }
+            (Value::List(items), "reverse") => {
+                let mut new_items = items.clone();
+                new_items.reverse();
+                Ok(Value::List(new_items))
+            }
+            (Value::List(items), "join") => {
+                if args.len() != 1 { return Err("join() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::Str(sep) => {
+                        let parts: Vec<String> = items.iter().map(|v| match v {
+                            Value::Str(s) => s.clone(),
+                            Value::Int(n) => n.to_string(),
+                            Value::Bool(b) => b.to_string(),
+                            _ => format!("{:?}", v),
+                        }).collect();
+                        Ok(Value::Str(parts.join(sep)))
+                    }
+                    _ => Err("join() expects a string separator".into()),
+                }
             }
             _ => Err(format!("No method '{}' on this value", method)),
         }

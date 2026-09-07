@@ -83,7 +83,7 @@ impl HealthChecker {
                         variables: &std::collections::HashMap<String, crate::veldt::VariableEntry>,
                         structs: &std::collections::HashMap<String, crate::veldt::StructEntry>,
                         start: Instant) -> TrialResult {
-        let mut interp = Interpreter::new();
+        let mut interp = Interpreter::with_step_limit(10000);
         Self::load_snapshot_into_interp(functions, variables, structs, &mut interp);
 
         // Load the function being tested
@@ -132,7 +132,7 @@ impl HealthChecker {
                          variables: &std::collections::HashMap<String, crate::veldt::VariableEntry>,
                          structs: &std::collections::HashMap<String, crate::veldt::StructEntry>,
                          start: Instant) -> TrialResult {
-        let mut interp = Interpreter::new();
+        let mut interp = Interpreter::with_step_limit(10000);
         Self::load_snapshot_into_interp(functions, variables, structs, &mut interp);
 
         let variant = crate::interpreter::FunctionVariant {
@@ -339,13 +339,14 @@ mod tests {
     #[test]
     fn test_sick_function_fails_trial() {
         let mut veldt = make_veldt();
+        // Division by zero — genuinely crashes at runtime
         veldt.grow_function("broken", vec![
             Param { name: "a".into(), typ: Type::Int },
         ], vec![Stmt::Return(Some(Expr::BinOp(
             Box::new(Expr::Var("a".into())),
-            BinOp::Add,
-            Box::new(Expr::Str("bad".into())),
-        )))], vec![], "fn broken(a: int) { return a + \"bad\" }");
+            BinOp::Div,
+            Box::new(Expr::Int(0)),
+        )))], vec![], "fn broken(a: int) { return a / 0 }");
 
         check_entry(&mut veldt, "broken");
         let entry = &veldt.functions["broken"][0];

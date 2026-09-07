@@ -1,6 +1,7 @@
 // Veldt CLI — main entry point
 
 mod ast;
+mod evolve;
 mod health;
 mod interpreter;
 mod lexer;
@@ -86,6 +87,20 @@ fn main() {
             veldt.save().unwrap_or_else(|e| eprintln!("Save error: {}", e));
             println!("The veldt has been cleared.");
         }
+        "evolve" => {
+            let cycles: usize = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(1);
+            let mut veldt = veldt::Veldt::new();
+            if let Err(e) = veldt.load() {
+                eprintln!("Error loading veldt: {}", e);
+                process::exit(1);
+            }
+            let mut evolver = evolve::Evolver::new();
+            let events = evolver.evolve(&mut veldt, cycles);
+            for event in &events {
+                eprintln!("{}", event.format());
+            }
+            veldt.save().unwrap_or_else(|e| eprintln!("Save error: {}", e));
+        }
         "visual" => {
             let mut veldt = veldt::Veldt::new();
             if let Err(e) = veldt.load() {
@@ -125,6 +140,7 @@ fn print_usage() {
     println!("  veldt lineage <name>         Show all variants of a function lineage");
     println!("  veldt prune <name#N>         Manually kill a specific variant");
     println!("  veldt clear                  Clear the entire veldt");
+    println!("  veldt evolve [N]             Run N evolution cycles (garden self-grows)");
     println!("  veldt visual                 Open visual ecosystem viewer in browser");
 }
 
