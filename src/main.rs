@@ -6,6 +6,7 @@ mod health;
 mod interpreter;
 mod lexer;
 mod parser;
+mod server;
 mod veldt;
 mod visual;
 
@@ -20,6 +21,17 @@ fn main() {
     }
 
     let command = &args[1];
+
+    // Studio needs async runtime
+    if command == "studio" {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let port: u16 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(7777);
+            server::start_server(port).await;
+        });
+        return;
+    }
+
     match command.as_str() {
         "run" => {
             if args.len() < 3 {
@@ -141,6 +153,7 @@ fn print_usage() {
     println!("  veldt prune <name#N>         Manually kill a specific variant");
     println!("  veldt clear                  Clear the entire veldt");
     println!("  veldt evolve [N]             Run N evolution cycles (garden self-grows)");
+    println!("  veldt studio [port]          Start Veldt Studio IDE (default port 7777)");
     println!("  veldt visual                 Open visual ecosystem viewer in browser");
 }
 

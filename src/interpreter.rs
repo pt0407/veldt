@@ -49,6 +49,8 @@ pub struct Interpreter {
     // instruction counter — prevents infinite loops in mutants/trials
     pub step_count: u64,
     pub step_limit: u64,
+    // print capture — when set, print goes here instead of stdout
+    pub print_buffer: Option<String>,
 }
 
 pub struct FunctionVariant {
@@ -70,6 +72,7 @@ impl Interpreter {
             usage_log: Vec::new(),
             step_count: 0,
             step_limit: 100_000, // safety limit
+            print_buffer: None,
         }
     }
 
@@ -180,7 +183,12 @@ impl Interpreter {
             }
             Stmt::Print(expr) => {
                 let val = self.eval_expr(expr)?;
-                println!("{}", val);
+                let line = format!("{}\n", val);
+                if let Some(ref mut buf) = self.print_buffer {
+                    buf.push_str(&line);
+                } else {
+                    print!("{}", line);
+                }
                 Ok(FlowControl::Normal)
             }
             Stmt::ExprStmt(expr) => {

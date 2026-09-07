@@ -60,6 +60,7 @@ pub struct Obituary {
     pub timestamp: u64,
 }
 
+#[derive(Clone)]
 pub struct Veldt {
     pub functions: HashMap<String, Vec<FunctionEntry>>,  // lineage -> variants
     pub variables: HashMap<String, VariableEntry>,
