@@ -140,7 +140,6 @@ impl Lexer {
             "str" => Token::TypeStr,
             "bool" => Token::TypeBool,
             "list" => Token::TypeList,
-            "fn" => Token::TypeFn,
             _ => Token::Ident(s.to_string()),
         }
     }

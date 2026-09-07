@@ -51,7 +51,7 @@ impl Parser {
             Token::TypeInt => Ok(Type::Int),
             Token::TypeStr => Ok(Type::Str),
             Token::TypeBool => Ok(Type::Bool),
-            Token::TypeFn => Ok(Type::Fn),
+            Token::Fn => Ok(Type::Fn),
             Token::TypeList => {
                 // list<type> or just list
                 if self.check(&Token::Lt) {
@@ -75,7 +75,7 @@ impl Parser {
             Token::TypeStr => "str".into(),
             Token::TypeBool => "bool".into(),
             Token::TypeList => "list".into(),
-            Token::TypeFn => "fn".into(),
+            Token::Fn => "fn".into(),
             t => return Err(format!("Expected param name but got {:?}", t)),
         };
         self.expect(&Token::Colon, ":")?;
@@ -236,7 +236,7 @@ impl Parser {
                         Token::TypeStr => "str".into(),
                         Token::TypeBool => "bool".into(),
                         Token::TypeList => "list".into(),
-                        Token::TypeFn => "fn".into(),
+                        Token::Fn => "fn".into(),
                         t => return Err(format!("Expected field name but got {:?}", t)),
                     };
                     self.expect(&Token::Colon, ":")?;
@@ -346,7 +346,7 @@ impl Parser {
                 self.advance();
                 self.parse_ident_postfix("list".into())
             }
-            Token::TypeFn => {
+            Token::Fn => {
                 self.advance();
                 self.parse_ident_postfix("fn".into())
             }
