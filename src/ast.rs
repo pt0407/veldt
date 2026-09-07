@@ -1,6 +1,8 @@
 // AST type definitions for the Veldt language
 
-#[derive(Debug, Clone, PartialEq)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Type {
     Int,
     Str,
@@ -10,25 +12,25 @@ pub enum Type {
     Struct(String),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Param {
     pub name: String,
     pub typ: Type,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum BinOp {
     Add, Sub, Mul, Div, Mod,
     Eq, Neq, Lt, Gt, Le, Ge,
     And, Or,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum UnaryOp {
     Neg, Not,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Expr {
     Int(i64),
     Str(String),
@@ -47,13 +49,13 @@ pub enum Expr {
     StructLit(String, Vec<(String, Expr)>),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TestAssert {
     pub call: Expr,
     pub expected: Expr,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Stmt {
     Let(String, Expr),
     Assign(String, Expr),
@@ -68,7 +70,7 @@ pub enum Stmt {
     Grow(GrowItem),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum GrowItem {
     Fn(String, Vec<Param>, Vec<Stmt>, Vec<TestAssert>),
     Let(String, Expr),

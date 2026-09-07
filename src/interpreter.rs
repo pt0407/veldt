@@ -1,9 +1,10 @@
 // Interpreter for the Veldt language — tree-walking
 
 use crate::ast::*;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Value {
     Int(i64),
     Str(String),
