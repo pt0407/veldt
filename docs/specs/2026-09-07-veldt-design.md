@@ -139,10 +139,10 @@ When a program executes a `grow fn` statement, the grown function enters the vel
    - Fails → **stillborn** (dies immediately, obituary printed).
 2. **Type check**: does it type-check against the current veldt?
    - Fails → **sick**, enters with a weak lifespan.
-3. **Trial run**: the runtime calls the function with sample inputs (generated from the parameter types) and measures:
-   - Does it run without errors? (correctness)
-   - How fast does it complete? (performance)
-   - This produces a **trial score** that becomes the variant's starting fitness.
+3. **Trial run**: the runtime tests the function to measure correctness and performance.
+   - **If the grow statement includes inline test assertions** (e.g., `grow fn sort(list) test sort([3, 1, 2]) == [1, 2, 3]`), the runtime runs those tests. Passing tests → high trial score. Failing tests → low trial score.
+   - **If no test assertions are provided**, the runtime falls back to safe defaults for each parameter type (`int: 0`, `str: ""`, `bool: true`, `list: []`) and just checks the function doesn't crash. This gives a neutral trial score — not great, not terrible.
+   - The trial score becomes the variant's starting fitness, letting it compete against incumbents from the start.
 
 If all pass → **healthy**, enters with a strong lifespan baseline + trial score as initial fitness.
 If parse OK but type/trial fails → **sick**, enters with a weak lifespan and low trial score.
@@ -151,11 +151,15 @@ If the new variant joins an existing lineage (same function name), competition b
 
 ### Birth of variables and structs
 
-`grow let` and `grow struct` entries are immortal — no health check, no trial run, no lifespan. They enter the veldt and persist permanently.
+`grow let` entries are immortal — no health check, no trial run, no lifespan. They enter the veldt and persist permanently.
+
+`grow struct` entries are immortal but **can be superseded**: growing a struct with the same name as an existing struct replaces the old one. The old struct is removed and the new definition takes its place. This allows struct evolution without full lineage/variant complexity.
 
 ### Life
 
-During each program run, the veldt is loaded. Living code is available to all programs. When a running program calls veldt code, that code's usage count increments and its lifespan grows (usage bonus). Used, healthy code thrives.
+During each program run, the veldt is loaded fresh from disk. Living code is available to all programs. When a running program calls veldt code, that code's usage count increments and its lifespan grows (usage bonus). Used, healthy code thrives.
+
+**Cross-run compatibility:** Because the veldt changes between runs (variants age, die, get healed, get outcompeted), the interpreter must type-check the running program against the *currently active fittest variants* at load time — not assume past signatures are static. If `foo#1` was fittest last run but `foo#2` is fittest now, programs calling `foo` bind to `foo#2`'s signature. If the signature is incompatible, the runtime reports a compatibility error (the ecosystem shifted under you).
 
 ### Aging
 
@@ -172,8 +176,9 @@ When a function variant is sick, the runtime attempts to heal it before it dies.
 Healing is **contextual** — it depends on whether the healer serves the same purpose as the sick code:
 
 **Same-purpose healer** (healthy function in the same lineage, or doing the same job):
-- Healing = **absorption**. The sick code becomes a copy of the healthy code. It's not just fixed — it's converted. The superior code wins by both starving and absorbing the inferior. Like an immune system that converts invaders into allies.
-- The absorbed variant keeps its ID but its source becomes the healthy code's source.
+- Healing = **hybrid merge**. Instead of cloning the healthy code into the sick variant (which would create a redundant duplicate), the runtime merges the sick code's unique parts with the healthy code's working parts. The sick variant survives as a **new mutation** — not a clone, but a hybrid. It keeps its ID and gains a blend of both sources.
+- This preserves diversity in the lineage while fixing the sickness. The hybrid may turn out better or worse than either parent — natural selection will sort it out.
+- If the sick code has no unique salvageable parts (it's entirely broken), the merge degrades to replacement and the sick variant dies, transferring its usage history to the healer as a legacy bonus.
 
 **Different-purpose healer** (healthy function with similar structure but different job):
 - Healing = **patching**. The healer can only lend parts — type annotations, structural patterns — without being absorbed. The sick code stays itself, just patched up.
@@ -284,6 +289,12 @@ print(p.x)
 # Growing code (the core feature)
 grow fn shout(name: str) {
     print("HELLO " + name)
+}
+
+# Growing with inline test assertions (optional but recommended)
+# Tests are run at birth as the trial run — passing = high fitness
+grow fn sort(list: list) test sort([3, 1, 2]) == [1, 2, 3] {
+    # ... implementation ...
 }
 
 grow let default_greeting = "hello"
