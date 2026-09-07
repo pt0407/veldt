@@ -2,7 +2,7 @@
 
 ## Overview
 
-Veldt is a programming language where programs grow new code, and that code lives in a shared, persistent ecosystem called the veldt. Grown code has a lifespan: healthy code persists, sick code gets healed or dies. The codebase is not a file you edit — it is a living veldt that grows, self-cleans, and evolves.
+Veldt is a programming language where programs grow new code, and that code lives in a shared, persistent ecosystem called the veldt. Grown code has a lifespan determined by how useful it is and whether it works — and when superior code exists for the same job, inferior code's lifespan shrinks until it dies out. The codebase is not a file you edit — it is a living veldt where code competes, evolves, and dies by natural selection.
 
 Implemented in Rust. Interpreter design (lexer → parser → interpreter → ecosystem).
 
@@ -12,6 +12,7 @@ Implemented in Rust. Interpreter design (lexer → parser → interpreter → ec
 - Code is **alive** — it enters the veldt, lives, can get sick, can heal, ages, and dies.
 - The veldt is **shared** — all programs grow into and read from one global ecosystem.
 - The codebase **evolves** — the language gets richer as the veldt grows.
+- Code **competes** — when superior code exists for the same job, inferior code dies out. Natural selection, not just aging.
 
 ## Output channels
 
@@ -50,11 +51,50 @@ Functions, variables, and type definitions that have been grown by any program. 
 - **Born**: timestamp when it was grown
 - **Age**: how many runs it has survived
 - **Health**: `healthy`, `sick`, `dying`
-- **Lifespan**: max age before death (depends on health)
+- **Lifespan**: current remaining lifespan (dynamic — see below)
 - **Usage count**: how many times it's been called by running programs
+- **Last used**: run number when last called
+- **Competitors**: other veldt entries that serve the same purpose
 - **Healing attempts**: history of repair attempts
 
 ## Life cycle of code
+
+### Lifespan is dynamic
+
+Lifespan is not a fixed number. It is computed from two factors:
+
+1. **Does it work?** (health)
+   - Healthy (parses, type-checks, runs) → strong lifespan baseline
+   - Sick (parse OK but type/run fails) → weak lifespan baseline, fast aging
+   - Stillborn (parse fails) → dies immediately
+
+2. **Is it useful?** (usage)
+   - Called frequently by running programs → lifespan grows
+   - Never called → lifespan shrinks toward zero
+   - Recently called → lifespan boosted; long dormant → lifespan decays
+
+Each run, lifespan is recalculated:
+```
+lifespan = base(health) + usage_bonus(recent_calls) - dormancy_penalty(time_since_last_use)
+```
+
+Healthy, frequently-used code lives long. Healthy, never-used code slowly starves. Sick code dies fast unless it gets healed and used.
+
+### Competition (natural selection)
+
+Code in the veldt competes. When two or more entries serve the **same purpose** — same function name, or compatible signature doing the same job — the runtime compares them and ranks them by fitness:
+
+**Fitness** = health × usage × recency
+
+- A healthy, frequently-called, recently-used function has high fitness.
+- A sick or never-called function has low fitness.
+
+When a superior competitor exists:
+- The inferior code's lifespan **shrinks** each run (competition penalty).
+- The superior code's lifespan **grows** (it absorbs the "demand" the inferior one was failing to meet).
+- If the inferior code is also sick, it dies even faster — competition + sickness compounds.
+
+This means: if you grow a better `sort`, the old `sort` dies out. If you grow a worse `sort`, *it* dies out and the better one survives. The veldt self-optimizes toward the fittest code for every job. No manual cleanup — competition handles it.
 
 ### Birth
 
@@ -64,17 +104,23 @@ When a program executes a `grow` statement, the grown code enters the veldt. The
 - **Type check**: does it type-check against the current veldt?
 - **Run check**: can it execute without immediate errors?
 
-If all pass → **healthy**, long lifespan (default: 100 runs).
+If all pass → **healthy**, enters with a strong lifespan baseline.
 If parse fails → **stillborn** (dies immediately, obituary printed).
-If parse OK but type/run fails → **sick**, short lifespan (default: 5 runs).
+If parse OK but type/run fails → **sick**, enters with a weak lifespan.
+
+If the new code competes with existing code (same name/signature), competition begins immediately — the fitter one starts starving the other.
 
 ### Life
 
-During each program run, the veldt is loaded. Living code is available to all programs. When a running program calls veldt code, that code's usage count increments and its lifespan renews (extends by a renewal amount, e.g., +50 runs, capped at a max). Used healthy code thrives.
+During each program run, the veldt is loaded. Living code is available to all programs. When a running program calls veldt code, that code's usage count increments and its lifespan grows (usage bonus). Used, healthy code thrives.
 
 ### Aging
 
-After each run, all veldt entries age by 1. Sick code ages by 3 (ages faster). Code that was used during the run gets renewed. Code that was not used just ages normally.
+After each run:
+- All veldt entries age by 1.
+- Lifespan is recalculated based on current health, usage, and dormancy.
+- Competition penalties applied — inferior code in a competitive pair loses lifespan to the superior one.
+- Sick code ages faster (sickness multiplier on aging).
 
 ### Healing (immune system)
 
@@ -98,7 +144,16 @@ When code's age exceeds its lifespan, it dies. The runtime prints an **obituary*
   Health: sick (type error: unknown method 'upper' on str)
   Healing attempts: 2 (failed — no similar healthy function found)
   Last used: never
-  Cause of death: lifespan exceeded
+  Cause of death: lifespan exceeded (sickness + outcompeted by greet(name))
+```
+
+Competition-related deaths look like:
+```
+[OBITUARY] sort(list) — died at age 23 (healthy)
+  Born: 2026-09-05 09:14:00
+  Health: healthy
+  Last used: 2 runs ago
+  Cause of death: outcompeted by sort_v2(list) — higher fitness (more usage, more recent)
 ```
 
 Dead code is removed from the veldt. The ecosystem self-cleans.
@@ -230,7 +285,9 @@ veldt clear                   # clear the entire veldt
 1. You can write and run a Veldt program with variables, functions, conditionals, and loops.
 2. Programs can `grow` code that persists to the veldt and is available in future runs.
 3. Grown code is health-checked on birth.
-4. Sick code gets garden-inspired healing attempts.
-5. Code ages and dies with obituaries when its lifespan is exceeded.
-6. `veldt garden` shows the living ecosystem.
-7. The whole thing feels alive — not like editing files, like tending an ecosystem.
+4. Lifespan is dynamic — based on usefulness (usage) and health (does it work).
+5. Code competes — when superior code exists for the same job, inferior code's lifespan shrinks and dies out.
+6. Sick code gets garden-inspired healing attempts.
+7. Code ages and dies with obituaries when its lifespan is exceeded (including competition as a cause of death).
+8. `veldt garden` shows the living ecosystem.
+9. The whole thing feels alive — not like editing files, like tending a living, competing ecosystem.
