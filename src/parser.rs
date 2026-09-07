@@ -245,6 +245,9 @@ impl Parser {
                     if !self.match_tok(&Token::Comma) {
                         break;
                     }
+                    if self.check(&Token::RBrace) {
+                        break;
+                    }
                 }
             }
             self.expect(&Token::RBrace, "}")?;
@@ -381,16 +384,24 @@ impl Parser {
             Token::Print => self.parse_print(),
             Token::Grow => self.parse_grow(),
             Token::Struct => self.parse_struct(),
-            Token::Ident(name) => {
-                // could be assignment or expression statement
-                if self.tokens.get(self.pos + 1) == Some(&Token::Eq) {
-                    self.advance(); // ident
+            Token::Ident(_) => {
+                // Parse as expression, then check for assignment
+                let target = self.parse_expr()?;
+                if self.check(&Token::Eq) {
                     self.advance(); // =
-                    let expr = self.parse_expr()?;
-                    Ok(Stmt::Assign(name, expr))
+                    let value = self.parse_expr()?;
+                    match target {
+                        Expr::Var(name) => Ok(Stmt::Assign(name, value)),
+                        Expr::FieldAccess(obj, field) => {
+                            Ok(Stmt::FieldAssign(*obj, field, value))
+                        }
+                        Expr::Index(obj, index) => {
+                            Ok(Stmt::IndexAssign(*obj, *index, value))
+                        }
+                        _ => Err("Invalid assignment target".into()),
+                    }
                 } else {
-                    let e = self.parse_expr()?;
-                    Ok(Stmt::ExprStmt(e))
+                    Ok(Stmt::ExprStmt(target))
                 }
             }
             t => Err(format!("Unexpected token in statement: {:?}", t)),

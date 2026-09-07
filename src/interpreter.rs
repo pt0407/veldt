@@ -3,6 +3,7 @@
 use crate::ast::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Value {
@@ -51,6 +52,8 @@ pub struct Interpreter {
     pub step_limit: u64,
     // print capture — when set, print goes here instead of stdout
     pub print_buffer: Option<String>,
+    // RNG state for rand()
+    rng_state: u64,
 }
 
 pub struct FunctionVariant {
@@ -73,6 +76,10 @@ impl Interpreter {
             step_count: 0,
             step_limit: 100_000, // safety limit
             print_buffer: None,
+            rng_state: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_nanos() as u64)
+                .unwrap_or(0x1234567890ABCDEF),
         }
     }
 
@@ -115,6 +122,53 @@ impl Interpreter {
                     Ok(FlowControl::Normal)
                 } else {
                     Err(format!("Cannot assign to undefined variable: {}", name))
+                }
+            }
+            Stmt::FieldAssign(obj_expr, field, val_expr) => {
+                let obj_val = self.eval_expr(obj_expr)?;
+                let new_val = self.eval_expr(val_expr)?;
+                match obj_val {
+                    Value::Struct(name, mut fields) => {
+                        if !fields.contains_key(field.as_str()) {
+                            return Err(format!("No field '{}' on struct {}", field, name));
+                        }
+                        fields.insert(field.clone(), new_val);
+                        // Write back to the variable holding this struct
+                        // This is tricky — we need to find where the struct lives
+                        // For now, we only support field assignment on variables
+                        if let Expr::Var(var_name) = obj_expr {
+                            self.vars.insert(var_name.clone(), Value::Struct(name, fields));
+                        } else {
+                            return Err("Can only assign fields on a variable".into());
+                        }
+                        Ok(FlowControl::Normal)
+                    }
+                    _ => Err("Cannot assign field on non-struct".into()),
+                }
+            }
+            Stmt::IndexAssign(obj_expr, index_expr, val_expr) => {
+                let obj_val = self.eval_expr(obj_expr)?;
+                let index = self.eval_expr(index_expr)?;
+                let new_val = self.eval_expr(val_expr)?;
+                match obj_val {
+                    Value::List(mut items) => {
+                        match index {
+                            Value::Int(i) => {
+                                if i < 0 || i as usize >= items.len() {
+                                    return Err(format!("Index {} out of bounds", i));
+                                }
+                                items[i as usize] = new_val;
+                                if let Expr::Var(var_name) = obj_expr {
+                                    self.vars.insert(var_name.clone(), Value::List(items));
+                                } else {
+                                    return Err("Can only assign index on a variable".into());
+                                }
+                                Ok(FlowControl::Normal)
+                            }
+                            _ => Err("Index must be an integer".into()),
+                        }
+                    }
+                    _ => Err("Cannot index-assign on non-list".into()),
                 }
             }
             Stmt::FnDef(name, params, body) => {
@@ -455,7 +509,7 @@ impl Interpreter {
         Ok(result)
     }
 
-    fn try_builtin(&self, name: &str, args: &[Value]) -> Result<Option<Value>, String> {
+    fn try_builtin(&mut self, name: &str, args: &[Value]) -> Result<Option<Value>, String> {
         match name {
             "range" => {
                 if args.len() != 1 {
@@ -515,6 +569,25 @@ impl Interpreter {
                     Value::Int(n) => Ok(Some(Value::Int(*n))),
                     Value::Bool(b) => Ok(Some(Value::Int(if *b { 1 } else { 0 }))),
                     _ => Err("int() expects a string or int".into()),
+                }
+            }
+            "rand" => {
+                if args.len() != 1 { return Err("rand() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::Int(n) => {
+                        if *n <= 0 {
+                            Ok(Some(Value::Int(0)))
+                        } else {
+                            // xorshift64
+                            let mut x = self.rng_state;
+                            x ^= x << 13;
+                            x ^= x >> 7;
+                            x ^= x << 17;
+                            self.rng_state = x;
+                            Ok(Some(Value::Int((x % (*n as u64)) as i64)))
+                        }
+                    }
+                    _ => Err("rand() expects an integer".into()),
                 }
             }
             _ => Ok(None),

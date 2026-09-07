@@ -1,0 +1,223 @@
+# dungeon.veldt — a text-based dungeon crawler RPG
+# Fight monsters, collect loot, descend deeper.
+
+# === GAME STRUCTS ===
+struct Fighter {
+    name: str,
+    hp: int,
+    max_hp: int,
+    atk: int,
+    def: int,
+    level: int,
+    xp: int,
+}
+
+struct Enemy {
+    name: str,
+    hp: int,
+    atk: int,
+    def: int,
+    xp: int,
+}
+
+# === GROW: create_player ===
+grow fn create_player(name: str) {
+    return Fighter {
+        name: name,
+        hp: 50,
+        max_hp: 50,
+        atk: 10,
+        def: 4,
+        level: 1,
+        xp: 0,
+    }
+}
+
+# === GROW: spawn_enemy ===
+grow fn spawn_enemy(depth: int) {
+    let r = rand(3)
+    let name = "Goblin"
+    let hp = 15
+    let atk = 4
+    let xp = 10
+    if r == 0 {
+        name = "Goblin"
+        hp = 12 + depth * 2
+        atk = 3 + depth
+        xp = 10 + depth * 3
+    }
+    if r == 1 {
+        name = "Skeleton"
+        hp = 16 + depth * 2
+        atk = 5 + depth
+        xp = 15 + depth * 4
+    }
+    if r == 2 {
+        name = "Orc"
+        hp = 22 + depth * 3
+        atk = 7 + depth
+        xp = 25 + depth * 5
+    }
+    return Enemy {
+        name: name,
+        hp: hp,
+        atk: atk,
+        def: 2 + depth,
+        xp: xp,
+    }
+}
+
+# === GROW: calculate_damage ===
+grow fn calculate_damage(atk: int, def: int) test calculate_damage(10, 3) == 7 {
+    let dmg = atk - def
+    if dmg < 1 {
+        dmg = 1
+    }
+    return dmg
+}
+
+# === GROW: player_attack ===
+grow fn player_attack(player: Fighter, enemy: Enemy) {
+    let base = calculate_damage(player.atk, enemy.def)
+    let crit = rand(10)
+    let dmg = base
+    if crit == 0 {
+        dmg = base * 2
+        print("  CRITICAL HIT! " + player.name + " deals " + dmg + " damage!")
+    } else {
+        print("  " + player.name + " attacks " + enemy.name + " for " + dmg + " damage")
+    }
+    enemy.hp = enemy.hp - dmg
+    return enemy
+}
+
+# === GROW: enemy_attack ===
+grow fn enemy_attack(enemy: Enemy, player: Fighter) {
+    let base = calculate_damage(enemy.atk, player.def)
+    let dmg = base
+    print("  " + enemy.name + " attacks " + player.name + " for " + dmg + " damage")
+    player.hp = player.hp - dmg
+    return player
+}
+
+# === GROW: gain_xp ===
+grow fn gain_xp(player: Fighter, amount: int) {
+    player.xp = player.xp + amount
+    let needed = player.level * 50
+    if player.xp >= needed {
+        player.level = player.level + 1
+        player.max_hp = player.max_hp + 10
+        player.hp = player.max_hp
+        player.atk = player.atk + 2
+        player.def = player.def + 1
+        player.xp = player.xp - needed
+        print("  *** " + player.name + " leveled up to " + player.level + "! ***")
+        print("  HP: " + player.max_hp + " | ATK: " + player.atk + " | DEF: " + player.def)
+    }
+    return player
+}
+
+# === GROW: battle ===
+grow fn battle(player: Fighter, enemy: Enemy) {
+    print("")
+    print("A wild " + enemy.name + " appears! (HP: " + enemy.hp + " | ATK: " + enemy.atk + ")")
+    print("")
+    let round = 1
+    while enemy.hp > 0 and player.hp > 0 {
+        print("-- Round " + round + " --")
+        print("  " + player.name + " HP: " + player.hp + "/" + player.max_hp + " | " + enemy.name + " HP: " + enemy.hp)
+
+        # Player attacks
+        enemy = player_attack(player, enemy)
+
+        if enemy.hp <= 0 {
+            print("  " + enemy.name + " is defeated!")
+            print("  +" + enemy.xp + " XP")
+            player = gain_xp(player, enemy.xp)
+            return player
+        }
+
+        # Enemy attacks
+        player = enemy_attack(enemy, player)
+
+        if player.hp <= 0 {
+            print("  " + player.name + " has fallen...")
+            return player
+        }
+
+        round = round + 1
+        print("")
+    }
+    return player
+}
+
+# === GROW: explore_dungeon ===
+grow fn explore_dungeon(player: Fighter, depth: int) {
+    print("")
+    print("=== Dungeon Floor " + depth + " ===")
+    print("")
+
+    # Number of encounters on this floor
+    let encounters = 2 + depth
+    let i = 0
+    while i < encounters and player.hp > 0 {
+        let enemy = spawn_enemy(depth)
+        player = battle(player, enemy)
+        if player.hp <= 0 {
+            return player
+        }
+        i = i + 1
+    }
+
+    if player.hp > 0 {
+        print("")
+        print("Floor " + depth + " cleared!")
+        # Heal between floors
+        let heal = player.max_hp / 4
+        player.hp = player.hp + heal
+        if player.hp > player.max_hp {
+            player.hp = player.max_hp
+        }
+        print(player.name + " rests and recovers " + heal + " HP")
+    }
+    return player
+}
+
+# === MAIN GAME ===
+print("========================================")
+print("      DUNGEONS OF VELDT")
+print("========================================")
+print("")
+
+let hero = create_player("Hero")
+print("Welcome, " + hero.name + "!")
+print("HP: " + hero.hp + " | ATK: " + hero.atk + " | DEF: " + hero.def)
+print("")
+
+# Descend through dungeon floors
+let depth = 1
+let max_depth = 5
+while depth <= max_depth and hero.hp > 0 {
+    hero = explore_dungeon(hero, depth)
+    depth = depth + 1
+}
+
+print("")
+if hero.hp > 0 {
+    print("========================================")
+    print("  VICTORY! " + hero.name + " conquered the dungeon!")
+    print("  Final level: " + hero.level)
+    print("  Final HP: " + hero.hp + "/" + hero.max_hp)
+    print("  Total XP: " + hero.xp)
+    print("========================================")
+} else {
+    print("========================================")
+    print("  GAME OVER")
+    print("  " + hero.name + " fell on floor " + (depth - 1))
+    print("  Reached level " + hero.level)
+    print("========================================")
+}
+
+print("")
+print("All game functions grown into the garden.")
+print("Run 'veldt evolve' to mutate the combat system!")

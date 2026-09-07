@@ -61,6 +61,10 @@ pub struct TestAssert {
 pub enum Stmt {
     Let(String, Expr),
     Assign(String, Expr),
+    // obj.field = expr
+    FieldAssign(Expr, String, Expr),
+    // obj[index] = expr
+    IndexAssign(Expr, Expr, Expr),
     FnDef(String, Vec<Param>, Vec<Stmt>),
     StructDef(String, Vec<(String, Type)>),
     If(Expr, Vec<Stmt>, Option<Vec<Stmt>>),
