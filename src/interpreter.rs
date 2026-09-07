@@ -337,7 +337,7 @@ impl Interpreter {
         }
     }
 
-    fn call_function(&mut self, name: &str, variant: Option<u32>, args: Vec<Value>) -> Result<Value, String> {
+    pub fn call_function(&mut self, name: &str, variant: Option<u32>, args: Vec<Value>) -> Result<Value, String> {
         // Try builtin first (builtins don't have variants)
         if variant.is_none() {
             if let Some(result) = self.try_builtin(name, &args)? {
@@ -429,6 +429,11 @@ impl Interpreter {
             }
             _ => Err(format!("No method '{}' on this value", method)),
         }
+    }
+
+    /// Evaluate an expression in the current scope (used by health checker for test assertions)
+    pub fn eval_expr_in_scope(&mut self, expr: &Expr) -> Result<Value, String> {
+        self.eval_expr(expr)
     }
 
     // Public method to collect grow statements from a program
