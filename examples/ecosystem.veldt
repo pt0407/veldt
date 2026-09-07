@@ -1,0 +1,23 @@
+# ecosystem.veldt — demonstrates the veldt ecosystem
+
+# This program uses functions grown by previous runs.
+# Run hello.veldt first, then run this file.
+
+shout("ecosystem")
+
+let result = double(21)
+print("double(21) = " + result)
+
+# Use the struct grown in a previous run
+let p = Point { x: 3, y: 4 }
+print("point: " + p.x + ", " + p.y)
+
+# Grow a competing variant of double — if it's better, it wins
+grow fn double(x: int) test double(5) == 10 {
+    return x * 2
+}
+
+# Grow a function with no test — gets a neutral trial score
+grow fn triple(x: int) {
+    return x + x + x
+}

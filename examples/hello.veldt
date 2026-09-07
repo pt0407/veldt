@@ -1,0 +1,28 @@
+# hello.veldt — a simple Veldt program
+
+let name = "world"
+
+fn greet(name: str) {
+    print("hello " + name)
+}
+
+greet(name)
+
+# Grow a function into the veldt — it will be available in future runs
+grow fn shout(name: str) {
+    print("HELLO " + name)
+}
+
+# Grow with an inline test — passing tests give high fitness at birth
+grow fn double(x: int) test double(3) == 6 {
+    return x * 2
+}
+
+# Grow an immortal variable
+grow let default_greeting = "hello"
+
+# Grow a struct
+grow struct Point {
+    x: int,
+    y: int,
+}
