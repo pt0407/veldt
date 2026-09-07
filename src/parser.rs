@@ -224,8 +224,8 @@ impl Parser {
             }
             self.expect(&Token::RParen, ")")?;
             Ok(Expr::Call(name, variant, args))
-        } else if self.check(&Token::LBrace) {
-            // struct literal: Name { field: val, ... }
+        } else if self.check(&Token::LBrace) && name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
+            // struct literal: Name { field: val, ... } — only if Name is capitalized
             self.advance(); // {
             let mut fields = Vec::new();
             if !self.check(&Token::RBrace) {

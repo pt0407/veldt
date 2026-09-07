@@ -1,0 +1,18 @@
+# fibonacci.veldt — grow a fibonacci function into the veldt
+# The inline test proves it works, giving it high fitness at birth
+
+grow fn fib(n: int) test fib(0) == 0, fib(1) == 1, fib(10) == 55 {
+    if n <= 1 {
+        return n
+    }
+    let a = 0
+    let b = 1
+    let i = 2
+    while i <= n {
+        let temp = a + b
+        a = b
+        b = temp
+        i = i + 1
+    }
+    return b
+}

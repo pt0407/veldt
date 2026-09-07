@@ -272,6 +272,10 @@ impl Interpreter {
             BinOp::Add => match (l, r) {
                 (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a + b)),
                 (Value::Str(a), Value::Str(b)) => Ok(Value::Str(format!("{}{}", a, b))),
+                (Value::Str(a), Value::Int(b)) => Ok(Value::Str(format!("{}{}", a, b))),
+                (Value::Int(a), Value::Str(b)) => Ok(Value::Str(format!("{}{}", a, b))),
+                (Value::Str(a), Value::Bool(b)) => Ok(Value::Str(format!("{}{}", a, b))),
+                (Value::Bool(a), Value::Str(b)) => Ok(Value::Str(format!("{}{}", a, b))),
                 _ => Err("Cannot add these types".into()),
             },
             BinOp::Sub => match (l, r) {
