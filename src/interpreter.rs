@@ -14,6 +14,7 @@ pub enum Value {
     List(Vec<Value>),
     Dict(HashMap<String, Value>),
     Struct(String, HashMap<String, Value>),
+    Closure(Vec<Param>, Vec<Stmt>, HashMap<String, Value>),
     Null,
 }
 
@@ -43,6 +44,7 @@ impl std::fmt::Display for Value {
                     .collect();
                 write!(f, "{} {{ {} }}", name, strs.join(", "))
             }
+            Value::Closure(_, _, _) => write!(f, "<closure>"),
         }
     }
 }
@@ -65,6 +67,8 @@ pub struct Interpreter {
     pub print_buffer: Option<String>,
     // RNG state for rand()
     rng_state: u64,
+    // Current source line for error reporting
+    pub current_line: usize,
 }
 
 pub struct FunctionVariant {
@@ -91,6 +95,7 @@ impl Interpreter {
                 .duration_since(UNIX_EPOCH)
                 .map(|d| d.as_nanos() as u64)
                 .unwrap_or(0x1234567890ABCDEF),
+            current_line: 0,
         }
     }
 
@@ -110,6 +115,19 @@ impl Interpreter {
 
     pub fn run(&mut self, stmts: &[Stmt]) -> Result<(), String> {
         for stmt in stmts {
+            match self.exec_stmt(stmt)? {
+                FlowControl::Return(_) => break,
+                FlowControl::Normal => {}
+            }
+        }
+        Ok(())
+    }
+
+    pub fn run_with_lines(&mut self, stmts: &[Stmt], lines: &[usize]) -> Result<(), String> {
+        for (i, stmt) in stmts.iter().enumerate() {
+            if let Some(&line) = lines.get(i) {
+                self.current_line = line;
+            }
             match self.exec_stmt(stmt)? {
                 FlowControl::Return(_) => break,
                 FlowControl::Normal => {}
@@ -274,6 +292,25 @@ impl Interpreter {
                 }
                 Ok(FlowControl::Normal)
             }
+            Stmt::Try(body, err_var, handler) => {
+                match self.exec_block(body) {
+                    Ok(flow) => Ok(flow),
+                    Err(e) => {
+                        self.vars.insert(err_var.clone(), Value::Str(e));
+                        self.exec_block(handler)
+                    }
+                }
+            }
+            Stmt::Import(path) => {
+                let content = std::fs::read_to_string(&path)
+                    .map_err(|e| format!("Cannot import '{}': {}", path, e))?;
+                let mut lexer = crate::lexer::Lexer::new(&content);
+                let tokens = lexer.tokenize()?;
+                let lines = lexer.token_lines.clone();
+                let mut parser = crate::parser::Parser::new_with_lines(tokens, lines);
+                let program = parser.parse_program()?;
+                self.exec_block(&program)
+            }
         }
     }
 
@@ -296,6 +333,7 @@ impl Interpreter {
             Value::Null => false,
             Value::List(items) => !items.is_empty(),
             Value::Dict(entries) => !entries.is_empty(),
+            Value::Closure(_, _, _) => true,
             Value::Struct(_, fields) => !fields.is_empty(),
         }
     }
@@ -305,6 +343,21 @@ impl Interpreter {
             Expr::Int(n) => Ok(Value::Int(*n)),
             Expr::Float(n) => Ok(Value::Float(*n)),
             Expr::Str(s) => Ok(Value::Str(s.clone())),
+            Expr::Interp(parts) => {
+                let mut result = String::new();
+                for part in parts {
+                    let val = self.eval_expr(part)?;
+                    match &val {
+                        Value::Str(s) => result.push_str(s),
+                        Value::Float(n) => {
+                            if n.fract() == 0.0 { result.push_str(&format!("{:.1}", n)) }
+                            else { result.push_str(&format!("{}", n)) }
+                        }
+                        _ => result.push_str(&format!("{}", val)),
+                    }
+                }
+                Ok(Value::Str(result))
+            }
             Expr::Bool(b) => Ok(Value::Bool(*b)),
             Expr::List(items) => {
                 let mut vals = Vec::new();
@@ -341,6 +394,12 @@ impl Interpreter {
                 for a in args {
                     arg_vals.push(self.eval_expr(a)?);
                 }
+                // First check if it's a variable holding a closure
+                if variant.is_none() {
+                    if let Some(Value::Closure(params, body, captured)) = self.vars.get(name) {
+                        return self.call_closure(params.clone(), body.clone(), captured.clone(), arg_vals);
+                    }
+                }
                 self.call_function(name, *variant, arg_vals)
             }
             Expr::MethodCall(obj, method, args) => {
@@ -369,6 +428,10 @@ impl Interpreter {
                     field_map.insert(fname.clone(), val);
                 }
                 Ok(Value::Struct(name.clone(), field_map))
+            }
+            Expr::Lambda(params, body) => {
+                // Capture current variables as closure environment
+                Ok(Value::Closure(params.clone(), body.clone(), self.vars.clone()))
             }
             Expr::Index(obj, index) => {
                 let obj_val = self.eval_expr(obj)?;
@@ -568,6 +631,29 @@ impl Interpreter {
         Ok(result)
     }
 
+    fn call_closure(&mut self, params: Vec<Param>, body: Vec<Stmt>, captured: HashMap<String, Value>, args: Vec<Value>) -> Result<Value, String> {
+        if args.len() != params.len() {
+            return Err(format!("Closure expects {} args but got {}", params.len(), args.len()));
+        }
+
+        // Save current vars, set up closure scope with captured vars + params
+        let old_vars = self.vars.clone();
+        self.vars = captured;
+        for (param, val) in params.iter().zip(args.into_iter()) {
+            self.vars.insert(param.name.clone(), val);
+        }
+
+        // Execute body
+        let result = match self.exec_block(&body)? {
+            FlowControl::Return(v) => v.unwrap_or(Value::Null),
+            FlowControl::Normal => Value::Null,
+        };
+
+        // Restore scope
+        self.vars = old_vars;
+        Ok(result)
+    }
+
     fn try_builtin(&mut self, name: &str, args: &[Value]) -> Result<Option<Value>, String> {
         match name {
             "range" => {
@@ -710,7 +796,145 @@ impl Interpreter {
                     _ => Err("float() expects a number or string".into()),
                 }
             }
+            // Math builtins
+            "sqrt" => {
+                if args.len() != 1 { return Err("sqrt() expects 1 argument".into()); }
+                let n = self.to_f64(&args[0])?;
+                Ok(Some(Value::Float(n.sqrt())))
+            }
+            "sin" => {
+                let n = self.to_f64(&args[0])?;
+                Ok(Some(Value::Float(n.sin())))
+            }
+            "cos" => {
+                let n = self.to_f64(&args[0])?;
+                Ok(Some(Value::Float(n.cos())))
+            }
+            "tan" => {
+                let n = self.to_f64(&args[0])?;
+                Ok(Some(Value::Float(n.tan())))
+            }
+            "log" => {
+                let n = self.to_f64(&args[0])?;
+                Ok(Some(Value::Float(n.ln())))
+            }
+            "log10" => {
+                let n = self.to_f64(&args[0])?;
+                Ok(Some(Value::Float(n.log10())))
+            }
+            "exp" => {
+                let n = self.to_f64(&args[0])?;
+                Ok(Some(Value::Float(n.exp())))
+            }
+            "pow" => {
+                if args.len() != 2 { return Err("pow() expects 2 arguments".into()); }
+                let base = self.to_f64(&args[0])?;
+                let exp = self.to_f64(&args[1])?;
+                Ok(Some(Value::Float(base.powf(exp))))
+            }
+            "floor" => {
+                let n = self.to_f64(&args[0])?;
+                Ok(Some(Value::Int(n.floor() as i64)))
+            }
+            "ceil" => {
+                let n = self.to_f64(&args[0])?;
+                Ok(Some(Value::Int(n.ceil() as i64)))
+            }
+            "round" => {
+                let n = self.to_f64(&args[0])?;
+                Ok(Some(Value::Int(n.round() as i64)))
+            }
+            "fabs" => {
+                let n = self.to_f64(&args[0])?;
+                Ok(Some(Value::Float(n.abs())))
+            }
+            "pi" => Ok(Some(Value::Float(std::f64::consts::PI))),
+            "e" => Ok(Some(Value::Float(std::f64::consts::E))),
+            // JSON builtins
+            "json_parse" => {
+                if args.len() != 1 { return Err("json_parse() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::Str(s) => {
+                        let v: serde_json::Value = serde_json::from_str(s)
+                            .map_err(|e| format!("JSON parse error: {}", e))?;
+                        Ok(Some(Self::json_to_value(v)))
+                    }
+                    _ => Err("json_parse() expects a string".into()),
+                }
+            }
+            "json_stringify" => {
+                if args.len() != 1 { return Err("json_stringify() expects 1 argument".into()); }
+                let json = Self::value_to_json(&args[0]);
+                Ok(Some(Value::Str(serde_json::to_string_pretty(&json)
+                    .map_err(|e| format!("JSON stringify error: {}", e))?)))
+            }
             _ => Ok(None),
+        }
+    }
+
+    fn to_f64(&self, v: &Value) -> Result<f64, String> {
+        match v {
+            Value::Int(n) => Ok(*n as f64),
+            Value::Float(n) => Ok(*n),
+            _ => Err(format!("Expected number, got {}", v)),
+        }
+    }
+
+    fn json_to_value(json: serde_json::Value) -> Value {
+        match json {
+            serde_json::Value::Null => Value::Null,
+            serde_json::Value::Bool(b) => Value::Bool(b),
+            serde_json::Value::Number(n) => {
+                if let Some(i) = n.as_i64() {
+                    Value::Int(i)
+                } else {
+                    Value::Float(n.as_f64().unwrap_or(0.0))
+                }
+            }
+            serde_json::Value::String(s) => Value::Str(s),
+            serde_json::Value::Array(arr) => {
+                Value::List(arr.into_iter().map(Self::json_to_value).collect())
+            }
+            serde_json::Value::Object(obj) => {
+                let mut map = HashMap::new();
+                for (k, v) in obj {
+                    map.insert(k, Self::json_to_value(v));
+                }
+                Value::Dict(map)
+            }
+        }
+    }
+
+    fn value_to_json(v: &Value) -> serde_json::Value {
+        match v {
+            Value::Null => serde_json::Value::Null,
+            Value::Bool(b) => serde_json::Value::Bool(*b),
+            Value::Int(n) => serde_json::Value::Number((*n).into()),
+            Value::Float(n) => {
+                serde_json::Number::from_f64(*n)
+                    .map(serde_json::Value::Number)
+                    .unwrap_or(serde_json::Value::Null)
+            }
+            Value::Str(s) => serde_json::Value::String(s.clone()),
+            Value::List(items) => {
+                serde_json::Value::Array(items.iter().map(Self::value_to_json).collect())
+            }
+            Value::Dict(entries) => {
+                let mut map = serde_json::Map::new();
+                for (k, val) in entries {
+                    map.insert(k.clone(), Self::value_to_json(val));
+                }
+                serde_json::Value::Object(map)
+            }
+            Value::Struct(name, fields) => {
+                let mut map = serde_json::Map::new();
+                map.insert("__struct__".into(), serde_json::Value::String(name.clone()));
+                for (k, val) in fields {
+                    map.insert(k.clone(), Self::value_to_json(val));
+                }
+                serde_json::Value::Object(map)
+            }
+            Value::Closure(_, _, _) => serde_json::Value::String("<closure>".into()),
         }
     }
 

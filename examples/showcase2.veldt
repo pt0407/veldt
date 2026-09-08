@@ -1,0 +1,128 @@
+# showcase2.veldt — exercises all 7 new features
+# 1. String interpolation  2. Error handling  3. Line numbers
+# 4. Closures  5. Math builtins  6. JSON  7. Modules
+
+# === STRING INTERPOLATION ===
+print("=== String Interpolation ===")
+let name = "Veldt"
+let version = 0.3
+print("Welcome to {name} v{version}!")
+let nums = [1, 2, 3]
+print("List has {len(nums)} items: {nums}")
+print("Math: {1 + 2} * {3} = {(1 + 2) * 3}")
+print("")
+
+# === ERROR HANDLING ===
+print("=== Error Handling ===")
+try {
+    let x = 10 / 0
+    print("Should not reach")
+} catch e {
+    print("Caught: {e}")
+}
+
+try {
+    let data = read_file("/nonexistent/file.txt")
+} catch e {
+    print("File error caught gracefully")
+}
+print("Program continues after errors!")
+print("")
+
+# === LINE NUMBERS ===
+print("=== Line Numbers ===")
+print("Errors now show line numbers:")
+try {
+    let x = nums[99]
+} catch e {
+    print("Error: {e}")
+}
+print("")
+
+# === CLOSURES ===
+print("=== Closures ===")
+let double = fn(x: int) { return x * 2 }
+print("double(21) = {double(21)}")
+
+let make_adder = fn(n: int) { return fn(x: int) { return x + n } }
+let add5 = make_adder(5)
+let add100 = make_adder(100)
+print("add5(10) = {add5(10)}")
+print("add100(1) = {add100(1)}")
+
+# Closure capturing a variable
+let multiplier = 10
+let scale = fn(x: int) { return x * multiplier }
+print("scale(7) = {scale(7)}")
+print("")
+
+# === MATH BUILTINS ===
+print("=== Math Builtins ===")
+print("sqrt(16) = {sqrt(16)}")
+print("sqrt(2) = {sqrt(2)}")
+print("pow(2, 10) = {pow(2, 10)}")
+print("pi = {pi()}")
+print("e = {e()}")
+print("floor(3.7) = {floor(3.7)}")
+print("ceil(3.2) = {ceil(3.2)}")
+print("round(3.5) = {round(3.5)}")
+print("sin(0) = {sin(0)}")
+print("cos(0) = {cos(0)}")
+print("log(e()) = {log(e())}")
+print("")
+
+# === JSON ===
+print("=== JSON ===")
+let json_str = "\{\"name\": \"Alice\", \"age\": 30, \"scores\": [95, 82, 78]\}"
+let parsed = json_parse(json_str)
+print("Parsed: {parsed}")
+print("Name: {parsed.get("name")}")
+print("Age: {parsed.get("age")}")
+
+let data = dict()
+data = data.put("product", "Veldt")
+data = data.put("version", "0.3")
+data = data.put("features", ["interpolation", "closures", "json"])
+let json_out = json_stringify(data)
+print("JSON output: {json_out}")
+print("")
+
+# === MODULES ===
+print("=== Modules ===")
+print("import statement loads and runs another .veldt file")
+print("Example: import \"math_lib.veldt\"")
+print("Imported functions become available in current scope")
+print("")
+
+# === GROW functions with new features ===
+grow fn circle_area(r: float) test circle_area(2.0) == 12.56636 {
+    return pi() * r * r
+}
+
+grow fn distance(x1: float, y1: float, x2: float, y2: float)
+    test distance(0.0, 0.0, 3.0, 4.0) == 5.0 {
+    let dx = x2 - x1
+    let dy = y2 - y1
+    return sqrt(dx * dx + dy * dy)
+}
+
+grow fn safe_divide(a: int, b: int) test safe_divide(10, 2) == 5 {
+    try {
+        return a / b
+    } catch e {
+        return 0
+    }
+}
+
+grow fn format_score(name: str, score: int) test format_score("Alice", 95) == "Alice: 95" {
+    return "{name}: {score}"
+}
+
+print("=== All 7 features working! ===")
+print("1. String interpolation: \"Hello {name}\"")
+print("2. Error handling: try/catch")
+print("3. Line numbers in errors")
+print("4. Closures: fn(x) \{ return x + 1 \}")
+print("5. Math: sqrt, pow, sin, cos, floor, ceil, round, pi, e, log")
+print("6. JSON: json_parse, json_stringify")
+print("7. Modules: import \"file.veldt\"")

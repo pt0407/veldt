@@ -90,7 +90,8 @@ async fn run_program(
     };
 
     // Parse
-    let mut parser = Parser::new(tokens);
+    let lines = lexer.token_lines.clone();
+    let mut parser = Parser::new_with_lines(tokens, lines);
     let stmts = match parser.parse_program() {
         Ok(s) => s,
         Err(e) => {
@@ -101,8 +102,9 @@ async fn run_program(
             });
         }
     };
+    let parser_lines = parser.statement_lines();
 
-    // Load veldt and run
+    // Load veldt
     let mut veldt = {
         let v = state.veldt.lock().unwrap();
         v.clone()
@@ -112,10 +114,15 @@ async fn run_program(
     veldt.load_into_interpreter(&mut interp);
 
     // Run with output capture
-    let run_result = run_with_capture(&mut interp, &stmts, &mut output);
+    let run_result = run_with_capture(&mut interp, &stmts, &parser_lines, &mut output);
 
     if let Err(e) = run_result {
-        output.push_str(&format!("Runtime error: {}\n", e));
+        let line = interp.current_line;
+        if line > 0 {
+            output.push_str(&format!("Runtime error (line {}): {}\n", line, e));
+        } else {
+            output.push_str(&format!("Runtime error: {}\n", e));
+        }
         success = false;
     }
 
@@ -175,9 +182,9 @@ async fn run_program(
     Json(RunResponse { output, events, success })
 }
 
-fn run_with_capture(interp: &mut Interpreter, stmts: &[crate::ast::Stmt], output: &mut String) -> Result<(), String> {
+fn run_with_capture(interp: &mut Interpreter, stmts: &[crate::ast::Stmt], lines: &[usize], output: &mut String) -> Result<(), String> {
     interp.print_buffer = Some(String::new());
-    let result = interp.run(stmts);
+    let result = interp.run_with_lines(stmts, lines);
     if let Some(buf) = interp.print_buffer.take() {
         output.push_str(&buf);
     }

@@ -178,7 +178,8 @@ fn run_program(path: &str) {
     };
 
     // Parse
-    let mut parser = parser::Parser::new(tokens);
+    let lines = lexer.token_lines.clone();
+    let mut parser = parser::Parser::new_with_lines(tokens, lines);
     let stmts = match parser.parse_program() {
         Ok(s) => s,
         Err(e) => {
@@ -186,6 +187,7 @@ fn run_program(path: &str) {
             process::exit(1);
         }
     };
+    let parser_lines = parser.statement_lines();
 
     // Load veldt from disk
     let mut veldt = veldt::Veldt::new();
@@ -198,8 +200,13 @@ fn run_program(path: &str) {
     veldt.load_into_interpreter(&mut interp);
 
     // Run the program
-    if let Err(e) = interp.run(&stmts) {
-        eprintln!("Runtime error: {}", e);
+    if let Err(e) = interp.run_with_lines(&stmts, &parser_lines) {
+        let line = interp.current_line;
+        if line > 0 {
+            eprintln!("Runtime error (line {}): {}", line, e);
+        } else {
+            eprintln!("Runtime error: {}", e);
+        }
         // Still save veldt — the program may have grown code before failing
     }
 

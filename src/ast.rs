@@ -36,6 +36,7 @@ pub enum Expr {
     Int(i64),
     Float(f64),
     Str(String),
+    Interp(Vec<Expr>), // string interpolation: alternating Str and expression parts, concatenated
     Bool(bool),
     List(Vec<Expr>),
     Var(String),
@@ -51,6 +52,8 @@ pub enum Expr {
     StructLit(String, Vec<(String, Expr)>),
     // list indexing: expr[index]
     Index(Box<Expr>, Box<Expr>),
+    // anonymous function / lambda
+    Lambda(Vec<Param>, Vec<Stmt>),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -76,6 +79,8 @@ pub enum Stmt {
     ExprStmt(Expr),
     Print(Expr),
     Grow(GrowItem),
+    Try(Vec<Stmt>, String, Vec<Stmt>), // try { body } catch var { handler }
+    Import(String), // import "path"
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

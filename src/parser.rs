@@ -5,12 +5,27 @@ use crate::lexer::Token;
 
 pub struct Parser {
     tokens: Vec<Token>,
+    lines: Vec<usize>,
+    stmt_lines: Vec<usize>,
     pos: usize,
 }
 
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
-        Parser { tokens, pos: 0 }
+        let lines = vec![0; tokens.len()];
+        Parser { tokens, lines, stmt_lines: Vec::new(), pos: 0 }
+    }
+
+    pub fn new_with_lines(tokens: Vec<Token>, lines: Vec<usize>) -> Self {
+        Parser { tokens, lines, stmt_lines: Vec::new(), pos: 0 }
+    }
+
+    pub fn statement_lines(&self) -> Vec<usize> {
+        self.stmt_lines.clone()
+    }
+
+    fn current_line(&self) -> usize {
+        *self.lines.get(self.pos).unwrap_or(&0)
     }
 
     fn peek(&self) -> &Token {
@@ -42,7 +57,7 @@ impl Parser {
         if self.check(t) {
             Ok(self.advance())
         } else {
-            Err(format!("Expected {} but got {:?} at pos {}", msg, self.peek(), self.pos))
+            Err(format!("Line {}: Expected {} but got {:?}", self.current_line(), msg, self.peek()))
         }
     }
 
@@ -312,6 +327,29 @@ impl Parser {
                 self.advance();
                 Ok(Expr::Str(s))
             }
+            Token::InterpStr(parts) => {
+                self.advance();
+                // parts: alternating literal, expr-source, literal, expr-source, ..., literal
+                // Even indices are literals, odd indices are expression source code
+                let mut exprs = Vec::new();
+                for (i, part) in parts.iter().enumerate() {
+                    if i % 2 == 0 {
+                        // Literal string part
+                        if !part.is_empty() {
+                            exprs.push(Expr::Str(part.clone()));
+                        }
+                    } else {
+                        // Expression source — sub-parse
+                        let mut sub_lexer = crate::lexer::Lexer::new(part);
+                        let sub_tokens = sub_lexer.tokenize()?;
+                        let sub_lines = sub_lexer.token_lines.clone();
+                        let mut sub_parser = Parser::new_with_lines(sub_tokens, sub_lines);
+                        let expr = sub_parser.parse_expr()?;
+                        exprs.push(expr);
+                    }
+                }
+                Ok(Expr::Interp(exprs))
+            }
             Token::True => {
                 self.advance();
                 Ok(Expr::Bool(true))
@@ -361,10 +399,27 @@ impl Parser {
                 self.parse_ident_postfix("list".into())
             }
             Token::Fn => {
-                self.advance();
-                self.parse_ident_postfix("fn".into())
+                // Lambda: fn(params) { body }
+                self.advance(); // fn
+                self.expect(&Token::LParen, "(")?;
+                let mut params = Vec::new();
+                if !self.check(&Token::RParen) {
+                    loop {
+                        let pname = match self.advance() {
+                            Token::Ident(n) => n,
+                            t => return Err(format!("Expected parameter name but got {:?}", t)),
+                        };
+                        self.expect(&Token::Colon, ":")?;
+                        let ptype = self.parse_type()?;
+                        params.push(Param { name: pname, typ: ptype });
+                        if !self.match_tok(&Token::Comma) { break; }
+                    }
+                }
+                self.expect(&Token::RParen, ")")?;
+                let body = self.parse_block()?;
+                Ok(Expr::Lambda(params, body))
             }
-            t => Err(format!("Unexpected token in expression: {:?}", t)),
+            t => Err(format!("Line {}: Unexpected token in expression: {:?}", self.current_line(), t)),
         }
     }
 
@@ -373,6 +428,8 @@ impl Parser {
     pub fn parse_program(&mut self) -> Result<Vec<Stmt>, String> {
         let mut stmts = Vec::new();
         while !self.check(&Token::Eof) {
+            let line = self.current_line();
+            self.stmt_lines.push(line);
             stmts.push(self.parse_stmt()?);
         }
         Ok(stmts)
@@ -389,6 +446,8 @@ impl Parser {
             Token::Print => self.parse_print(),
             Token::Grow => self.parse_grow(),
             Token::Struct => self.parse_struct(),
+            Token::Try => self.parse_try(),
+            Token::Import => self.parse_import(),
             Token::Ident(_) => {
                 // Parse as expression, then check for assignment
                 let target = self.parse_expr()?;
@@ -409,7 +468,7 @@ impl Parser {
                     Ok(Stmt::ExprStmt(target))
                 }
             }
-            t => Err(format!("Unexpected token in statement: {:?}", t)),
+            t => Err(format!("Line {}: Unexpected token in statement: {:?}", self.current_line(), t)),
         }
     }
 
@@ -501,6 +560,27 @@ impl Parser {
         let e = self.parse_expr()?;
         self.expect(&Token::RParen, ")")?;
         Ok(Stmt::Print(e))
+    }
+
+    fn parse_try(&mut self) -> Result<Stmt, String> {
+        self.advance(); // try
+        let body = self.parse_block()?;
+        self.expect(&Token::Catch, "catch")?;
+        let err_var = match self.advance() {
+            Token::Ident(n) => n,
+            t => return Err(format!("Expected variable name after catch but got {:?}", t)),
+        };
+        let handler = self.parse_block()?;
+        Ok(Stmt::Try(body, err_var, handler))
+    }
+
+    fn parse_import(&mut self) -> Result<Stmt, String> {
+        self.advance(); // import
+        let path = match self.advance() {
+            Token::Str(s) => s,
+            t => return Err(format!("Expected string path after import but got {:?}", t)),
+        };
+        Ok(Stmt::Import(path))
     }
 
     fn parse_struct(&mut self) -> Result<Stmt, String> {
