@@ -19,10 +19,14 @@ impl HealthChecker {
         let trial_result = Self::run_trial(entry, &functions_snapshot, &variables_snapshot, &structs_snapshot);
 
         match trial_result {
-            TrialResult::Pass(score) => {
+            TrialResult::Pass(score, steps) => {
                 entry.health = Health::Healthy;
                 entry.trial_score = score;
-                entry.fitness = score;
+                // Fitness factors in score + efficiency (fewer steps = fitter)
+                // Also factor in code size (smaller = fitter)
+                let code_size = Self::count_statements(&entry.body) as f64;
+                let size_factor = 1.0 / (1.0 + code_size * 0.01);
+                entry.fitness = score * (0.7 + size_factor * 0.3);
             }
             TrialResult::Fail(err) => {
                 entry.health = Health::Sick(err);
@@ -117,11 +121,15 @@ impl HealthChecker {
 
         let elapsed = start.elapsed().as_secs_f64();
         let correctness = passed as f64 / total as f64;
+        let steps = interp.step_count;
+        // Efficiency bonus: fewer steps = higher score
+        // Formula: 1.0 base + up to 0.3 bonus for efficiency
+        let efficiency = 1.0 - (steps as f64 / interp.step_limit as f64).min(0.7);
         let speed_bonus = (1.0 / (1.0 + elapsed * 10.0)).max(0.0);
-        let score = correctness + speed_bonus * 0.1;
+        let score = correctness + speed_bonus * 0.05 + efficiency * 0.15;
 
         if passed == total {
-            TrialResult::Pass(score)
+            TrialResult::Pass(score, steps)
         } else {
             TrialResult::Fail(format!("{} of {} tests failed", total - passed, total))
         }
@@ -151,11 +159,28 @@ impl HealthChecker {
         match interp.call_function(&entry.name, Some(entry.id), args) {
             Ok(_) => {
                 let elapsed = start.elapsed().as_secs_f64();
+                let steps = interp.step_count;
                 let speed_bonus = (1.0 / (1.0 + elapsed * 10.0)).max(0.0);
-                TrialResult::Pass(0.5 + speed_bonus * 0.1)
+                TrialResult::Pass(0.5 + speed_bonus * 0.1, steps)
             }
             Err(e) => TrialResult::Fail(e),
         }
+    }
+
+    fn count_statements(body: &[Stmt]) -> usize {
+        let mut count = 0;
+        for stmt in body {
+            count += 1 + match stmt {
+                Stmt::If(_, then_body, else_body) => {
+                    Self::count_statements(then_body) +
+                    else_body.as_ref().map(|eb| Self::count_statements(eb)).unwrap_or(0)
+                }
+                Stmt::While(_, body) => Self::count_statements(body),
+                Stmt::For(_, _, body) => Self::count_statements(body),
+                _ => 0,
+            };
+        }
+        count
     }
 
     fn eval_test_expr(interp: &mut Interpreter, expr: &Expr) -> Result<Value, String> {
@@ -165,6 +190,7 @@ impl HealthChecker {
     fn safe_default(typ: &Type) -> Value {
         match typ {
             Type::Int => Value::Int(0),
+            Type::Float => Value::Float(0.0),
             Type::Str => Value::Str("".into()),
             Type::Bool => Value::Bool(true),
             Type::List(_) => Value::List(vec![]),
@@ -176,11 +202,15 @@ impl HealthChecker {
     fn values_equal(a: &Value, b: &Value) -> bool {
         match (a, b) {
             (Value::Int(a), Value::Int(b)) => a == b,
+            (Value::Float(a), Value::Float(b)) => a == b,
+            (Value::Int(a), Value::Float(b)) => (*a as f64) == *b,
+            (Value::Float(a), Value::Int(b)) => *a == (*b as f64),
             (Value::Str(a), Value::Str(b)) => a == b,
             (Value::Bool(a), Value::Bool(b)) => a == b,
             (Value::List(a), Value::List(b)) => {
                 a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| Self::values_equal(x, y))
             }
+            (Value::Dict(a), Value::Dict(b)) => a == b,
             (Value::Null, Value::Null) => true,
             _ => false,
         }
@@ -295,7 +325,7 @@ impl HealthChecker {
 }
 
 enum TrialResult {
-    Pass(f64),
+    Pass(f64, u64),  // (score, step_count)
     Fail(String),
 }
 

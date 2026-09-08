@@ -49,6 +49,7 @@ impl Parser {
     fn parse_type(&mut self) -> Result<Type, String> {
         match self.advance() {
             Token::TypeInt => Ok(Type::Int),
+            Token::TypeFloat => Ok(Type::Float),
             Token::TypeStr => Ok(Type::Str),
             Token::TypeBool => Ok(Type::Bool),
             Token::Fn => Ok(Type::Fn),
@@ -302,6 +303,10 @@ impl Parser {
             Token::Int(n) => {
                 self.advance();
                 Ok(Expr::Int(n))
+            }
+            Token::Float(n) => {
+                self.advance();
+                Ok(Expr::Float(n))
             }
             Token::Str(s) => {
                 self.advance();

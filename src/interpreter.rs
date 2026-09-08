@@ -8,9 +8,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Value {
     Int(i64),
+    Float(f64),
     Str(String),
     Bool(bool),
     List(Vec<Value>),
+    Dict(HashMap<String, Value>),
     Struct(String, HashMap<String, Value>),
     Null,
 }
@@ -19,12 +21,21 @@ impl std::fmt::Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             Value::Int(n) => write!(f, "{}", n),
+            Value::Float(n) => {
+                if n.fract() == 0.0 { write!(f, "{:.1}", n) } else { write!(f, "{}", n) }
+            }
             Value::Str(s) => write!(f, "{}", s),
             Value::Bool(b) => write!(f, "{}", b),
             Value::Null => write!(f, "null"),
             Value::List(items) => {
                 let strs: Vec<String> = items.iter().map(|v| format!("{}", v)).collect();
                 write!(f, "[{}]", strs.join(", "))
+            }
+            Value::Dict(entries) => {
+                let strs: Vec<String> = entries.iter()
+                    .map(|(k, v)| format!("{}: {}", k, v))
+                    .collect();
+                write!(f, "{{{}}}", strs.join(", "))
             }
             Value::Struct(name, fields) => {
                 let strs: Vec<String> = fields.iter()
@@ -280,9 +291,11 @@ impl Interpreter {
         match val {
             Value::Bool(b) => *b,
             Value::Int(n) => *n != 0,
+            Value::Float(n) => *n != 0.0,
             Value::Str(s) => !s.is_empty(),
             Value::Null => false,
             Value::List(items) => !items.is_empty(),
+            Value::Dict(entries) => !entries.is_empty(),
             Value::Struct(_, fields) => !fields.is_empty(),
         }
     }
@@ -290,6 +303,7 @@ impl Interpreter {
     fn eval_expr(&mut self, expr: &Expr) -> Result<Value, String> {
         match expr {
             Expr::Int(n) => Ok(Value::Int(*n)),
+            Expr::Float(n) => Ok(Value::Float(*n)),
             Expr::Str(s) => Ok(Value::Str(s.clone())),
             Expr::Bool(b) => Ok(Value::Bool(*b)),
             Expr::List(items) => {
@@ -384,52 +398,93 @@ impl Interpreter {
         match op {
             BinOp::Add => match (l, r) {
                 (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a.wrapping_add(*b))),
+                (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a + b)),
+                (Value::Int(a), Value::Float(b)) => Ok(Value::Float(*a as f64 + b)),
+                (Value::Float(a), Value::Int(b)) => Ok(Value::Float(a + *b as f64)),
                 (Value::Str(a), Value::Str(b)) => Ok(Value::Str(format!("{}{}", a, b))),
                 (Value::Str(a), Value::Int(b)) => Ok(Value::Str(format!("{}{}", a, b))),
+                (Value::Str(a), Value::Float(b)) => {
+                    let s = if b.fract() == 0.0 { format!("{:.1}", b) } else { format!("{}", b) };
+                    Ok(Value::Str(format!("{}{}", a, s)))
+                }
                 (Value::Int(a), Value::Str(b)) => Ok(Value::Str(format!("{}{}", a, b))),
+                (Value::Float(a), Value::Str(b)) => {
+                    let s = if a.fract() == 0.0 { format!("{:.1}", a) } else { format!("{}", a) };
+                    Ok(Value::Str(format!("{}{}", s, b)))
+                }
                 (Value::Str(a), Value::Bool(b)) => Ok(Value::Str(format!("{}{}", a, b))),
                 (Value::Bool(a), Value::Str(b)) => Ok(Value::Str(format!("{}{}", a, b))),
                 (Value::Str(a), Value::List(b)) => {
                     let strs: Vec<String> = b.iter().map(|v| format!("{}", v)).collect();
                     Ok(Value::Str(format!("{}[{}]", a, strs.join(", "))))
                 }
+                (Value::Str(a), Value::Dict(b)) => {
+                    let strs: Vec<String> = b.iter().map(|(k, v)| format!("{}: {}", k, v)).collect();
+                    Ok(Value::Str(format!("{}{{{}}}", a, strs.join(", "))))
+                }
                 (Value::Str(a), Value::Null) => Ok(Value::Str(format!("{}null", a))),
                 _ => Err("Cannot add these types".into()),
             },
             BinOp::Sub => match (l, r) {
                 (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a.wrapping_sub(*b))),
-                _ => Err("Cannot subtract non-integers".into()),
+                (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a - b)),
+                (Value::Int(a), Value::Float(b)) => Ok(Value::Float(*a as f64 - b)),
+                (Value::Float(a), Value::Int(b)) => Ok(Value::Float(a - *b as f64)),
+                _ => Err("Cannot subtract these types".into()),
             },
             BinOp::Mul => match (l, r) {
                 (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a.wrapping_mul(*b))),
-                _ => Err("Cannot multiply non-integers".into()),
+                (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a * b)),
+                (Value::Int(a), Value::Float(b)) => Ok(Value::Float(*a as f64 * b)),
+                (Value::Float(a), Value::Int(b)) => Ok(Value::Float(a * *b as f64)),
+                _ => Err("Cannot multiply these types".into()),
             },
             BinOp::Div => match (l, r) {
                 (Value::Int(_), Value::Int(0)) => Err("Division by zero".into()),
                 (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a.wrapping_div(*b))),
-                _ => Err("Cannot divide non-integers".into()),
+                (Value::Float(_), Value::Float(b)) if *b == 0.0 => Err("Division by zero".into()),
+                (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a / b)),
+                (Value::Int(a), Value::Float(b)) => Ok(Value::Float(*a as f64 / b)),
+                (Value::Float(a), Value::Int(b)) => Ok(Value::Float(a / *b as f64)),
+                _ => Err("Cannot divide these types".into()),
             },
             BinOp::Mod => match (l, r) {
                 (Value::Int(_), Value::Int(0)) => Err("Modulo by zero".into()),
                 (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a.wrapping_rem(*b))),
-                _ => Err("Cannot modulo non-integers".into()),
+                (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a % b)),
+                (Value::Int(a), Value::Float(b)) => Ok(Value::Float((*a as f64) % b)),
+                (Value::Float(a), Value::Int(b)) => Ok(Value::Float(a % (*b as f64))),
+                _ => Err("Cannot modulo these types".into()),
             },
             BinOp::Eq => Ok(Value::Bool(self.values_eq(l, r))),
             BinOp::Neq => Ok(Value::Bool(!self.values_eq(l, r))),
             BinOp::Lt => match (l, r) {
                 (Value::Int(a), Value::Int(b)) => Ok(Value::Bool(a < b)),
-                _ => Err("Cannot compare non-integers with <".into()),
+                (Value::Float(a), Value::Float(b)) => Ok(Value::Bool(a < b)),
+                (Value::Int(a), Value::Float(b)) => Ok(Value::Bool((*a as f64) < *b)),
+                (Value::Float(a), Value::Int(b)) => Ok(Value::Bool(*a < (*b as f64))),
+                _ => Err("Cannot compare these types with <".into()),
             },
             BinOp::Gt => match (l, r) {
                 (Value::Int(a), Value::Int(b)) => Ok(Value::Bool(a > b)),
-                _ => Err("Cannot compare non-integers with >".into()),
+                (Value::Float(a), Value::Float(b)) => Ok(Value::Bool(a > b)),
+                (Value::Int(a), Value::Float(b)) => Ok(Value::Bool((*a as f64) > *b)),
+                (Value::Float(a), Value::Int(b)) => Ok(Value::Bool(*a > (*b as f64))),
+                _ => Err("Cannot compare these types with >".into()),
             },
             BinOp::Le => match (l, r) {
                 (Value::Int(a), Value::Int(b)) => Ok(Value::Bool(a <= b)),
-                _ => Err("Cannot compare non-integers with <=".into()),
+                (Value::Float(a), Value::Float(b)) => Ok(Value::Bool(a <= b)),
+                (Value::Int(a), Value::Float(b)) => Ok(Value::Bool((*a as f64) <= *b)),
+                (Value::Float(a), Value::Int(b)) => Ok(Value::Bool(*a <= (*b as f64))),
+                _ => Err("Cannot compare these types with <=".into()),
             },
             BinOp::Ge => match (l, r) {
                 (Value::Int(a), Value::Int(b)) => Ok(Value::Bool(a >= b)),
+                (Value::Float(a), Value::Float(b)) => Ok(Value::Bool(a >= b)),
+                (Value::Int(a), Value::Float(b)) => Ok(Value::Bool((*a as f64) >= *b)),
+                (Value::Float(a), Value::Int(b)) => Ok(Value::Bool(*a >= (*b as f64))),
+                _ => Err("Cannot compare these types with >=".into()),
                 _ => Err("Cannot compare non-integers with >=".into()),
             },
             BinOp::And => match (l, r) {
@@ -446,12 +501,16 @@ impl Interpreter {
     fn values_eq(&self, l: &Value, r: &Value) -> bool {
         match (l, r) {
             (Value::Int(a), Value::Int(b)) => a == b,
+            (Value::Float(a), Value::Float(b)) => a == b,
+            (Value::Int(a), Value::Float(b)) => (*a as f64) == *b,
+            (Value::Float(a), Value::Int(b)) => *a == (*b as f64),
             (Value::Str(a), Value::Str(b)) => a == b,
             (Value::Bool(a), Value::Bool(b)) => a == b,
             (Value::Null, Value::Null) => true,
             (Value::List(a), Value::List(b)) => {
                 a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| self.values_eq(x, y))
             }
+            (Value::Dict(a), Value::Dict(b)) => a == b,
             (Value::Struct(n1, f1), Value::Struct(n2, f2)) => {
                 n1 == n2 && f1 == f2
             }
@@ -590,6 +649,67 @@ impl Interpreter {
                     _ => Err("rand() expects an integer".into()),
                 }
             }
+            "read_file" => {
+                if args.len() != 1 { return Err("read_file() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::Str(path) => {
+                        match std::fs::read_to_string(path) {
+                            Ok(content) => Ok(Some(Value::Str(content))),
+                            Err(e) => Err(format!("Cannot read file '{}': {}", path, e)),
+                        }
+                    }
+                    _ => Err("read_file() expects a string path".into()),
+                }
+            }
+            "write_file" => {
+                if args.len() != 2 { return Err("write_file() expects 2 arguments".into()); }
+                match (&args[0], &args[1]) {
+                    (Value::Str(path), Value::Str(content)) => {
+                        match std::fs::write(path, content) {
+                            Ok(_) => Ok(Some(Value::Bool(true))),
+                            Err(e) => Err(format!("Cannot write file '{}': {}", path, e)),
+                        }
+                    }
+                    _ => Err("write_file() expects (path, content) strings".into()),
+                }
+            }
+            "input" => {
+                if !args.is_empty() {
+                    if let Value::Str(prompt) = &args[0] {
+                        if let Some(ref buf) = self.print_buffer {
+                            // IDE mode — can't read stdin, return empty
+                            eprintln!("[input prompt: {}]", prompt);
+                        } else {
+                            print!("{}", prompt);
+                            use std::io::Write;
+                            std::io::stdout().flush().ok();
+                        }
+                    }
+                }
+                let mut line = String::new();
+                if self.print_buffer.is_some() {
+                    // IDE mode — no stdin available
+                    return Ok(Some(Value::Str("".into())));
+                }
+                match std::io::stdin().read_line(&mut line) {
+                    Ok(_) => Ok(Some(Value::Str(line.trim_end().to_string()))),
+                    Err(e) => Err(format!("Input error: {}", e)),
+                }
+            }
+            "dict" => Ok(Some(Value::Dict(HashMap::new()))),
+            "float" => {
+                if args.len() != 1 { return Err("float() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::Int(n) => Ok(Some(Value::Float(*n as f64))),
+                    Value::Float(n) => Ok(Some(Value::Float(*n))),
+                    Value::Str(s) => {
+                        s.trim().parse::<f64>()
+                            .map(|n| Some(Value::Float(n)))
+                            .map_err(|_| format!("Cannot convert '{}' to float", s))
+                    }
+                    _ => Err("float() expects a number or string".into()),
+                }
+            }
             _ => Ok(None),
         }
     }
@@ -695,6 +815,50 @@ impl Interpreter {
                         }
                     }
                     _ => Err("slice() expects two integers".into()),
+                }
+            }
+            // Dict methods
+            (Value::Dict(entries), "put") => {
+                if args.len() != 2 { return Err("put() expects 2 arguments (key, value)".into()); }
+                match &args[0] {
+                    Value::Str(key) => {
+                        let mut new_entries = entries.clone();
+                        new_entries.insert(key.clone(), args[1].clone());
+                        Ok(Value::Dict(new_entries))
+                    }
+                    _ => Err("put() expects a string key".into()),
+                }
+            }
+            (Value::Dict(entries), "get") => {
+                if args.len() != 1 { return Err("get() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::Str(key) => {
+                        Ok(entries.get(key).cloned().unwrap_or(Value::Null))
+                    }
+                    _ => Err("get() expects a string key".into()),
+                }
+            }
+            (Value::Dict(entries), "has") => {
+                if args.len() != 1 { return Err("has() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::Str(key) => Ok(Value::Bool(entries.contains_key(key))),
+                    _ => Err("has() expects a string key".into()),
+                }
+            }
+            (Value::Dict(entries), "keys") => {
+                let keys: Vec<Value> = entries.keys().map(|k| Value::Str(k.clone())).collect();
+                Ok(Value::List(keys))
+            }
+            (Value::Dict(entries), "len") => Ok(Value::Int(entries.len() as i64)),
+            (Value::Dict(entries), "remove") => {
+                if args.len() != 1 { return Err("remove() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::Str(key) => {
+                        let mut new_entries = entries.clone();
+                        new_entries.remove(key);
+                        Ok(Value::Dict(new_entries))
+                    }
+                    _ => Err("remove() expects a string key".into()),
                 }
             }
             _ => Err(format!("No method '{}' on this value", method)),

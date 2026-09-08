@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Type {
     Int,
+    Float,
     Str,
     Bool,
     List(Box<Type>),
@@ -33,6 +34,7 @@ pub enum UnaryOp {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Expr {
     Int(i64),
+    Float(f64),
     Str(String),
     Bool(bool),
     List(Vec<Expr>),

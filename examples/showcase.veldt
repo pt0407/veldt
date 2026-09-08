@@ -1,0 +1,88 @@
+# showcase.veldt — exercises all 5 new features
+# 1. Floats  2. Dicts  3. File I/O  4. Input  5. Smart evolution
+
+# === FLOATS ===
+print("=== Floats ===")
+let pi = 3.14159
+let radius = 5.0
+let area = pi * radius * radius
+print("pi = " + pi)
+print("radius = " + radius)
+print("area = " + area)
+let temp_c = 25.5
+let temp_f = temp_c * 9.0 / 5.0 + 32.0
+print(temp_c + "C = " + temp_f + "F")
+print("")
+
+# === DICTS ===
+print("=== Dicts ===")
+let scores = dict()
+scores = scores.put("Alice", 95)
+scores = scores.put("Bob", 82)
+scores = scores.put("Charlie", 78)
+print("Scores: " + scores)
+print("Alice's score: " + scores.get("Alice"))
+print("Has Dave? " + scores.has("Dave"))
+print("Keys: " + scores.keys())
+print("Count: " + scores.len())
+print("")
+
+# === FILE I/O ===
+print("=== File I/O ===")
+let result = write_file("/tmp/veldt_test.txt", "Hello from Veldt!\nLine 2 here.\n")
+print("Write success: " + result)
+let content = read_file("/tmp/veldt_test.txt")
+print("Read back: " + content)
+let lines = content.split("\n")
+print("Line count: " + len(lines))
+print("")
+
+# === INPUT (skipped in IDE, works in CLI) ===
+print("=== Input ===")
+print("(input() works in CLI mode, returns empty in IDE)")
+# let name = input("What is your name? ")
+# print("Hello, " + name + "!")
+print("")
+
+# === SMART EVOLUTION ===
+print("=== Smart Evolution ===")
+print("Functions grown with efficiency-aware fitness:")
+print("Mutants that pass tests AND use fewer steps get higher fitness.")
+print("Smaller code also gets a bonus.")
+print("")
+print("Run 'veldt evolve 5' to see fitness scores that reward efficiency.")
+
+# === GROW functions for evolution ===
+grow fn fast_sum(nums: list<int>) test fast_sum([1, 2, 3, 4, 5]) == 15 {
+    let total = 0
+    for n in nums {
+        total = total + n
+    }
+    return total
+}
+
+grow fn fast_max(nums: list<int>) test fast_max([3, 7, 2, 9, 1]) == 9 {
+    let best = nums[0]
+    for n in nums {
+        if n > best {
+            best = n
+        }
+    }
+    return best
+}
+
+grow fn circle_area(r: float) test circle_area(2.0) == 12.56636 {
+    return 3.14159 * r * r
+}
+
+grow fn c_to_f(c: float) test c_to_f(0.0) == 32.0, c_to_f(100.0) == 212.0 {
+    return c * 9.0 / 5.0 + 32.0
+}
+
+grow fn word_count(text: str) test word_count("hello world foo") == 3 {
+    let words = text.split(" ")
+    return len(words)
+}
+
+print("")
+print("All 5 features working!")

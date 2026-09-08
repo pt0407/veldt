@@ -4,13 +4,14 @@
 pub enum Token {
     // Literals
     Int(i64),
+    Float(f64),
     Str(String),
     Ident(String),
     // Keywords
     Let, Fn, If, Else, While, For, Return, Print, Grow, Struct, Test,
     True, False, And, Or, Not,
     // Type names
-    TypeInt, TypeStr, TypeBool, TypeList, TypeFn,
+    TypeInt, TypeStr, TypeBool, TypeList, TypeFloat, TypeFn,
     // Operators
     Plus, Minus, Star, Slash, Percent,
     Eq, EqEq, Neq, Lt, Gt, Le, Ge,
@@ -93,7 +94,7 @@ impl Lexer {
         Ok(s)
     }
 
-    fn read_number(&mut self) -> Result<i64, String> {
+    fn read_number(&mut self) -> Result<Token, String> {
         let start = self.pos;
         while let Some(c) = self.peek() {
             if c.is_ascii_digit() {
@@ -102,8 +103,34 @@ impl Lexer {
                 break;
             }
         }
+        // Check for decimal point
+        let mut is_float = false;
+        if self.peek() == Some('.') {
+            // Make sure next char after . is a digit (not a method call like x.field)
+            if let Some(c2) = self.peek_at(1) {
+                if c2.is_ascii_digit() {
+                    is_float = true;
+                    self.advance(); // skip .
+                    while let Some(c) = self.peek() {
+                        if c.is_ascii_digit() {
+                            self.advance();
+                        } else {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
         let s: String = self.src[start..self.pos].iter().collect();
-        s.parse::<i64>().map_err(|e| e.to_string())
+        if is_float {
+            s.parse::<f64>()
+                .map(Token::Float)
+                .map_err(|e| e.to_string())
+        } else {
+            s.parse::<i64>()
+                .map(Token::Int)
+                .map_err(|e| e.to_string())
+        }
     }
 
     fn read_ident(&mut self) -> String {
@@ -140,6 +167,7 @@ impl Lexer {
             "str" => Token::TypeStr,
             "bool" => Token::TypeBool,
             "list" => Token::TypeList,
+            "float" => Token::TypeFloat,
             _ => Token::Ident(s.to_string()),
         }
     }
@@ -159,7 +187,11 @@ impl Lexer {
                         self.advance(); // skip #
                         // read the number after #
                         let n = self.read_number()?;
-                        tokens.push(Token::Hash(n as u32));
+                        let n_val = match n {
+                            Token::Int(v) => v as u32,
+                            _ => 0,
+                        };
+                        tokens.push(Token::Hash(n_val));
                         self.last_was_ident_no_space = false;
                     } else {
                         // comment: skip to end of line
@@ -175,8 +207,8 @@ impl Lexer {
                     self.last_was_ident_no_space = false;
                 }
                 Some(c) if c.is_ascii_digit() => {
-                    let n = self.read_number()?;
-                    tokens.push(Token::Int(n));
+                    let tok = self.read_number()?;
+                    tokens.push(tok);
                     self.last_was_ident_no_space = false;
                 }
                 Some(c) if c.is_alphabetic() || c == '_' => {
