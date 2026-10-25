@@ -6,4 +6,4 @@ while i < 5000 {
     s = s + "x"
     i = i + 1
 }
-print("string_build: " + (time_ms() - t) + "ms  (len=" + s.len() + ")")
+print("string_build: " + (time_ms() - t) + "ms  (len=" + len(s) + ")")

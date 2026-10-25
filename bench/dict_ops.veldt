@@ -1,9 +1,9 @@
-# dict insert/lookup — measures hash + clone cost
+# dict put/get — measures hash + whole-map clone cost per write
 let t = time_ms()
 let d = dict()
 let i = 0
-while i < 20000 { d["k" + i] = i  i = i + 1 }
+while i < 4000 { d = d.put("k" + i, i)  i = i + 1 }
 let acc = 0
 i = 0
-while i < 20000 { acc = acc + d["k" + i]  i = i + 1 }
+while i < 4000 { acc = acc + d.get("k" + i)  i = i + 1 }
 print("dict_ops: " + (time_ms() - t) + "ms  (acc=" + acc + ")")
