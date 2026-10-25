@@ -36,12 +36,14 @@ Every one of these is hit within the first hour of writing real scripts.
 
 ## Phase 1 — Stdlib depth (~1-2 weeks)
 
-- [ ] Strings: `s[a:b]` slice, `replace` (non-regex), `format` positional
-      `format("{0} {1}", a, b)` avoiding brace-interp collision, `pad`,
-      `chars`, `repeat`, `join` on lists, `split_at`
-- [ ] Lists: `sort_by(fn)`, `enumerate`, `zip`, `flatten`, `group_by(fn)`,
-      `min_by`/`max_by(fn)`, `take(n)`, `skip(n)`, `contains`
-- [ ] Dicts: `values()`, `items()`, `merge`, `delete`, `get_or(k, default)`
+- [x] Strings (devin): `s[a:b]` slice, `replace` (non-regex), `pad`,
+      `chars`, `repeat`, `join` on lists, `split_at` — `format` positional
+      still open (~devin)
+- [x] Lists (devin): `sort_by(fn)`, `enumerate`, `zip`, `flatten`,
+      `group_by(fn)`, `min_by`/`max_by(fn)`, `take(n)`, `skip(n)`, `contains`
+- [x] Dicts (devin): `values()`, `items()`, `keys()`, `merge`, `delete`,
+      `get_or(k, default)` — immutable-style, returns new dict
+- [~devin] `format("{0} {1}", a, b)` positional builtin
 - [ ] OS/files: `ls(dir)`, `mkdir`, `rm`, `cp`, `mv`, `exists(path)`,
       `cwd()`, `home()`, `read_lines`, `write_lines`, `file_size`
 - [ ] Encoding: `b64_encode`, `b64_decode`, `url_encode`, `url_decode`,
@@ -86,7 +88,8 @@ Target: within ~10-30x of Python on typical script workloads, not 500x.
 
 ## Phase 4 — Distribution & DX (~1 week)
 
-- [ ] `veldt --version` (0.3.0 → 1.0.0 when phases 0-2 land)
+- [x] `veldt --version` (0.3.0 → 1.0.0 when phases 0-2 land) — done
+- [x] `veldt new myapp` — scaffold `main.veldt` + README — done
 - [ ] `cargo install veldt-lang` to crates.io (name availability check needed)
 - [ ] GitHub release binaries — CI: macOS arm64/x86, linux x64, windows
 - [ ] README rewrite: 60-second quickstart — install, hello world,

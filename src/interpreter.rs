@@ -1330,6 +1330,29 @@ impl Interpreter {
                     _ => Err("call_best() expects a function name string".into()),
                 }
             }
+            "format" => {
+                // format("%0 is %1", a, b) — %N indexed args, %% literal.
+                // {} braces can't be used — veldt interpolates {expr} at lex time.
+                let tpl = match args.get(0) {
+                    Some(Value::Str(s)) => s.clone(),
+                    _ => return Err("format(tpl, ...) — first arg must be a string".into()),
+                };
+                let mut out = String::new();
+                let mut chars = tpl.chars().peekable();
+                while let Some(c) = chars.next() {
+                    if c == '%' {
+                        if chars.peek() == Some(&'%') { chars.next(); out.push('%'); continue; }
+                        let mut num = String::new();
+                        while let Some(&d) = chars.peek() {
+                            if d.is_ascii_digit() { num.push(d); chars.next(); } else { break; }
+                        }
+                        if num.is_empty() { out.push('%'); continue; }
+                        let idx: usize = num.parse().unwrap_or(0);
+                        out.push_str(&format!("{}", args.get(idx + 1).cloned().unwrap_or(Value::Null)));
+                    } else { out.push(c); }
+                }
+                Ok(Some(Value::Str(out)))
+            }
             "args" => {
                 // args() -> script argv (veldt run prog.veldt -- a b c)
                 Ok(Some(Value::List(self.argv.iter()

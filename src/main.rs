@@ -52,6 +52,16 @@ fn main() {
                 run_program(&args[2], args.iter().any(|a| a == "--trace"), args.iter().any(|a| a == "--evolve"));
             }
         }
+        "--version" | "-V" | "version" => {
+            println!("veldt {}", env!("CARGO_PKG_VERSION"));
+        }
+        "new" => {
+            if args.len() < 3 {
+                eprintln!("Usage: veldt new <dir>");
+                process::exit(1);
+            }
+            scaffold(&args[2]);
+        }
         "fmt" => {
             if args.len() < 3 {
                 eprintln!("Usage: veldt fmt <file.veldt> [--write]");
@@ -252,6 +262,31 @@ fn main() {
             process::exit(1);
         }
     }
+}
+
+fn scaffold(dir: &str) {
+    let path = std::path::Path::new(dir);
+    if path.exists() {
+        eprintln!("Directory '{}' already exists", dir);
+        process::exit(1);
+    }
+    std::fs::create_dir_all(path).unwrap_or_else(|e| {
+        eprintln!("Cannot create '{}': {}", dir, e);
+        process::exit(1);
+    });
+    std::fs::write(path.join("main.veldt"), r#"fn main() {
+    print("hello — code that grows")
+    let a = args()
+    if a.len() > 0 {
+        print("args: " + a.join(", "))
+    }
+}
+
+main()
+"#).unwrap();
+    std::fs::write(path.join("README.md"),
+        format!("# {}\n\nveldt app — `veldt run main.veldt` to start\n", dir)).unwrap();
+    println!("Created {} — run: veldt run {}/main.veldt", dir, dir);
 }
 
 fn print_usage() {
