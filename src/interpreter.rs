@@ -83,6 +83,9 @@ pub struct Interpreter {
     // spawned threads: task id -> join handle returning Result<json, err>
     tasks: HashMap<i64, std::thread::JoinHandle<Result<String, String>>>,
     next_task_id: i64,
+    // call traces: fn name -> (serialized args, serialized result)
+    pub traces: HashMap<String, Vec<(Vec<String>, String)>>,
+    pub trace_calls: bool,
 }
 
 pub struct FunctionVariant {
@@ -116,6 +119,8 @@ impl Interpreter {
             next_db_id: 1,
             tasks: HashMap::new(),
             next_task_id: 0,
+            traces: HashMap::new(),
+            trace_calls: false,
         }
     }
 
@@ -723,6 +728,11 @@ impl Interpreter {
             self.vars = old_vars;
             return Err(format!("Function {} expects {} args but got {}", name, params.len(), args.len()));
         }
+        // Serialize args for tracing before they're consumed by binding
+        let args_json: Vec<String> = if self.trace_calls {
+            args.iter().map(|a| serde_json::to_string(a).unwrap_or_default()).collect()
+        } else { Vec::new() };
+
         for (param, val) in params.iter().zip(args.into_iter()) {
             self.vars.borrow_mut().insert(param.name.clone(), val);
         }
@@ -735,6 +745,19 @@ impl Interpreter {
 
         // Restore scope
         self.vars = old_vars;
+
+        // Record call as evidence (only when trace_calls is on — not during
+        // trials/probes/spawned workers, so evidence stays user-driven)
+        if self.trace_calls {
+            let res_json = serde_json::to_string(&result).unwrap_or_default();
+            let entry = self.traces.entry(name.to_string()).or_insert_with(Vec::new);
+            entry.push((args_json, res_json));
+            if entry.len() > 100 {
+                let excess = entry.len() - 100;
+                entry.drain(0..excess);
+            }
+        }
+
         Ok(result)
     }
 

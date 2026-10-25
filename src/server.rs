@@ -111,6 +111,7 @@ async fn run_program(
     };
 
     let mut interp = Interpreter::new();
+    interp.trace_calls = true;
     veldt.load_into_interpreter(&mut interp);
 
     // Run with output capture
@@ -171,6 +172,7 @@ async fn run_program(
     }
 
     // Save veldt
+    veldt.merge_traces(&interp.traces);
     veldt.save().unwrap_or_else(|e| eprintln!("Save error: {}", e));
 
     // Update shared state
@@ -366,6 +368,9 @@ fn garden_json(veldt: &Veldt) -> serde_json::Value {
                 "cause": o.cause_of_death,
                 "last_used": o.last_used,
             })
+        }).collect::<Vec<_>>(),
+        "traces": veldt.traces.iter().map(|(name, ts)| {
+            serde_json::json!({"name": name, "count": ts.len()})
         }).collect::<Vec<_>>(),
         "probes": veldt.probes.iter().map(|(name, probes)| {
             serde_json::json!({

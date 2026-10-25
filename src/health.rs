@@ -17,8 +17,9 @@ impl HealthChecker {
         let structs_snapshot = veldt.structs.clone();
 
         let probes_snapshot = veldt.probes.get(&entry.name).cloned().unwrap_or_default();
+        let traces_snapshot = veldt.traces.get(&entry.name).cloned().unwrap_or_default();
 
-        let trial_result = Self::run_trial(entry, &functions_snapshot, &variables_snapshot, &structs_snapshot, &probes_snapshot);
+        let trial_result = Self::run_trial(entry, &functions_snapshot, &variables_snapshot, &structs_snapshot, &probes_snapshot, &traces_snapshot);
 
         match trial_result {
             TrialResult::Pass(score, steps) => {
@@ -43,6 +44,7 @@ impl HealthChecker {
                  variables: &std::collections::HashMap<String, crate::veldt::VariableEntry>,
                  structs: &std::collections::HashMap<String, crate::veldt::StructEntry>,
                  probes: &[crate::veldt::Probe],
+                 traces: &[crate::veldt::Trace],
     ) -> TrialResult {
         let start = Instant::now();
 
@@ -67,6 +69,14 @@ impl HealthChecker {
             let overall = niche_scores.values().sum::<f64>() / n_niches;
             entry.niche_scores = niche_scores;
             score += overall * 0.3; // up to +0.3 for full probe coverage
+        }
+
+        // Phase 3: real call traces — the strongest evidence. A variant that
+        // produces results matching what users actually got earns fitness;
+        // one that diverges from observed behavior loses it. Cap at 30 traces.
+        if !traces.is_empty() {
+            let trace_score = Self::score_traces(entry, functions, variables, structs, traces);
+            score += trace_score * 0.4; // up to +0.4 for matching real usage
         }
 
         TrialResult::Pass(score, steps)
@@ -108,6 +118,44 @@ impl HealthChecker {
             }
         }
         per_niche.into_iter().map(|(k, (p, t))| (k, p as f64 / t as f64)).collect()
+    }
+
+    /// Score a variant against real call traces: fraction of traces where
+    /// the variant produces the recorded result (what users actually got).
+    fn score_traces(entry: &FunctionEntry,
+                    functions: &std::collections::HashMap<String, Vec<FunctionEntry>>,
+                    variables: &std::collections::HashMap<String, crate::veldt::VariableEntry>,
+                    structs: &std::collections::HashMap<String, crate::veldt::StructEntry>,
+                    traces: &[crate::veldt::Trace]) -> f64 {
+        let mut interp = Interpreter::with_step_limit(10000);
+        Self::load_snapshot_into_interp(functions, variables, structs, &mut interp);
+        let variant = crate::interpreter::FunctionVariant {
+            id: entry.id,
+            fitness: entry.fitness,
+            def: crate::interpreter::FunctionDef {
+                params: entry.params.clone(),
+                body: entry.body.clone(),
+            },
+        };
+        interp.functions.entry(entry.name.clone())
+            .or_insert_with(Vec::new)
+            .push(variant);
+
+        let mut ok = 0u32;
+        let mut used = 0u32;
+        for t in traces.iter().take(30) {
+            let args: Vec<Value> = t.args.iter()
+                .filter_map(|s| serde_json::from_str(s).ok()).collect();
+            if args.len() != entry.params.len() { continue; }
+            used += 1;
+            match interp.call_function(&entry.name, Some(entry.id), args) {
+                Ok(v) => {
+                    if serde_json::to_string(&v).unwrap_or_default() == t.result { ok += 1; }
+                }
+                Err(_) => {}
+            }
+        }
+        if used == 0 { 0.0 } else { ok as f64 / used as f64 }
     }
 
     fn load_snapshot_into_interp(
