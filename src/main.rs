@@ -207,8 +207,11 @@ fn main() {
             }
             veldt.save().unwrap_or_else(|e| eprintln!("Save error: {}", e));
         }
-        "help" | "docs" => {
+        "help" => {
             print_help(args.get(2).map(|s| s.as_str()));
+        }
+        "docs" => {
+            print_docs(args.get(2).map(|s| s.as_str()));
         }
         "stats" => {
             let mut veldt = veldt::Veldt::new();
@@ -299,6 +302,58 @@ main()
     std::fs::write(path.join("README.md"),
         format!("# {}\n\nveldt app — `veldt run main.veldt` to start\n", dir)).unwrap();
     println!("Created {} — run: veldt run {}/main.veldt", dir, dir);
+}
+
+fn print_docs(topic: Option<&str>) {
+    const DOCS: &[(&str, &str, &str)] = &[
+        ("len", "len(x) -> int", "len(\"abc\") == 3, len([1,2]) == 2"),
+        ("args", "args() -> list<str>", "veldt run f.veldt -- a b → args() == [\"a\",\"b\"]"),
+        ("print", "print(x)", "print(\"hi\") — stdout"),
+        ("eprint", "eprint(x)", "stderr output"),
+        ("input", "input([prompt]) -> str", "read a line from stdin"),
+        ("exit", "exit([code])", "terminate process with code"),
+        ("format", "format(\"%0 is %1\", a, b) -> str", "%N positional, %% literal"),
+        ("fetch", "fetch(url[, headers]) -> dict{status,body}", "fetch(\"https://..\")"),
+        ("post", "post(url, body[, headers]) -> dict{status,body}", "post(u, \"{}\")"),
+        ("serve", "serve(port, fn(method, path, headers, body))", "blocks; handler returns str"),
+        ("match_path", "match_path(pat, path) -> dict|null", "match_path(\"/u/:id\", \"/u/4\") → {id: \"4\"}"),
+        ("dict", "dict() -> dict", "empty dict"),
+        ("get/put/has", "d.get(k) d.put(k,v) d.has(k)", "immutable-style; put returns new dict"),
+        ("re_match", "re_match(s, pat) -> bool", "regex match"),
+        ("re_captures", "re_captures(s, pat) -> list|null", "capture groups"),
+        ("re_find", "re_find(s, pat) -> str|null", "first match"),
+        ("re_replace", "re_replace(s, pat, rep) -> str", "replace all"),
+        ("re_split", "re_split(s, pat) -> list", "split by pattern"),
+        ("env", "env(name) -> str|null", "read env var"),
+        ("now", "now() -> float ms", "epoch millis"),
+        ("date", "date([fmt]) -> str", "%Y %m %d %H %M %S tokens"),
+        ("sleep", "sleep(ms)", "block"),
+        ("rand", "rand() -> float", "[0,1)"),
+        ("spawn", "spawn(\"fn\", [args]) -> task_id", "concurrent thread"),
+        ("join", "join(task_id) -> value", "wait for task"),
+        ("pmap", "pmap(\"fn\", list) -> list", "parallel map over garden fn"),
+        ("call_best", "call_best(\"name\", args) -> value", "dispatch fittest variant"),
+        ("read_file", "read_file(path) -> str", ""),
+        ("write_file", "write_file(path, content)", ""),
+    ];
+    match topic {
+        None => {
+            println!("veldt docs <builtin> — {} documented. Categories via: veldt help builtins", DOCS.len());
+            for (name, sig, _) in DOCS { println!("  {:<14} {}", name, sig); }
+        }
+        Some(t) => {
+            let t = t.trim_start_matches('(');
+            let mut found = false;
+            for (name, sig, ex) in DOCS {
+                if name.contains(t) || sig.contains(t) {
+                    println!("{:<14} {}", name, sig);
+                    if !ex.is_empty() { println!("               eg {}", ex); }
+                    found = true;
+                }
+            }
+            if !found { println!("No docs for '{}' — try `veldt docs` for the list", t); }
+        }
+    }
 }
 
 fn print_help(topic: Option<&str>) {
