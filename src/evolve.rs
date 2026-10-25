@@ -113,13 +113,21 @@ impl Evolver {
             let mut births = 0;
 
             while spent < budget {
-                // Choose reproduction mode: crossover if the family has >=2
-                // healthy variants (30% chance), else mutation
-                let (name, id) = &candidates[self.rand_range(candidates.len())];
-                let entry = match veldt.functions.get(name).and_then(|v| v.iter().find(|e| e.id == *id)) {
+                // Pick a family, then a parent by lexicase selection: filter
+                // candidates through a shuffled niche sequence so specialists
+                // (best in some niche) get reproduced, not just the fittest.
+                let families: Vec<String> = candidates.iter().map(|(n, _)| n.clone())
+                    .collect::<std::collections::HashSet<_>>().into_iter().collect();
+                let name = families[self.rand_range(families.len())].clone();
+                let id = match self.lexicase_pick(veldt, &name) {
+                    Some(i) => i,
+                    None => continue,
+                };
+                let entry = match veldt.functions.get(&name).and_then(|v| v.iter().find(|e| e.id == id)) {
                     Some(e) => e.clone(),
                     None => continue,
                 };
+                let name = &name;
 
                 let healthy_ids: Vec<u32> = veldt.functions.get(name).map(|vs|
                     vs.iter().filter(|e| matches!(e.health, Health::Healthy)).map(|e| e.id).collect()
@@ -210,6 +218,48 @@ impl Evolver {
         }
 
         events
+    }
+
+    /// Lexicase selection: pick a parent by filtering healthy variants
+    /// through a randomly-ordered niche sequence, keeping only those
+    /// within epsilon of the best score at each niche. Specialists that
+    /// dominate a niche get reproduced even if globally mid-fitness.
+    fn lexicase_pick(&mut self, veldt: &Veldt, name: &str) -> Option<u32> {
+        let variants = veldt.functions.get(name)?;
+        let healthy: Vec<&FunctionEntry> = variants.iter()
+            .filter(|e| matches!(e.health, Health::Healthy) && !e.tests.is_empty())
+            .collect();
+        if healthy.is_empty() { return None; }
+
+        // all known niches for this family (probes + recorded scores)
+        let mut niches: Vec<String> = veldt.probes.get(name)
+            .map(|ps| ps.iter().map(|p| p.niche.clone()).collect()).unwrap_or_default();
+        for v in &healthy {
+            for k in v.niche_scores.keys() { niches.push(k.clone()); }
+        }
+        niches.sort();
+        niches.dedup();
+        if niches.is_empty() {
+            return Some(healthy[self.rand_range(healthy.len())].id);
+        }
+        // shuffle niche order — each generation selects for different expertise
+        for i in (1..niches.len()).rev() {
+            let j = self.rand_range(i + 1);
+            niches.swap(i, j);
+        }
+        let mut pool: Vec<&FunctionEntry> = healthy;
+        for niche in &niches {
+            if pool.len() <= 1 { break; }
+            let best = pool.iter()
+                .map(|v| v.niche_scores.get(niche).copied().unwrap_or(0.0))
+                .fold(0.0f64, f64::max);
+            pool.retain(|v| {
+                let s = v.niche_scores.get(niche).copied().unwrap_or(0.0);
+                (best - s).abs() < 0.001
+            });
+        }
+        if pool.is_empty() { return None; }
+        Some(pool[self.rand_range(pool.len())].id)
     }
 
     /// Generate typed random inputs for a family and record the fittest
@@ -338,11 +388,12 @@ impl Evolver {
     }
 
     fn pick_mutation(&mut self) -> Mutation {
-        match self.rand_range(4) {
+        match self.rand_range(5) {
             0 => Mutation::Constant,
             1 => Mutation::Operator,
             2 => Mutation::StatementSwap,
-            _ => Mutation::DeadCodeRemoval,
+            3 => Mutation::DeadCodeRemoval,
+            _ => Mutation::Simplify,
         }
     }
 
@@ -352,6 +403,7 @@ impl Evolver {
             Mutation::Operator => format!("operator mutation on {}#{}", name, id),
             Mutation::StatementSwap => format!("statement swap on {}#{}", name, id),
             Mutation::DeadCodeRemoval => format!("dead code removal on {}#{}", name, id),
+            Mutation::Simplify => format!("simplification on {}#{}", name, id),
         }
     }
 
@@ -382,9 +434,101 @@ impl Evolver {
                     new_body.remove(idx);
                 }
             }
+            Mutation::Simplify => {
+                // Algebraic simplification: x+0→x, x*1→x, x-0→x, x*0→0, x/1→x.
+                // Produces provably-equivalent, smaller code — a genuine
+                // improvement signal the garden can actually find.
+                for stmt in new_body.iter_mut() {
+                    if self.simplify_stmt(stmt) { break; }
+                }
+            }
         }
 
         new_body
+    }
+
+    /// Try to simplify every expr in a statement (depth-first, first match wins).
+    fn simplify_stmt(&mut self, stmt: &mut Stmt) -> bool {
+        match stmt {
+            Stmt::Let(_, e) | Stmt::Assign(_, e) | Stmt::Print(e) | Stmt::ExprStmt(e) => {
+                self.simplify_expr(e)
+            }
+            Stmt::LetDestructure(_, e) => self.simplify_expr(e),
+            Stmt::Return(Some(e)) => self.simplify_expr(e),
+            Stmt::FieldAssign(a, _, b) => self.simplify_expr(a) || self.simplify_expr(b),
+            Stmt::IndexAssign(o, i, v) => {
+                self.simplify_expr(o) || self.simplify_expr(i) || self.simplify_expr(v)
+            }
+            Stmt::If(c, then, els) => {
+                self.simplify_expr(c)
+                    || then.iter_mut().any(|s| self.simplify_stmt(s))
+                    || els.as_mut().map(|b| b.iter_mut().any(|s| self.simplify_stmt(s))).unwrap_or(false)
+            }
+            Stmt::While(c, body) | Stmt::For(_, c, body) => {
+                self.simplify_expr(c) || body.iter_mut().any(|s| self.simplify_stmt(s))
+            }
+            Stmt::Try(b, _, h) => {
+                b.iter_mut().any(|s| self.simplify_stmt(s))
+                    || h.iter_mut().any(|s| self.simplify_stmt(s))
+            }
+            Stmt::Match(scrut, arms, els) => {
+                self.simplify_expr(scrut)
+                    || arms.iter_mut().any(|(p, b)| {
+                        self.simplify_expr(p) || b.iter_mut().any(|s| self.simplify_stmt(s))
+                    })
+                    || els.as_mut().map(|b| b.iter_mut().any(|s| self.simplify_stmt(s))).unwrap_or(false)
+            }
+            Stmt::Grow(crate::ast::GrowItem::Fn(_, _, body, _)) => {
+                body.iter_mut().any(|s| self.simplify_stmt(s))
+            }
+            _ => false,
+        }
+    }
+
+    /// Apply one algebraic simplification to an expression (self first, then children).
+    fn simplify_expr(&mut self, e: &mut Expr) -> bool {
+        // check self: e op const patterns
+        let replacement: Option<Expr> = if let Expr::BinOp(l, op, r) = e {
+            match (op, l.as_ref(), r.as_ref()) {
+                (BinOp::Add, _, Expr::Int(0)) => Some((**l).clone()),
+                (BinOp::Add, Expr::Int(0), _) => Some((**r).clone()),
+                (BinOp::Sub, _, Expr::Int(0)) => Some((**l).clone()),
+                (BinOp::Mul, _, Expr::Int(1)) => Some((**l).clone()),
+                (BinOp::Mul, Expr::Int(1), _) => Some((**r).clone()),
+                (BinOp::Mul, _, Expr::Int(0)) => Some(Expr::Int(0)),
+                (BinOp::Mul, Expr::Int(0), _) => Some(Expr::Int(0)),
+                (BinOp::Div, _, Expr::Int(1)) => Some((**l).clone()),
+                _ => None,
+            }
+        } else { None };
+        if let Some(n) = replacement { *e = n; return true; }
+
+        // recurse into children
+        match e {
+            Expr::BinOp(l, _, r) => self.simplify_expr(l) || self.simplify_expr(r),
+            Expr::UnaryOp(_, i) => self.simplify_expr(i),
+            Expr::Call(_, _, args) | Expr::List(args) => {
+                args.iter_mut().any(|a| self.simplify_expr(a))
+            }
+            Expr::MethodCall(o, _, args) => {
+                self.simplify_expr(o) || args.iter_mut().any(|a| self.simplify_expr(a))
+            }
+            Expr::FieldAccess(o, _) => self.simplify_expr(o),
+            Expr::SafeGet(o, _, args) => {
+                self.simplify_expr(o)
+                    || args.as_mut().map(|a| a.iter_mut().any(|x| self.simplify_expr(x))).unwrap_or(false)
+            }
+            Expr::Index(o, i) => self.simplify_expr(o) || self.simplify_expr(i),
+            Expr::Interp(parts) => parts.iter_mut().any(|p| self.simplify_expr(p)),
+            Expr::StructLit(_, fields) => fields.iter_mut().any(|(_, v)| self.simplify_expr(v)),
+            Expr::ListComp(head, _, iter, cond) => {
+                self.simplify_expr(head)
+                    || self.simplify_expr(iter)
+                    || cond.as_mut().map(|c| self.simplify_expr(c)).unwrap_or(false)
+            }
+            Expr::Lambda(_, body) => body.iter_mut().any(|s| self.simplify_stmt(s)),
+            _ => false,
+        }
     }
 
     fn mutate_constants(&mut self, body: &mut Vec<Stmt>) {
@@ -580,6 +724,7 @@ enum Mutation {
     Operator,
     StatementSwap,
     DeadCodeRemoval,
+    Simplify,
 }
 
 fn mutation_name(m: Mutation) -> &'static str {
@@ -588,6 +733,7 @@ fn mutation_name(m: Mutation) -> &'static str {
         Mutation::Operator => "operator mutation",
         Mutation::StatementSwap => "statement swap",
         Mutation::DeadCodeRemoval => "dead code removal",
+        Mutation::Simplify => "simplification",
     }
 }
 
