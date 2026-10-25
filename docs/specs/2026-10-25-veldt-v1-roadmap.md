@@ -48,10 +48,11 @@ Every one of these is hit within the first hour of writing real scripts.
       `cwd()`, `home()`, `read_lines`, `write_lines`, `file_size`
 - [ ] Encoding: `b64_encode`, `b64_decode`, `url_encode`, `url_decode`,
       `sha256` (tiny crate or vendored impl)
-- [ ] `re_captures(str, pat)` — capture groups -> list
+- [x] `re_captures(str, pat)` — capture groups -> list (devin)
 - [ ] `parse_date(str) -> ts`, `date_add(ts, days)` — real datetime math
-- [ ] `serve` ergonomics: `route(pattern, handler)` table + path params
-      `/users/:id`, or keep the match-arm style and document it
+- [~devin] `serve` ergonomics: `match_path(pattern, path)` -> params dict
+      or null (path params like `/users/:id` work; full `route()` table
+      still open)
 - [ ] HTTP client: headers param on fetch, `fetch(url, {headers: dict})`,
       timeout, `post` exists — verify body types
 

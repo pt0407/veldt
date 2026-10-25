@@ -1330,6 +1330,25 @@ impl Interpreter {
                     _ => Err("call_best() expects a function name string".into()),
                 }
             }
+            "match_path" => {
+                // match_path("/users/:id", "/users/42") -> {id: "42"} or null
+                let (pat, path) = match (args.get(0), args.get(1)) {
+                    (Some(Value::Str(p)), Some(Value::Str(q))) => (p.clone(), q.clone()),
+                    _ => return Err("match_path(pattern, path) — two strings".into()),
+                };
+                let ps: Vec<&str> = pat.trim_matches('/').split('/').collect();
+                let qs: Vec<&str> = path.trim_matches('/').split('/').collect();
+                if ps.len() != qs.len() { return Ok(Some(Value::Null)); }
+                let mut out = std::collections::HashMap::new();
+                for (pseg, qseg) in ps.iter().zip(qs.iter()) {
+                    if let Some(name) = pseg.strip_prefix(':') {
+                        out.insert(name.to_string(), Value::Str(qseg.to_string()));
+                    } else if pseg != qseg {
+                        return Ok(Some(Value::Null));
+                    }
+                }
+                Ok(Some(Value::Dict(out)))
+            }
             "format" => {
                 // format("%0 is %1", a, b) — %N indexed args, %% literal.
                 // {} braces can't be used — veldt interpolates {expr} at lex time.
