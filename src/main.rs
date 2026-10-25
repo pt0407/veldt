@@ -132,13 +132,26 @@ fn main() {
                 eprintln!("Usage: veldt agent \"task\"");
                 process::exit(1);
             }
-            let task = args[2..].join(" ");
+            // optional trailing .veldt file acts as the "editor" source
+            let file_arg = args[2..].iter().find(|a| a.ends_with(".veldt"));
+            let source = file_arg
+                .and_then(|f| std::fs::read_to_string(f).ok())
+                .unwrap_or_default();
+            let task: Vec<&str> = args[2..].iter()
+                .filter(|a| !a.ends_with(".veldt"))
+                .map(|s| s.as_str())
+                .collect();
+            let task = task.join(" ");
+            if task.is_empty() {
+                eprintln!("Usage: veldt agent \"task\" [file.veldt]");
+                process::exit(1);
+            }
             let mut veldt = veldt::Veldt::new();
             if let Err(e) = veldt.load() {
                 eprintln!("Error loading veldt: {}", e);
                 process::exit(1);
             }
-            let resp = agent::respond(&task, "", &mut veldt);
+            let resp = agent::respond(&task, &source, &mut veldt);
             for s in &resp.steps {
                 let marker = match s.kind {
                     "plan" => ">", "act" => "*", "obs" => "-", "ok" => "+", "err" => "x",

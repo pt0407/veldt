@@ -257,7 +257,7 @@ fn help_intent() -> AgentResponse {
          • \"obituaries\" — recent deaths\n\
          • \"surprise me\" — plant a random new species\n\
          • \"run this\" · \"evolve 5\" · \"tend\" · \"prune x#N\" · \"what's alive?\"\n\
-         Known species: fib, factorial, prime, count primes, gcd, power, sort, quicksort, reverse, palindrome, sum, mean, max, min, fizzbuzz, collatz, evens, doubles, vowels, digits, leapyear, clamp, words, parallel."
+         Known species: fib, factorial, prime, count primes, nth prime, gcd, lcm, power, sort, quicksort, reverse, palindrome, sum, mean, max, min, fizzbuzz, collatz, evens, doubles, vowels, digits, leapyear, clamp, words, dedupe, anagram, sqrt, parallel."
     )
 }
 
@@ -275,12 +275,27 @@ fn run_intent(editor_source: &str, veldt: &mut Veldt) -> AgentResponse {
     } else {
         steps.push(step("err", "The run failed — see output below."));
     }
+    // Diagnose common failures into actionable hints
+    let hint = if result.success { None } else {
+        result.output.lines()
+            .find(|l| l.contains("error") || l.contains("Error"))
+            .and_then(|e| {
+                if let Some(f) = e.split("Undefined function: ").nth(1) {
+                    let f = f.trim();
+                    Some(format!("{} isn't in the garden — say \"write {}\" or \"a function called {}\" and I'll plant it.", f, f, f))
+                } else if e.contains("Parse") || e.contains("expected") || e.contains("Expected") {
+                    Some("syntax issue — check brackets and 'test' clauses.".to_string())
+                } else if e.contains("Cannot") {
+                    Some("type mismatch — watch what you're adding/comparing.".to_string())
+                } else { None }
+            })
+    };
     AgentResponse {
         steps,
-        reply: if result.success {
-            "Ran it. Any grows were health-checked and planted.".into()
-        } else {
-            "It died on the vine — the error is in the output. Fix the code and I'll run it again.".into()
+        reply: match (result.success, hint) {
+            (true, _) => "Ran it. Any grows were health-checked and planted.".into(),
+            (false, Some(h)) => format!("It failed — {}", h),
+            (false, None) => "It died on the vine — the error is in the output. Fix the code and I'll run it again.".into(),
         },
         code: None,
         ran: true,
@@ -1133,6 +1148,69 @@ print(@N@("veldt", "ldtev"))
 "#,
         },
         Template {
+            keywords: &["lcm", "least common", "lowest common"],
+            canonical: "lcm",
+            desc: "least common multiple — depends on gcd",
+            needs: &["gcd"],
+            make: r#"grow fn @N@(a: int, b: int) test @N@(4, 6) == 12, @N@(7, 3) == 21 {
+    if a == 0 or b == 0 {
+        return 0
+    }
+    return a * b / gcd(a, b)
+}
+
+print("@N@(12, 18) = " + @N@(12, 18))
+"#,
+        },
+        Template {
+            keywords: &["nth prime", "nth_prime", "prime number"],
+            canonical: "nth_prime",
+            desc: "nth prime — depends on is_prime",
+            needs: &["is_prime"],
+            make: r#"grow fn @N@(n: int) test @N@(1) == 2, @N@(6) == 13 {
+    let found = 0
+    let candidate = 2
+    while found < n {
+        if is_prime(candidate) {
+            found = found + 1
+        }
+        if found == n {
+            return candidate
+        }
+        candidate = candidate + 1
+    }
+    return candidate
+}
+
+print("@N@(10) = " + @N@(10))
+"#,
+        },
+        Template {
+            keywords: &["sqrt", "square root", "isqrt"],
+            canonical: "isqrt",
+            desc: "integer square root",
+            needs: &[],
+            make: r#"grow fn @N@(n: int) test @N@(16) == 4, @N@(17) == 4, @N@(0) == 0 {
+    if n < 2 {
+        return n
+    }
+    let lo = 1
+    let hi = n
+    while lo < hi {
+        let mid = (lo + hi + 1) / 2
+        if mid * mid <= n {
+            lo = mid
+        } else {
+            hi = mid - 1
+        }
+    }
+    return lo
+}
+
+print("@N@(1000000) = " + @N@(1000000))
+"#,
+        },
+        Template {
             keywords: &["count prime", "prime count", "primes under", "how many prime"],
             canonical: "count_primes",
             desc: "prime counter — depends on is_prime",
@@ -1223,7 +1301,7 @@ print("{}(0) = " + {}(0))
         );
     }
     plain(
-        "I'm not sure what to write. Name a species I know — fib, factorial, prime, count primes, gcd, power, sort, quicksort, reverse, palindrome, sum, mean, max, min, fizzbuzz, collatz, evens, doubles, vowels, digits, leapyear, clamp, words, parallel — or say \"a function called NAME\" for a stub."
+        "I'm not sure what to write. Name a species I know — fib, factorial, prime, count primes, nth prime, gcd, lcm, power, sort, quicksort, reverse, palindrome, sum, mean, max, min, fizzbuzz, collatz, evens, doubles, vowels, digits, leapyear, clamp, words, dedupe, anagram, sqrt, parallel — or say \"a function called NAME\" for a stub."
     )
 }
 
