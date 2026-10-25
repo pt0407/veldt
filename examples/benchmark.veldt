@@ -1,0 +1,10 @@
+# Garden benchmark: a bloated seed that the garden should simplify.
+# Evolve and watch 'compute' lose dead weight while staying correct.
+grow fn compute(x: int) test compute(3) == 6, compute(0) == 0 {
+    return x * 2 + 0 * 1
+}
+
+# Generate real call evidence
+for x in [1, 5, 10, -4, 42] {
+    print("compute({x}) = " + call_best("compute", x))
+}
