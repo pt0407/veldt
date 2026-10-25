@@ -15,6 +15,7 @@ mod visual;
 
 use std::env;
 use std::process;
+use crate::veldt::Health;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -206,6 +207,17 @@ fn main() {
             }
             veldt.save().unwrap_or_else(|e| eprintln!("Save error: {}", e));
         }
+        "help" | "docs" => {
+            print_help(args.get(2).map(|s| s.as_str()));
+        }
+        "stats" => {
+            let mut veldt = veldt::Veldt::new();
+            if let Err(e) = veldt.load() {
+                eprintln!("Error loading veldt: {}", e);
+                process::exit(1);
+            }
+            print_stats(&veldt);
+        }
         "bench" => {
             let mut veldt = veldt::Veldt::new();
             if let Err(e) = veldt.load() {
@@ -287,6 +299,55 @@ main()
     std::fs::write(path.join("README.md"),
         format!("# {}\n\nveldt app — `veldt run main.veldt` to start\n", dir)).unwrap();
     println!("Created {} — run: veldt run {}/main.veldt", dir, dir);
+}
+
+fn print_help(topic: Option<&str>) {
+    let text = match topic.unwrap_or("") {
+        "run" => "veldt run <file.veldt> [-- a b c]  — run a script; args() returns the -- tail\n  veldt run -e \"code\" — inline eval",
+        "repl" => "veldt repl — interactive loop\n  :help :garden :quit — commands",
+        "agent" => "veldt agent \"task\" [--json] — the Gardener (rule-based coding agent)\n  write/show/test/adopt/improve/suggest/bench/evolve/run — say \"help\" for verbs",
+        "evolve" => "veldt evolve [N] [--llm] — N cycles; --llm needs VELDT_LLM_KEY (+_BASE/_MODEL)",
+        "garden" => "veldt garden — census · veldt lineage <name> · veldt test <name> · veldt adopt <name#N>",
+        "builtins" => "len type str int float print eprint input read_stdin args exit\n  abs max min round floor ceil sqrt pow rand date now sleep env\n  fetch post serve match_path read_file write_file ls exists\n  dict get put has keys values items merge delete get_or\n  re_match re_find re_replace re_split re_captures format",
+        "strings" => "s.len() s.trim() s.ltrim() s.rtrim() s.to_lower() s.to_upper()\n  s.split(sep) s.replace(a,b) s.contains(x) s.starts_with(p) s.ends_with(p)\n  s.chars() s.repeat(n) s.pad(n[,ch]) s.split_at(i) s[a:b]",
+        "lists" => "xs.len() xs.push(v) xs.pop() xs.contains(v) xs.join(sep)\n  xs.enumerate() xs.zip(ys) xs.flatten() xs.take(n) xs.skip(n)\n  xs.sort() xs.sort_by(f) xs.group_by(f) xs.min_by(f) xs.max_by(f)\n  xs.reverse() xs.index_of(v) xs[a:b] xs[-1]",
+        "types" => "int float str bool list dict set null fn — types are advisory docs\n  `x in xs` membership · `??` null-coalesce · `?.` safe access · `|>` pipe",
+        _ => "veldt help <topic> — run, repl, agent, evolve, garden, builtins, strings, lists, types",
+    };
+    println!("{}", text);
+}
+
+fn print_stats(veldt: &veldt::Veldt) {
+    let mut total = 0usize;
+    let mut healthy = 0usize;
+    let mut sick = 0usize;
+    let mut dying = 0usize;
+    let mut best: Vec<(String, f64, usize)> = Vec::new();
+    for (name, variants) in &veldt.functions {
+        let top = variants.iter().map(|e| e.fitness)
+            .fold(f64::NEG_INFINITY, f64::max);
+        best.push((name.clone(), if variants.is_empty() { 0.0 } else { top }, variants.len()));
+        for e in variants {
+            total += 1;
+            match e.health {
+                Health::Healthy => healthy += 1,
+                Health::Sick(_) => sick += 1,
+                Health::Dying => dying += 1,
+            }
+        }
+    }
+    best.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    let probe_count: usize = veldt.probes.values().map(|v| v.len()).sum();
+    println!("garden: {} lineages, {} variants ({} healthy, {} sick, {} dying)",
+        veldt.functions.len(), total, healthy, sick, dying);
+    println!("probes: {} across {} families | deaths: {} | runs: {}",
+        probe_count, veldt.probes.len(), veldt.obituaries.len(), veldt.run_count);
+    if !best.is_empty() {
+        println!("top families:");
+        for (name, fit, n) in best.iter().take(10) {
+            println!("  {:<20} fitness {:>5.2}  ({} variants)", name, fit, n);
+        }
+    }
 }
 
 fn print_usage() {
