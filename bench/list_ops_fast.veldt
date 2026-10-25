@@ -1,0 +1,8 @@
+# list build via mutating append — O(1) per op, no clone
+let t = time_ms()
+let xs = []
+let i = 0
+while i < 20000 { xs.append(i)  i = i + 1 }
+let evens = xs.filter(fn(x) { return x % 2 == 0 })
+let total = evens.map(fn(x) { return x * 2 }).reduce(0, fn(a, b) { return a + b })
+print("list_ops_fast: " + (time_ms() - t) + "ms  (total=" + total + ")")
