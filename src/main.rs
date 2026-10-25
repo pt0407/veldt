@@ -122,10 +122,22 @@ fn main() {
         }
         "pull" => {
             if args.len() < 3 {
-                eprintln!("Usage: veldt pull <url>   (fetch garden from a registry)");
+                eprintln!("Usage: veldt pull <url> [--merge]  (fetch garden from a registry)");
                 process::exit(1);
             }
-            import_garden(&format!("{}/api/garden", args[2].trim_end_matches('/')));
+            let url = format!("{}/api/garden", args[2].trim_end_matches('/'));
+            if args.iter().any(|a| a == "--merge") {
+                merge_garden(&url);
+            } else {
+                import_garden(&url);
+            }
+        }
+        "search" => {
+            if args.len() < 4 {
+                eprintln!("Usage: veldt search <url> <name>  (find families in a registry)");
+                process::exit(1);
+            }
+            search_registry(&args[2], &args[3]);
         }
         "garden" => {
             let mut veldt = veldt::Veldt::new();
@@ -580,6 +592,63 @@ fn push_garden(url: &str) {
             r.text().unwrap_or_default()),
         Err(e) => { eprintln!("Push failed: {}", e); process::exit(1); }
     }
+}
+
+fn merge_garden(url: &str) {
+    // pull the pool and merge its families INTO the local garden —
+    // immigrants keep their provenance and get tagged.
+    let client = reqwest::blocking::Client::builder()
+        .user_agent("Veldt/0.3").timeout(std::time::Duration::from_secs(30))
+        .build().expect("http client");
+    let body = match client.get(url).send().and_then(|r| r.error_for_status()) {
+        Ok(r) => r.text().unwrap_or_default(),
+        Err(e) => { eprintln!("Pull failed: {}", e); process::exit(1); }
+    };
+    let remote: serde_json::Value = match serde_json::from_str(&body) {
+        Ok(v) => v, Err(e) => { eprintln!("Bad pool json: {}", e); process::exit(1); }
+    };
+    let mut veldt = veldt::Veldt::new();
+    if let Err(e) = veldt.load() { eprintln!("Error: {}", e); process::exit(1); }
+    let mut added = 0;
+    if let Some(fns) = remote.get("functions").and_then(|f| f.as_object()) {
+        for (name, variants) in fns {
+            let Some(list) = variants.as_array() else { continue; };
+            let family = veldt.functions.entry(name.clone()).or_insert_with(Vec::new);
+            for v in list {
+                let id = v.get("id").and_then(|i| i.as_u64()).unwrap_or(0) as u32;
+                if family.iter().any(|e| e.id == id) { continue; }
+                if let Ok(mut entry) = serde_json::from_value::<veldt::FunctionEntry>(v.clone()) {
+                    entry.origin = format!("immigrant:{}", entry.origin);
+                    family.push(entry);
+                    added += 1;
+                }
+            }
+        }
+    }
+    if let Err(e) = veldt.save() { eprintln!("Save failed: {}", e); process::exit(1); }
+    println!("Merged {} immigrant variants from {}", added, url);
+}
+
+fn search_registry(url: &str, needle: &str) {
+    let client = reqwest::blocking::Client::builder()
+        .user_agent("Veldt/0.3").timeout(std::time::Duration::from_secs(15))
+        .build().expect("http client");
+    let endpoint = format!("{}/api/garden", url.trim_end_matches('/'));
+    let body = match client.get(&endpoint).send().and_then(|r| r.error_for_status()) {
+        Ok(r) => r.text().unwrap_or_default(),
+        Err(e) => { eprintln!("Search failed: {}", e); process::exit(1); }
+    };
+    let pool: serde_json::Value = serde_json::from_str(&body).unwrap_or_default();
+    let mut found = 0;
+    if let Some(fns) = pool.get("functions").and_then(|f| f.as_object()) {
+        for (name, variants) in fns {
+            if !name.contains(needle) { continue; }
+            found += 1;
+            let n = variants.as_array().map(|v| v.len()).unwrap_or(0);
+            println!("  {} — {} variant{}", name, n, if n == 1 { "" } else { "s" });
+        }
+    }
+    if found == 0 { println!("No families matching '{}'", needle); }
 }
 
 fn fmt_check(path: &str) {
