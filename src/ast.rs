@@ -63,7 +63,9 @@ pub enum Expr {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TestAssert {
     pub call: Expr,
-    pub expected: Expr,
+    // None => the call itself is a truthy predicate (property test)
+    #[serde(default)]
+    pub expected: Option<Expr>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

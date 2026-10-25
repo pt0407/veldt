@@ -63,27 +63,97 @@ impl Evolver {
                 continue;
             }
 
+            // === Phase 1: probe generation (co-evolving test pool) ===
+            // For each candidate family, generate fresh typed inputs; the
+            // fittest variant's answers become consensus ground truth. The
+            // pool accumulates — selection pressure ratchets up.
+            let mut probe_families: std::collections::HashSet<String> = std::collections::HashSet::new();
+            let family_names: Vec<String> = candidates.iter().map(|(n, _)| n.clone())
+                .collect::<std::collections::HashSet<_>>().into_iter().collect();
+            for name in &family_names {
+                if let Some(new_probes) = self.generate_probes(veldt, name, 4) {
+                    if !new_probes.is_empty() {
+                        let pool = veldt.probes.entry(name.clone()).or_insert_with(Vec::new);
+                        for p in &new_probes {
+                            events.push(EvolutionEvent::ProbeGenerated {
+                                name: name.clone(),
+                                niche: p.niche.clone(),
+                            });
+                            pool.push(p.clone());
+                        }
+                        // cap pool size — keep the most recent 40 probes
+                        if pool.len() > 40 {
+                            let excess = pool.len() - 40;
+                            pool.drain(0..excess);
+                        }
+                        probe_families.insert(name.clone());
+                    }
+                }
+            }
+
+            // Re-trial healthy variants in families that got new probes so
+            // their niche scores reflect the enlarged pool
+            for name in &probe_families {
+                let ids: Vec<u32> = veldt.functions.get(name).map(|vs|
+                    vs.iter().filter(|e| matches!(e.health, Health::Healthy)).map(|e| e.id).collect()
+                ).unwrap_or_default();
+                for id in ids {
+                    let mut e = veldt.functions[name].iter().find(|e| e.id == id).cloned().unwrap();
+                    HealthChecker::check_at_birth(&mut e, veldt);
+                    if let Some(variants) = veldt.functions.get_mut(name) {
+                        for v in variants.iter_mut() {
+                            if v.id == id { *v = e.clone(); break; }
+                        }
+                    }
+                }
+            }
+
+            // === Phase 2: reproduction — mutation + crossover ===
             let mut mutations = 0;
             let mut births = 0;
 
             while spent < budget {
-                // Pick a random candidate
+                // Choose reproduction mode: crossover if the family has >=2
+                // healthy variants (30% chance), else mutation
                 let (name, id) = &candidates[self.rand_range(candidates.len())];
                 let entry = match veldt.functions.get(name).and_then(|v| v.iter().find(|e| e.id == *id)) {
                     Some(e) => e.clone(),
                     None => continue,
                 };
 
-                // Apply a random mutation
-                let mutation = self.pick_mutation();
-                let mutated_body = self.mutate_body(&entry.body, mutation);
-                let mutated_tests = entry.tests.clone();
-                let mutated_params = entry.params.clone();
-                let mutation_desc = self.describe_mutation(mutation, &entry.name, entry.id);
+                let healthy_ids: Vec<u32> = veldt.functions.get(name).map(|vs|
+                    vs.iter().filter(|e| matches!(e.health, Health::Healthy)).map(|e| e.id).collect()
+                ).unwrap_or_default();
 
-                // Grow the mutant as a new variant
-                let source = format!("fn {}(...) {{ [mutated from {}#{}] }}", name, name, entry.id);
-                let new_id = veldt.grow_function(name, mutated_params, mutated_body, mutated_tests, &source);
+                let do_crossover = healthy_ids.len() >= 2 && self.rand_range(10) < 3;
+
+                let (child_body, parents, origin) = if do_crossover {
+                    let other_id = healthy_ids.iter().filter(|i| **i != entry.id)
+                        .nth(self.rand_range(healthy_ids.len() - 1)).copied().unwrap();
+                    let other = veldt.functions[name].iter().find(|e| e.id == other_id).cloned().unwrap();
+                    let body = self.crossover_bodies(&entry.body, &other.body);
+                    (body, vec![entry.id, other_id],
+                     format!("crossover {}#{} x {}#{}", name, entry.id, name, other_id))
+                } else {
+                    let mutation = self.pick_mutation();
+                    let body = self.mutate_body(&entry.body, mutation);
+                    (body, vec![entry.id],
+                     format!("{} of {}#{}", mutation_name(mutation), name, entry.id))
+                };
+
+                // Semantic dedup: reject children identical to an existing variant
+                if let Some(variants) = veldt.functions.get(name) {
+                    let child_key = format!("{:?}", child_body);
+                    if variants.iter().any(|e| format!("{:?}", e.body) == child_key) {
+                        events.push(EvolutionEvent::CloneRejected { name: name.clone() });
+                        spent += 1;
+                        continue;
+                    }
+                }
+
+                let source = format!("fn {}(...) {{ [{}] }}", name, origin);
+                let new_id = veldt.grow_function_full(name, entry.params.clone(), child_body,
+                    entry.tests.clone(), &source, parents.clone(), &origin);
                 spent += 1;
                 mutations += 1;
 
@@ -91,15 +161,14 @@ impl Evolver {
                     name: name.clone(),
                     parent_id: entry.id,
                     new_id,
-                    desc: mutation_desc,
+                    desc: origin.clone(),
                 });
 
-                // Health check at birth
+                // Health check at birth (runs inline tests + probes)
                 let mut new_entry = veldt.functions[name].iter()
                     .find(|e| e.id == new_id).cloned().unwrap();
                 HealthChecker::check_at_birth(&mut new_entry, veldt);
 
-                // Put it back
                 if let Some(variants) = veldt.functions.get_mut(name) {
                     for e in variants.iter_mut() {
                         if e.id == new_id { *e = new_entry.clone(); break; }
@@ -119,11 +188,10 @@ impl Evolver {
                     births += 1;
                 }
 
-                // Stop if we've made enough mutants this cycle
                 if mutations >= 5 { break; }
             }
 
-            // Age and reap — competition happens here
+            // Age and reap — competition happens here (with niche protection)
             let obituaries = veldt.age_and_reap();
             for obit in &obituaries {
                 events.push(EvolutionEvent::Death {
@@ -142,6 +210,131 @@ impl Evolver {
         }
 
         events
+    }
+
+    /// Generate typed random inputs for a family and record the fittest
+    /// variant's answers as consensus ground truth.
+    fn generate_probes(&mut self, veldt: &Veldt, name: &str, count: usize) -> Option<Vec<crate::veldt::Probe>> {
+        let fittest = veldt.get_fittest_variant(name)?.clone();
+        if !matches!(fittest.health, Health::Healthy) { return None; }
+
+        // Build an interpreter with the veldt snapshot
+        let mut interp = crate::interpreter::Interpreter::with_step_limit(10000);
+        veldt.load_into_interpreter(&mut interp);
+
+        let mut probes = Vec::new();
+        for _ in 0..count {
+            // generate typed args
+            let mut args = Vec::new();
+            let mut ok = true;
+            for p in &fittest.params {
+                match self.gen_value(&p.typ) {
+                    Some(v) => args.push(v),
+                    None => { ok = false; break; }
+                }
+            }
+            if !ok { continue; }
+            // run fittest variant -> consensus answer
+            match interp.call_function(name, Some(fittest.id), args.clone()) {
+                Ok(expected) => {
+                    let arg_strs: Vec<String> = args.iter()
+                        .map(|v| serde_json::to_string(v).unwrap_or_default()).collect();
+                    probes.push(crate::veldt::Probe {
+                        args: arg_strs,
+                        expected: serde_json::to_string(&expected).unwrap_or_default(),
+                        niche: Self::niche_signature(&args),
+                        born: now_ts(),
+                    });
+                }
+                Err(_) => {} // fittest can't answer this input either — skip
+            }
+        }
+        Some(probes)
+    }
+
+    /// Coarse input signature — defines niches. Variants that specialise on
+    /// particular input shapes can survive as niche champions.
+    fn niche_signature(args: &[crate::interpreter::Value]) -> String {
+        use crate::interpreter::Value;
+        args.iter().map(|v| match v {
+            Value::Int(n) => {
+                if *n < 0 { "int:neg".to_string() }
+                else if *n == 0 { "int:zero".to_string() }
+                else if *n < 10 { "int:small".to_string() }
+                else { "int:big".to_string() }
+            }
+            Value::Float(f) => {
+                if f.abs() < 1.0 { "float:tiny".to_string() } else { "float:big".to_string() }
+            }
+            Value::Str(s) => {
+                if s.is_empty() { "str:empty".to_string() }
+                else if s.len() < 4 { "str:short".to_string() }
+                else { "str:long".to_string() }
+            }
+            Value::Bool(b) => format!("bool:{}", b),
+            Value::List(l) => {
+                if l.is_empty() { "list:empty".to_string() }
+                else if l.len() <= 3 { "list:small".to_string() }
+                else { "list:big".to_string() }
+            }
+            Value::Dict(d) => format!("dict:{}", if d.len() <= 3 { "small" } else { "big" }),
+            Value::Set(s) => format!("set:{}", if s.len() <= 3 { "small" } else { "big" }),
+            Value::Struct(n, _) => format!("struct:{}", n),
+            _ => "other".to_string(),
+        }).collect::<Vec<_>>().join("|")
+    }
+
+    /// Typed random value generation for probes.
+    fn gen_value(&mut self, typ: &Type) -> Option<crate::interpreter::Value> {
+        use crate::interpreter::Value;
+        match typ {
+            Type::Int => {
+                let choices = [-3i64, -1, 0, 1, 2, 3, 5, 8, 13, 42, 100];
+                Some(Value::Int(choices[self.rand_range(choices.len())]))
+            }
+            Type::Float => {
+                let f = (self.rand() % 2000) as f64 / 100.0 - 10.0;
+                Some(Value::Float(f))
+            }
+            Type::Str => {
+                let words = ["", "a", "hi", "veldt", "hello world", "x"];
+                Some(Value::Str(words[self.rand_range(words.len())].into()))
+            }
+            Type::Bool => Some(Value::Bool(self.rand_bool())),
+            Type::List(inner) => {
+                let n = self.rand_range(6);
+                let mut items = Vec::new();
+                for _ in 0..n {
+                    items.push(self.gen_value(inner)?);
+                }
+                Some(Value::List(items))
+            }
+            Type::Any => {
+                // pick a random concrete type
+                let t = match self.rand_range(4) {
+                    0 => Type::Int,
+                    1 => Type::Str,
+                    2 => Type::Bool,
+                    _ => Type::Int,
+                };
+                self.gen_value(&t)
+            }
+            _ => None, // Fn, Struct — can't generate
+        }
+    }
+
+    /// Crossover: splice prefix of A with suffix of B at statement level.
+    fn crossover_bodies(&mut self, a: &[Stmt], b: &[Stmt]) -> Vec<Stmt> {
+        if a.is_empty() { return b.to_vec(); }
+        if b.is_empty() { return a.to_vec(); }
+        let i = self.rand_range(a.len() + 1);
+        let j = self.rand_range(b.len() + 1);
+        let mut child: Vec<Stmt> = a[..i].to_vec();
+        child.extend_from_slice(&b[j..]);
+        if child.is_empty() {
+            child = a.to_vec();
+        }
+        child
     }
 
     fn pick_mutation(&mut self) -> Mutation {
@@ -333,10 +526,16 @@ impl Evolver {
     }
 }
 
+fn now_ts() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()
+}
+
 #[derive(Debug, Clone)]
 pub enum EvolutionEvent {
     CycleStart(usize),
     NoCandidates,
+    ProbeGenerated { name: String, niche: String },
+    CloneRejected { name: String },
     Mutate { name: String, parent_id: u32, new_id: u32, desc: String },
     Trial { name: String, id: u32, healthy: bool, score: f64, fitness: f64 },
     Death { name: String, id: u32, cause: String },
@@ -348,6 +547,12 @@ impl EvolutionEvent {
         match self {
             Self::CycleStart(n) => format!("[EVOLVE] Cycle {}/", n),
             Self::NoCandidates => "  [SKIP] No healthy functions with tests to evolve".into(),
+            Self::ProbeGenerated { name, niche } => {
+                format!("  [PROBE]  {} — new test generated in niche {}", name, niche)
+            }
+            Self::CloneRejected { name } => {
+                format!("  [REJECT] {} — child identical to existing variant, not born", name)
+            }
             Self::Mutate { name, parent_id, new_id, desc } => {
                 format!("  [MUTATE] {}#{} → {}#{} ({})", name, parent_id, name, new_id, desc)
             }
@@ -377,6 +582,15 @@ enum Mutation {
     DeadCodeRemoval,
 }
 
+fn mutation_name(m: Mutation) -> &'static str {
+    match m {
+        Mutation::Constant => "constant mutation",
+        Mutation::Operator => "operator mutation",
+        Mutation::StatementSwap => "statement swap",
+        Mutation::DeadCodeRemoval => "dead code removal",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -401,7 +615,7 @@ mod tests {
             Box::new(Expr::Var("b".into())),
         )))], vec![TestAssert {
             call: Expr::Call("add".into(), None, vec![Expr::Int(2), Expr::Int(3)]),
-            expected: Expr::Int(5),
+            expected: Some(Expr::Int(5)),
         }], "fn add(a, b) { return a + b }");
 
         // Health check

@@ -688,9 +688,12 @@ impl Parser {
                         let expr = self.parse_expr()?;
                         match expr {
                             Expr::BinOp(call, BinOp::Eq, expected) => {
-                                tests.push(TestAssert { call: *call, expected: *expected });
+                                tests.push(TestAssert { call: *call, expected: Some(*expected) });
                             }
-                            _ => return Err("Test assertion must be of form: expr == expr".into()),
+                            other => {
+                                // bare predicate: must evaluate truthy
+                                tests.push(TestAssert { call: other, expected: None });
+                            }
                         }
                         if !self.match_tok(&Token::Comma) {
                             break;

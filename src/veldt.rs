@@ -31,6 +31,25 @@ pub struct FunctionEntry {
     pub fitness: f64,
     pub trial_score: f64,
     pub healing_attempts: Vec<String>,
+    // provenance: which variants this one descends from, and how it was born
+    #[serde(default)]
+    pub parents: Vec<u32>,
+    #[serde(default)]
+    pub origin: String,  // "seed" | "mutation(op) of f#2" | "crossover f#2 x f#4" | "healing"
+    // per-niche probe scores: niche -> fraction of probes passed
+    #[serde(default)]
+    pub niche_scores: HashMap<String, f64>,
+}
+
+/// A probe: an ecosystem-generated test. args produced by typed generation;
+/// expected = the answer of the family's fittest variant at generation time
+/// (consensus ground truth). Probes accumulate — selection pressure grows.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Probe {
+    pub args: Vec<String>,    // serialized Values
+    pub expected: String,     // serialized Value
+    pub niche: String,        // input signature, e.g. "int:neg|list:len4+"
+    pub born: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -66,6 +85,8 @@ pub struct Veldt {
     pub variables: HashMap<String, VariableEntry>,
     pub structs: HashMap<String, StructEntry>,
     pub obituaries: Vec<Obituary>,
+    // ecosystem-generated tests, per function family
+    pub probes: HashMap<String, Vec<Probe>>,
     pub run_count: u64,
     pub garden_path: PathBuf,
 }
@@ -83,6 +104,7 @@ impl Veldt {
             variables: HashMap::new(),
             structs: HashMap::new(),
             obituaries: Vec::new(),
+            probes: HashMap::new(),
             run_count: 0,
             garden_path,
         }
@@ -94,6 +116,7 @@ impl Veldt {
             variables: HashMap::new(),
             structs: HashMap::new(),
             obituaries: Vec::new(),
+            probes: HashMap::new(),
             run_count: 0,
             garden_path: path,
         }
@@ -114,6 +137,7 @@ impl Veldt {
         self.variables = saved.variables;
         self.structs = saved.structs;
         self.obituaries = saved.obituaries;
+        self.probes = saved.probes;
         self.run_count = saved.run_count;
         Ok(())
     }
@@ -126,6 +150,7 @@ impl Veldt {
             variables: self.variables.clone(),
             structs: self.structs.clone(),
             obituaries: self.obituaries.clone(),
+            probes: self.probes.clone(),
             run_count: self.run_count,
         };
         let data = serde_json::to_string_pretty(&saved)
@@ -141,6 +166,7 @@ impl Veldt {
         self.variables.clear();
         self.structs.clear();
         self.obituaries.clear();
+        self.probes.clear();
         self.run_count = 0;
     }
 
@@ -153,6 +179,7 @@ impl Veldt {
                 if matches!(entry.health, Health::Healthy | Health::Sick(_)) {
                     let variant = FunctionVariant {
                         id: entry.id,
+                        fitness: entry.fitness,
                         def: FunctionDef {
                             params: entry.params.clone(),
                             body: entry.body.clone(),
@@ -179,6 +206,10 @@ impl Veldt {
     // === Growing code ===
 
     pub fn grow_function(&mut self, name: &str, params: Vec<Param>, body: Vec<Stmt>, tests: Vec<TestAssert>, source: &str) -> u32 {
+        self.grow_function_full(name, params, body, tests, source, Vec::new(), "seed")
+    }
+
+    pub fn grow_function_full(&mut self, name: &str, params: Vec<Param>, body: Vec<Stmt>, tests: Vec<TestAssert>, source: &str, parents: Vec<u32>, origin: &str) -> u32 {
         let id = self.functions.get(name)
             .map(|v| v.iter().map(|e| e.id).max().unwrap_or(0) + 1)
             .unwrap_or(1);
@@ -199,6 +230,9 @@ impl Veldt {
             fitness: 0.0,
             trial_score: 0.0,
             healing_attempts: Vec::new(),
+            parents,
+            origin: origin.to_string(),
+            niche_scores: HashMap::new(),
         };
 
         self.functions.entry(name.to_string())
@@ -317,6 +351,34 @@ impl Veldt {
             }
         }
 
+        // Niche champions: for each family, for each niche present in the probe
+        // pool, find the variant with strictly-best niche score. Specialists
+        // (champions of >=1 niche) get protected from competition.
+        let mut niche_champions: HashMap<(String, u32), Vec<String>> = HashMap::new();
+        for (name, probes) in &self.probes {
+            let niches: std::collections::HashSet<&String> =
+                probes.iter().map(|p| &p.niche).collect();
+            for niche in niches {
+                let mut best_id = None;
+                let mut best_score = f64::MIN;
+                if let Some(variants) = self.functions.get(name) {
+                    for e in variants {
+                        if !matches!(e.health, Health::Healthy) { continue; }
+                        let s = e.niche_scores.get(niche).copied().unwrap_or(0.0);
+                        if s > best_score {
+                            best_score = s;
+                            best_id = Some(e.id);
+                        }
+                    }
+                }
+                if let (Some(id), true) = (best_id, best_score > 0.0) {
+                    niche_champions.entry((name.clone(), id))
+                        .or_insert_with(Vec::new)
+                        .push(niche.clone());
+                }
+            }
+        }
+
         // Second pass: age and check death (mutable borrow)
         let mut new_obituaries = Vec::new();
         let mut to_remove: Vec<(String, u32)> = Vec::new();
@@ -346,7 +408,7 @@ impl Veldt {
                     let runs_since = (run_count.saturating_sub(entry.last_used)) as f64;
                     runs_since * 2.0
                 };
-                let competition_penalty = if let Some(fittest_id) = fittest_map.get(name) {
+                let mut competition_penalty = if let Some(fittest_id) = fittest_map.get(name) {
                     if *fittest_id != entry.id {
                         let fittest_fitness = *fitness_map.get(&(name.clone(), *fittest_id)).unwrap_or(&0.0);
                         let my_fitness = entry.fitness;
@@ -357,6 +419,10 @@ impl Veldt {
                 } else {
                     0.0
                 };
+                // niche protection: specialists face reduced competition
+                if niche_champions.contains_key(&(name.clone(), entry.id)) {
+                    competition_penalty *= 0.2;
+                }
                 entry.lifespan = (base + usage_bonus - dormancy_penalty - competition_penalty).max(0.0);
 
                 // check death
@@ -504,8 +570,8 @@ impl Veldt {
                     let fittest = self.get_fittest_variant(name);
                     let is_fittest = fittest.map(|f| f.id == entry.id).unwrap_or(false);
                     let marker = if is_fittest { " *" } else { "" };
-                    println!("  {}#{}{} — {} | age: {} | usage: {} | fitness: {:.2}",
-                        name, entry.id, marker, health_str, entry.age, entry.usage_count, entry.fitness);
+                    println!("  {}#{}{} — {} | age: {} | usage: {} | fitness: {:.2} | born: {}",
+                        name, entry.id, marker, health_str, entry.age, entry.usage_count, entry.fitness, entry.origin);
                 }
             }
             None => println!("Lineage '{}' not found in veldt", name),
@@ -543,6 +609,8 @@ struct SavedVeldt {
     variables: HashMap<String, VariableEntry>,
     structs: HashMap<String, StructEntry>,
     obituaries: Vec<Obituary>,
+    #[serde(default)]
+    probes: HashMap<String, Vec<Probe>>,
     run_count: u64,
 }
 
@@ -609,6 +677,7 @@ mod tests {
             born: 0, age: 0, health: Health::Healthy,
             lifespan: 100.0, usage_count: 10, last_used: 5,
             fitness: 0.0, trial_score: 0.5, healing_attempts: vec![],
+            parents: vec![], origin: "seed".into(), niche_scores: HashMap::new(),
         };
         let fitness = veldt.calculate_fitness(&entry);
         assert!(fitness > 0.5); // trial_score + usage

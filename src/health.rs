@@ -16,7 +16,9 @@ impl HealthChecker {
         let variables_snapshot = veldt.variables.clone();
         let structs_snapshot = veldt.structs.clone();
 
-        let trial_result = Self::run_trial(entry, &functions_snapshot, &variables_snapshot, &structs_snapshot);
+        let probes_snapshot = veldt.probes.get(&entry.name).cloned().unwrap_or_default();
+
+        let trial_result = Self::run_trial(entry, &functions_snapshot, &variables_snapshot, &structs_snapshot, &probes_snapshot);
 
         match trial_result {
             TrialResult::Pass(score, steps) => {
@@ -36,18 +38,76 @@ impl HealthChecker {
         }
     }
 
-    fn run_trial(entry: &FunctionEntry,
+    fn run_trial(entry: &mut FunctionEntry,
                  functions: &std::collections::HashMap<String, Vec<FunctionEntry>>,
                  variables: &std::collections::HashMap<String, crate::veldt::VariableEntry>,
                  structs: &std::collections::HashMap<String, crate::veldt::StructEntry>,
+                 probes: &[crate::veldt::Probe],
     ) -> TrialResult {
         let start = Instant::now();
 
-        if !entry.tests.is_empty() {
-            return Self::run_inline_tests(entry, functions, variables, structs, start);
+        // Phase 1: author-written inline tests — must all pass
+        let base = if !entry.tests.is_empty() {
+            Self::run_inline_tests(entry, functions, variables, structs, start)
+        } else {
+            Self::run_safe_defaults(entry, functions, variables, structs, start)
+        };
+
+        let (mut score, steps) = match base {
+            TrialResult::Fail(e) => return TrialResult::Fail(e),
+            TrialResult::Pass(s, st) => (s, st),
+        };
+
+        // Phase 2: ecosystem probes — not lethal, but scored per-niche.
+        // A variant that fails in some niche loses fitness there; specialists
+        // can still survive by dominating their niche.
+        if !probes.is_empty() {
+            let niche_scores = Self::run_probes(entry, functions, variables, structs, probes);
+            let n_niches = niche_scores.len().max(1) as f64;
+            let overall = niche_scores.values().sum::<f64>() / n_niches;
+            entry.niche_scores = niche_scores;
+            score += overall * 0.3; // up to +0.3 for full probe coverage
         }
 
-        Self::run_safe_defaults(entry, functions, variables, structs, start)
+        TrialResult::Pass(score, steps)
+    }
+
+    /// Run all probes for the family; returns niche -> fraction passed.
+    fn run_probes(entry: &FunctionEntry,
+                  functions: &std::collections::HashMap<String, Vec<FunctionEntry>>,
+                  variables: &std::collections::HashMap<String, crate::veldt::VariableEntry>,
+                  structs: &std::collections::HashMap<String, crate::veldt::StructEntry>,
+                  probes: &[crate::veldt::Probe]) -> std::collections::HashMap<String, f64> {
+        let mut interp = Interpreter::with_step_limit(10000);
+        Self::load_snapshot_into_interp(functions, variables, structs, &mut interp);
+        let variant = crate::interpreter::FunctionVariant {
+            id: entry.id,
+            fitness: entry.fitness,
+            def: crate::interpreter::FunctionDef {
+                params: entry.params.clone(),
+                body: entry.body.clone(),
+            },
+        };
+        interp.functions.entry(entry.name.clone())
+            .or_insert_with(Vec::new)
+            .push(variant);
+
+        let mut per_niche: std::collections::HashMap<String, (u32, u32)> = std::collections::HashMap::new();
+        for probe in probes {
+            let args: Vec<Value> = probe.args.iter()
+                .filter_map(|s| serde_json::from_str(s).ok())
+                .collect();
+            if args.len() != entry.params.len() { continue; }
+            let expected: Result<Value, _> = serde_json::from_str(&probe.expected);
+            let expected = match expected { Ok(v) => v, Err(_) => continue };
+            let e = per_niche.entry(probe.niche.clone()).or_insert((0, 0));
+            e.1 += 1;
+            match interp.call_function(&entry.name, Some(entry.id), args) {
+                Ok(v) if Self::values_equal(&v, &expected) => { e.0 += 1; }
+                _ => {}
+            }
+        }
+        per_niche.into_iter().map(|(k, (p, t))| (k, p as f64 / t as f64)).collect()
     }
 
     fn load_snapshot_into_interp(
@@ -61,6 +121,7 @@ impl HealthChecker {
                 if matches!(entry.health, Health::Healthy | Health::Sick(_)) {
                     let variant = crate::interpreter::FunctionVariant {
                         id: entry.id,
+                        fitness: entry.fitness,
                         def: crate::interpreter::FunctionDef {
                             params: entry.params.clone(),
                             body: entry.body.clone(),
@@ -93,6 +154,7 @@ impl HealthChecker {
         // Load the function being tested
         let variant = crate::interpreter::FunctionVariant {
             id: entry.id,
+            fitness: entry.fitness,
             def: crate::interpreter::FunctionDef {
                 params: entry.params.clone(),
                 body: entry.body.clone(),
@@ -107,15 +169,27 @@ impl HealthChecker {
 
         for test in &entry.tests {
             total += 1;
-            match (interp.eval_expr_in_scope(&test.call),
-                   interp.eval_expr_in_scope(&test.expected)) {
-                (Ok(call_val), Ok(expected_val)) => {
-                    if Self::values_equal(&call_val, &expected_val) {
-                        passed += 1;
+            match &test.expected {
+                Some(expected) => {
+                    match (interp.eval_expr_in_scope(&test.call),
+                           interp.eval_expr_in_scope(expected)) {
+                        (Ok(call_val), Ok(expected_val)) => {
+                            if Self::values_equal(&call_val, &expected_val) {
+                                passed += 1;
+                            }
+                        }
+                        (Err(e), _) => return TrialResult::Fail(format!("Test call failed: {}", e)),
+                        (_, Err(e)) => return TrialResult::Fail(format!("Test expected value failed: {}", e)),
                     }
                 }
-                (Err(e), _) => return TrialResult::Fail(format!("Test call failed: {}", e)),
-                (_, Err(e)) => return TrialResult::Fail(format!("Test expected value failed: {}", e)),
+                None => {
+                    match interp.eval_expr_in_scope(&test.call) {
+                        Ok(v) => {
+                            if Self::is_truthy_pub(&v) { passed += 1; }
+                        }
+                        Err(e) => return TrialResult::Fail(format!("Test predicate failed: {}", e)),
+                    }
+                }
             }
         }
 
@@ -145,6 +219,7 @@ impl HealthChecker {
 
         let variant = crate::interpreter::FunctionVariant {
             id: entry.id,
+            fitness: entry.fitness,
             def: crate::interpreter::FunctionDef {
                 params: entry.params.clone(),
                 body: entry.body.clone(),
@@ -197,6 +272,21 @@ impl HealthChecker {
             Type::Fn => Value::Null,
             Type::Struct(_) => Value::Null,
             Type::Any => Value::Null,
+        }
+    }
+
+    pub fn is_truthy_pub(v: &Value) -> bool {
+        match v {
+            Value::Bool(b) => *b,
+            Value::Int(n) => *n != 0,
+            Value::Float(n) => *n != 0.0,
+            Value::Str(s) => !s.is_empty(),
+            Value::Null => false,
+            Value::List(l) => !l.is_empty(),
+            Value::Dict(d) => !d.is_empty(),
+            Value::Set(s) => !s.is_empty(),
+            Value::Struct(_, f) => !f.is_empty(),
+            Value::Closure(_, _, _) => true,
         }
     }
 
@@ -395,7 +485,7 @@ mod tests {
             Box::new(Expr::Int(2)),
         )))], vec![TestAssert {
             call: Expr::Call("double".into(), None, vec![Expr::Int(3)]),
-            expected: Expr::Int(6),
+            expected: Some(Expr::Int(6)),
         }], "fn double(x: int) { return x * 2 }");
 
         check_entry(&mut veldt, "double");
@@ -414,7 +504,7 @@ mod tests {
             Box::new(Expr::Int(1)),
         )))], vec![TestAssert {
             call: Expr::Call("bad_double".into(), None, vec![Expr::Int(3)]),
-            expected: Expr::Int(6),
+            expected: Some(Expr::Int(6)),
         }], "fn bad_double(x: int) { return x + 1 }");
 
         check_entry(&mut veldt, "bad_double");

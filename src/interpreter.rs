@@ -82,6 +82,7 @@ pub struct Interpreter {
 pub struct FunctionVariant {
     pub id: u32,
     pub def: FunctionDef,
+    pub fitness: f64,
 }
 
 pub enum FlowControl {
@@ -216,6 +217,7 @@ impl Interpreter {
                     .unwrap_or(1);
                 let variant = FunctionVariant {
                     id,
+                    fitness: 1.0,
                     def: FunctionDef {
                         params: params.clone(),
                         body: body.clone(),
@@ -297,7 +299,7 @@ impl Interpreter {
                         params: params.clone(),
                         body: body.clone(),
                     };
-                    let variant = FunctionVariant { id: 1, def };
+                    let variant = FunctionVariant { id: 1, fitness: 1.0, def };
                     self.functions.entry(name.clone()).or_default().push(variant);
                 }
                 Ok(FlowControl::Normal)
@@ -651,9 +653,10 @@ impl Interpreter {
                 Some(id) => variants.iter().find(|v| v.id == id)
                     .ok_or_else(|| format!("Variant {}#{} not found", name, id))?,
                 None => {
-                    // dispatch to fittest — for now, just use the last one
-                    // TODO: replace with fitness-based dispatch when veldt system is built
-                    variants.last().unwrap()
+                    // dispatch to the fittest loaded variant
+                    variants.iter()
+                        .max_by(|a, b| a.fitness.partial_cmp(&b.fitness).unwrap_or(std::cmp::Ordering::Equal))
+                        .unwrap()
                 }
             };
             (chosen.id, chosen.def.params.clone(), chosen.def.body.clone())
@@ -1062,6 +1065,24 @@ impl Interpreter {
                     }
                 }
                 Ok(Some(Value::Set(items)))
+            }
+            "call_best" => {
+                // call_best("name", arg1, arg2, ...) — dispatch to the
+                // currently-fittest variant of the named function
+                if args.is_empty() { return Err("call_best() expects a function name".into()); }
+                match &args[0] {
+                    Value::Str(fname) => {
+                        let fname = fname.clone();
+                        let fargs = args[1..].to_vec();
+                        let best_id = self.functions.get(&fname)
+                            .and_then(|vs| vs.iter()
+                                .max_by(|a, b| a.fitness.partial_cmp(&b.fitness).unwrap_or(std::cmp::Ordering::Equal))
+                                .map(|v| v.id))
+                            .ok_or_else(|| format!("call_best: no variants of '{}'", fname))?;
+                        return self.call_function(&fname, Some(best_id), fargs).map(Some);
+                    }
+                    _ => Err("call_best() expects a function name string".into()),
+                }
             }
             "serve" => {
                 if args.len() != 2 { return Err("serve() expects (port, handler_fn)".into()); }
