@@ -1,15 +1,10 @@
 // Veldt Studio IDE — web server
 
-use crate::ast::GrowItem;
-use crate::evolve::{EvolutionEvent, Evolver};
-use crate::health::HealthChecker;
-use crate::interpreter::Interpreter;
-use crate::lexer::Lexer;
-use crate::parser::Parser;
+use crate::agent;
+use crate::evolve::Evolver;
 use crate::veldt::{Health, Veldt};
 use axum::{
     extract::State,
-    http::StatusCode,
     response::{Html, Json},
     routing::{get, post},
     Router,
@@ -40,6 +35,7 @@ pub async fn start_server(port: u16) {
         .route("/api/prune", post(prune_variant))
         .route("/api/save", post(save_file))
         .route("/api/files", get(list_files))
+        .route("/api/agent", post(agent_task))
         .with_state(state);
 
     let addr = format!("127.0.0.1:{}", port);
@@ -72,123 +68,75 @@ async fn run_program(
     State(state): State<Arc<AppState>>,
     Json(req): Json<RunRequest>,
 ) -> Json<RunResponse> {
-    let mut output = String::new();
-    let mut events = Vec::new();
-    let mut success = true;
-
-    // Lex
-    let mut lexer = Lexer::new(&req.source);
-    let tokens = match lexer.tokenize() {
-        Ok(t) => t,
-        Err(e) => {
-            return Json(RunResponse {
-                output: String::new(),
-                events: vec![format!("Lex error: {}", e)],
-                success: false,
-            });
-        }
-    };
-
-    // Parse
-    let lines = lexer.token_lines.clone();
-    let mut parser = Parser::new_with_lines(tokens, lines);
-    let stmts = match parser.parse_program() {
-        Ok(s) => s,
-        Err(e) => {
-            return Json(RunResponse {
-                output: String::new(),
-                events: vec![format!("Parse error: {}", e)],
-                success: false,
-            });
-        }
-    };
-    let parser_lines = parser.statement_lines();
-
-    // Load veldt
     let mut veldt = {
         let v = state.veldt.lock().unwrap();
         v.clone()
     };
 
-    let mut interp = Interpreter::new();
-    veldt.load_into_interpreter(&mut interp);
+    let result = agent::execute_source(&req.source, &mut veldt);
 
-    // Run with output capture
-    let run_result = run_with_capture(&mut interp, &stmts, &parser_lines, &mut output);
-
-    if let Err(e) = run_result {
-        let line = interp.current_line;
-        if line > 0 {
-            output.push_str(&format!("Runtime error (line {}): {}\n", line, e));
-        } else {
-            output.push_str(&format!("Runtime error: {}\n", e));
-        }
-        success = false;
-    }
-
-    // Record usage
-    veldt.record_usage(&interp.usage_log);
-
-    // Process grows
-    let grows = interp.collect_grows(&stmts);
-    for item in &grows {
-        match item {
-            GrowItem::Fn(name, params, body, tests) => {
-                let source = format!("fn {}(...) {{ ... }}", name);
-                let id = veldt.grow_function(name, params.clone(), body.clone(), tests.clone(), &source);
-                let mut entry = veldt.functions[name].iter()
-                    .find(|e| e.id == id).cloned().unwrap();
-                HealthChecker::check_at_birth(&mut entry, &veldt);
-                if let Some(variants) = veldt.functions.get_mut(name) {
-                    for e in variants.iter_mut() {
-                        if e.id == id { *e = entry.clone(); break; }
-                    }
-                }
-                let health_str = match &entry.health {
-                    Health::Healthy => "healthy".into(),
-                    Health::Sick(e) => format!("sick: {}", e),
-                    Health::Dying => "dying".into(),
-                };
-                events.push(format!("[BIRTH] {}#{} — {} (trial: {:.2})", name, id, health_str, entry.trial_score));
-            }
-            GrowItem::Let(name, expr) => {
-                if let Ok(val) = interp.eval_expr_in_scope(expr) {
-                    veldt.grow_variable(name, &val);
-                    events.push(format!("[GROW] ${} planted", name));
-                }
-            }
-            GrowItem::Struct(name, fields) => {
-                veldt.grow_struct(name, fields.clone());
-                events.push(format!("[GROW] struct {} planted", name));
-            }
-        }
-    }
-
-    // Age and reap
-    let obituaries = veldt.age_and_reap();
-    for obit in &obituaries {
-        events.push(format!("[OBITUARY] {}#{} — {} (age {})", obit.name, obit.id, obit.cause_of_death, obit.age));
-    }
-
-    // Save veldt
     veldt.save().unwrap_or_else(|e| eprintln!("Save error: {}", e));
 
-    // Update shared state
     {
         let mut v = state.veldt.lock().unwrap();
         *v = veldt;
     }
 
-    Json(RunResponse { output, events, success })
+    Json(RunResponse {
+        output: result.output,
+        events: result.events,
+        success: result.success,
+    })
 }
 
-fn run_with_capture(interp: &mut Interpreter, stmts: &[crate::ast::Stmt], lines: &[usize], output: &mut String) -> Result<(), String> {
-    interp.print_buffer = Some(String::new());
-    let result = interp.run_with_lines(stmts, lines);
-    if let Some(buf) = interp.print_buffer.take() {
-        output.push_str(&buf);
+#[derive(Deserialize)]
+struct AgentRequest {
+    task: String,
+    #[serde(default)]
+    source: String,
+}
+
+#[derive(Serialize)]
+struct AgentApiResponse {
+    steps: Vec<agent::AgentStep>,
+    reply: String,
+    code: Option<String>,
+    ran: bool,
+    output: Option<String>,
+    success: Option<bool>,
+    events: Vec<String>,
+    garden: serde_json::Value,
+}
+
+async fn agent_task(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<AgentRequest>,
+) -> Json<AgentApiResponse> {
+    let mut veldt = {
+        let v = state.veldt.lock().unwrap();
+        v.clone()
+    };
+
+    let resp = agent::respond(&req.task, &req.source, &mut veldt);
+
+    veldt.save().unwrap_or_else(|e| eprintln!("Save error: {}", e));
+    let garden = garden_json(&veldt);
+
+    {
+        let mut v = state.veldt.lock().unwrap();
+        *v = veldt;
     }
-    result
+
+    Json(AgentApiResponse {
+        steps: resp.steps,
+        reply: resp.reply,
+        code: resp.code,
+        ran: resp.ran,
+        output: resp.output,
+        success: resp.success,
+        events: resp.events,
+        garden,
+    })
 }
 
 #[derive(Deserialize)]

@@ -202,6 +202,112 @@
     font-style: italic;
   }
 
+  /* Panel tabs (Inspector / Gardener) */
+  .panel-tabs { display: flex; gap: 14px; font-style: normal; }
+  .panel-tabs .tab {
+    cursor: pointer;
+    color: var(--text-dim);
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 16px;
+    font-style: italic;
+    transition: color 0.2s;
+  }
+  .panel-tabs .tab:hover { color: var(--text); }
+  .panel-tabs .tab.active { color: var(--bloom); }
+  .inspector-panel.wide { width: 380px; }
+
+  /* Agent panel */
+  .agent-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .agent-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px 14px;
+    font-size: 12px;
+  }
+  .agent-empty {
+    color: var(--text-dim);
+    font-style: italic;
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 15px;
+    text-align: center;
+    padding: 30px 16px;
+    line-height: 1.6;
+  }
+  .agent-msg { margin-bottom: 14px; }
+  .agent-msg .who {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 4px;
+  }
+  .agent-msg.user .who { color: var(--amber); text-align: right; }
+  .agent-msg.user .bubble {
+    color: var(--amber);
+    text-align: right;
+    font-style: italic;
+  }
+  .agent-msg.gardener .who { color: var(--moss-bright); }
+  .agent-msg .bubble { white-space: pre-wrap; line-height: 1.5; }
+  .agent-steps {
+    border-left: 2px solid var(--border);
+    padding-left: 8px;
+    margin: 6px 0;
+  }
+  .agent-step { font-size: 11px; color: var(--text-dim); padding: 1px 0; white-space: pre-wrap; }
+  .agent-step.plan { color: var(--amber); font-style: italic; }
+  .agent-step.act { color: var(--fog); }
+  .agent-step.obs { color: var(--text-dim); }
+  .agent-step.ok { color: var(--moss-bright); }
+  .agent-step.err { color: var(--rust); }
+  .agent-block {
+    background: var(--bg-editor);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    margin-top: 6px;
+    overflow: hidden;
+  }
+  .agent-block pre {
+    padding: 8px 10px;
+    font-size: 11px;
+    line-height: 1.5;
+    overflow: auto;
+    max-height: 220px;
+    white-space: pre;
+    color: var(--text);
+  }
+  .agent-block .block-actions {
+    display: flex;
+    gap: 6px;
+    padding: 5px 8px;
+    border-top: 1px solid var(--border);
+  }
+  .agent-block .block-actions .btn { padding: 3px 10px; font-size: 10px; }
+  .agent-input-row {
+    display: flex;
+    gap: 6px;
+    padding: 10px;
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .agent-input {
+    flex: 1;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 7px 10px;
+    border-radius: 4px;
+    font-family: inherit;
+    font-size: 12px;
+    outline: none;
+  }
+  .agent-input:focus { border-color: var(--border-bright); }
+  .agent-thinking { color: var(--text-dim); font-style: italic; font-size: 11px; }
+
   /* Center: Editor + Output */
   .center-panel {
     flex: 1;
@@ -368,11 +474,28 @@
     </div>
   </div>
 
-  <!-- Inspector Panel -->
-  <div class="inspector-panel">
-    <div class="panel-header">Inspector</div>
+  <!-- Right Panel: Inspector / Gardener agent -->
+  <div class="inspector-panel" id="rightPanel">
+    <div class="panel-header panel-tabs">
+      <span class="tab active" id="tabInspector">Inspector</span>
+      <span class="tab" id="tabAgent">Gardener</span>
+    </div>
     <div class="inspector-content" id="inspector">
       <div class="inspector-empty">Select a function from the garden to inspect it.</div>
+    </div>
+    <div class="agent-panel" id="agentPanel" style="display:none">
+      <div class="agent-messages" id="agentMessages">
+        <div class="agent-empty">
+          The Gardener tends this veldt.<br><br>
+          "write a fibonacci function"<br>
+          "run this" · "evolve 5"<br>
+          "tend the garden" · "what's alive?"
+        </div>
+      </div>
+      <div class="agent-input-row">
+        <input class="agent-input" id="agentInput" placeholder="ask the gardener..." autocomplete="off">
+        <button class="btn primary" id="agentSend">Send</button>
+      </div>
     </div>
   </div>
 </div>
@@ -740,7 +863,142 @@ function selectVariant(name, id) {
   `;
 }
 
+// --- Gardener agent ---
+
+function switchTab(which) {
+  const panel = document.getElementById('rightPanel');
+  const inspector = document.getElementById('inspector');
+  const agent = document.getElementById('agentPanel');
+  document.getElementById('tabInspector').classList.toggle('active', which === 'inspector');
+  document.getElementById('tabAgent').classList.toggle('active', which === 'agent');
+  inspector.style.display = which === 'inspector' ? '' : 'none';
+  agent.style.display = which === 'agent' ? 'flex' : 'none';
+  panel.classList.toggle('wide', which === 'agent');
+}
+
+function agentScroll() {
+  const el = document.getElementById('agentMessages');
+  el.scrollTop = el.scrollHeight;
+}
+
+function appendUserMsg(text) {
+  const empty = document.querySelector('#agentMessages .agent-empty');
+  if (empty) empty.remove();
+  const div = document.createElement('div');
+  div.className = 'agent-msg user';
+  const who = document.createElement('div');
+  who.className = 'who';
+  who.textContent = 'you';
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
+  bubble.textContent = text;
+  div.appendChild(who);
+  div.appendChild(bubble);
+  document.getElementById('agentMessages').appendChild(div);
+  agentScroll();
+}
+
+function renderAgentResponse(data) {
+  const msgs = document.getElementById('agentMessages');
+  const div = document.createElement('div');
+  div.className = 'agent-msg gardener';
+
+  const who = document.createElement('div');
+  who.className = 'who';
+  who.textContent = 'the gardener';
+  div.appendChild(who);
+
+  if (data.steps && data.steps.length) {
+    const stepsEl = document.createElement('div');
+    stepsEl.className = 'agent-steps';
+    data.steps.forEach(s => {
+      const st = document.createElement('div');
+      st.className = 'agent-step ' + s.kind;
+      st.textContent = s.text;
+      stepsEl.appendChild(st);
+    });
+    div.appendChild(stepsEl);
+  }
+
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
+  bubble.textContent = data.reply || '';
+  div.appendChild(bubble);
+
+  if (data.code) {
+    const block = document.createElement('div');
+    block.className = 'agent-block';
+    const pre = document.createElement('pre');
+    pre.textContent = data.code;
+    block.appendChild(pre);
+    const actions = document.createElement('div');
+    actions.className = 'block-actions';
+    const insertBtn = document.createElement('button');
+    insertBtn.className = 'btn primary';
+    insertBtn.textContent = 'Insert into editor';
+    insertBtn.addEventListener('click', () => {
+      const cur = editor.getValue();
+      editor.setValue(cur ? cur.replace(/\s+$/, '') + '\n\n' + data.code : data.code);
+      editor.revealLine(editor.getModel().getLineCount());
+    });
+    actions.appendChild(insertBtn);
+    block.appendChild(actions);
+    div.appendChild(block);
+  }
+
+  if (data.output && data.output.trim()) {
+    const block = document.createElement('div');
+    block.className = 'agent-block';
+    const pre = document.createElement('pre');
+    pre.textContent = data.output;
+    block.appendChild(pre);
+    div.appendChild(block);
+  }
+
+  msgs.appendChild(div);
+  agentScroll();
+}
+
+async function sendAgentTask() {
+  const input = document.getElementById('agentInput');
+  const task = input.value.trim();
+  if (!task) return;
+  input.value = '';
+  appendUserMsg(task);
+
+  const msgs = document.getElementById('agentMessages');
+  const thinking = document.createElement('div');
+  thinking.className = 'agent-msg gardener agent-thinking';
+  thinking.innerHTML = '<span class="spinner"></span> the gardener is thinking...';
+  msgs.appendChild(thinking);
+  agentScroll();
+
+  try {
+    const res = await fetch(API + '/api/agent', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task, source: editor.getValue() })
+    });
+    const data = await res.json();
+    thinking.remove();
+    renderAgentResponse(data);
+    if (data.garden) {
+      gardenData = data.garden;
+      renderGarden();
+    }
+  } catch (e) {
+    thinking.remove();
+    renderAgentResponse({ reply: 'Something went wrong talking to the server: ' + e });
+  }
+}
+
 // --- Event handlers ---
+document.getElementById('tabInspector').addEventListener('click', () => switchTab('inspector'));
+document.getElementById('tabAgent').addEventListener('click', () => switchTab('agent'));
+document.getElementById('agentSend').addEventListener('click', sendAgentTask);
+document.getElementById('agentInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') sendAgentTask();
+});
 document.getElementById('runBtn').addEventListener('click', runProgram);
 document.getElementById('evolveBtn').addEventListener('click', evolve);
 document.getElementById('clearBtn').addEventListener('click', clearGarden);
