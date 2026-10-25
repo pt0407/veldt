@@ -75,15 +75,21 @@ Every one of these is hit within the first hour of writing real scripts.
 Target: within ~10-30x of Python on typical script workloads, not 500x.
 
 - [x] `veldt run --steps N` configurable limit — done (devin)
-- [ ] Per-instruction cost accounting (allocations weigh more) — crude but fair
-- [ ] Profile: `examples/csv_analysis` + a tight numeric loop are the benches
-- [ ] Likely wins, ordered by expected cost/benefit:
-      [ ] Value::Str/Clone reduction — avoid clone-heavy paths in hot loops
-            (eval_binop clones both operands today)
-      [ ] Interned/small-string optimization for Value::Str (Rc<str>)
-      [ ] Fast-path builtins for map/filter/reduce loops (skip per-call env
-            alloc where closure has no side effects on captured scope)
-      [ ] HashMap lookups: intern variable names? measure first
+- [x] Per-instruction cost accounting — eval_expr's BinOp arm charges
+      step_count += result.len()/16 (Str), len()/4 (List/Dict) — crude
+      but fair; big allocs cost more steps (devin)
+- [x] Profile: `veldt perf` (arith/fn-recursion/list-ops microbench) +
+      `bench/` dir scripts — done
+- [x] Likely wins, ordered by expected cost/benefit — done:
+      [x] Value::List -> im::Vector persistent vector: O(1) clone +
+            O(log n) push_back — 50k-push loop ~4min -> 0.5s (~500x) (devin)
+      [x] Value::Str -> Arc<str> interned: O(1) clone, Send+Sync for
+            spawn/pmap (devin)
+      [x] FunctionDef.body -> Rc<Vec<Stmt>>: per-call AST clone gone (devin)
+      [x] eval_method_call(&Value) by-ref dispatch (devin)
+      [x] map/filter/reduce builtins exist as methods — done already
+      [~] Var-name interning: HashMap<String,_> lookups remain — marginal
+            vs the clone wins; revisit if profiling shows it
       [ ] Statement dispatch: match on &Stmt is fine; avoid re-eval of
             subexpressions
 - [ ] NOT in scope: bytecode VM, JIT — months, revisit post-v1

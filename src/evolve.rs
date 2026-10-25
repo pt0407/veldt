@@ -379,7 +379,7 @@ impl Evolver {
                 for _ in 0..n {
                     items.push(self.gen_value_scaled(inner, 0)?);
                 }
-                Some(Value::List(items))
+                Some(Value::List(items.into_iter().collect()))
             }
             Type::Any => {
                 // pick a random concrete type

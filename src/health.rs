@@ -377,7 +377,7 @@ impl HealthChecker {
             Type::Float => Value::Float(0.0),
             Type::Str => Value::Str("".into()),
             Type::Bool => Value::Bool(true),
-            Type::List(_) => Value::List(vec![]),
+            Type::List(_) => Value::List(im::vector![]),
             Type::Fn => Value::Null,
             Type::Struct(_) => Value::Null,
             Type::Any => Value::Null,
