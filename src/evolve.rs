@@ -444,11 +444,15 @@ impl Evolver {
     }
 
     fn pick_mutation(&mut self) -> Mutation {
-        match self.rand_range(5) {
+        match self.rand_range(9) {
             0 => Mutation::Constant,
             1 => Mutation::Operator,
             2 => Mutation::StatementSwap,
             3 => Mutation::DeadCodeRemoval,
+            4 => Mutation::DeadBranch,
+            5 => Mutation::ConstProp,
+            6 => Mutation::HoistInvariant,
+            7 => Mutation::EarlyExit,
             _ => Mutation::Simplify,
         }
     }
@@ -460,6 +464,10 @@ impl Evolver {
             Mutation::StatementSwap => format!("statement swap on {}#{}", name, id),
             Mutation::DeadCodeRemoval => format!("dead code removal on {}#{}", name, id),
             Mutation::Simplify => format!("simplification on {}#{}", name, id),
+            Mutation::DeadBranch => format!("dead-branch elimination on {}#{}", name, id),
+            Mutation::ConstProp => format!("constant propagation on {}#{}", name, id),
+            Mutation::HoistInvariant => format!("loop-invariant hoisting on {}#{}", name, id),
+            Mutation::EarlyExit => format!("early-exit fusion on {}#{}", name, id),
         }
     }
 
@@ -496,6 +504,92 @@ impl Evolver {
                 // improvement signal the garden can actually find.
                 for stmt in new_body.iter_mut() {
                     if self.simplify_stmt(stmt) { break; }
+                }
+            }
+            Mutation::DeadBranch => {
+                // if <const> { A } else { B } -> splice the taken arm inline.
+                // Real algorithmic change: eliminates a guaranteed-dead path.
+                let idx = new_body.iter().position(|s| matches!(s,
+                    Stmt::If(c, _, _) if const_truthy(c).is_some()));
+                if let Some(i) = idx {
+                    if let Stmt::If(c, then_b, else_b) = &new_body[i] {
+                        let taken = if const_truthy(c).unwrap() {
+                            then_b.clone()
+                        } else {
+                            else_b.clone().unwrap_or_default()
+                        };
+                        new_body.splice(i..i + 1, taken);
+                    }
+                }
+            }
+            Mutation::ConstProp => {
+                // let a = <const>; return a  ->  return <const>
+                // Cross-statement constant propagation.
+                let mut target = None;
+                for i in 0..new_body.len().saturating_sub(1) {
+                    if let Stmt::Let(name, val) = &new_body[i] {
+                        if is_const_expr(val) {
+                            if let Stmt::Return(Some(Expr::Var(r))) = &new_body[i + 1] {
+                                if r == name { target = Some(i); break; }
+                            }
+                        }
+                    }
+                }
+                if let Some(i) = target {
+                    if let Stmt::Let(_, val) = new_body.remove(i) {
+                        new_body[i] = Stmt::Return(Some(val));
+                    }
+                }
+            }
+            Mutation::HoistInvariant => {
+                // while c { ... let x = <expr not reading loop-mutated vars> ... }
+                // -> let x = <expr>; while c { ... } — real work moved out.
+                let mut found = None;
+                for i in 0..new_body.len() {
+                    if let Stmt::While(_, body) = &new_body[i] {
+                        let mutated = collect_assigned(body);
+                        if let Some(p) = body.iter().position(|s| matches!(s,
+                            Stmt::Let(n, e) if !mutated.contains(n)
+                                && !expr_uses(e, &mutated))) {
+                            found = Some((i, p));
+                            break;
+                        }
+                    }
+                }
+                if let Some((i, p)) = found {
+                    if let Stmt::While(c, mut body) = new_body[i].clone() {
+                        if let Stmt::Let(n, e) = body.remove(p) {
+                            new_body[i] = Stmt::While(c, body);
+                            new_body.insert(i, Stmt::Let(n, e));
+                        }
+                    }
+                }
+            }
+            Mutation::EarlyExit => {
+                // while c { if c2 { return x } ; rest } ->
+                // while c and !c2 { rest } ; if c2 { return x }
+                let mut target = None;
+                for i in 0..new_body.len() {
+                    if let Stmt::While(_, body) = &new_body[i] {
+                        if let Some(Stmt::If(_, then_b, None)) = body.first() {
+                            if matches!(&then_b[..], [Stmt::Return(_)]) {
+                                target = Some(i); break;
+                            }
+                        }
+                    }
+                }
+                if let Some(i) = target {
+                    if let Stmt::While(c, mut body) = new_body[i].clone() {
+                        if let Some(Stmt::If(c2, mut then_b, None)) = body.first().cloned() {
+                            body.remove(0);
+                            let ret = then_b.remove(0);
+                            let guard = Expr::BinOp(
+                                Box::new(c), BinOp::And,
+                                Box::new(Expr::UnaryOp(UnaryOp::Not, Box::new(c2.clone()))));
+                            new_body[i] = Stmt::While(guard, body);
+                            new_body.insert(i + 1, Stmt::If(c2, vec![ret], None));
+                        }
+                    }
                 }
             }
         }
@@ -546,6 +640,20 @@ impl Evolver {
         // check self: e op const patterns
         let replacement: Option<Expr> = if let Expr::BinOp(l, op, r) = e {
             match (op, l.as_ref(), r.as_ref()) {
+                // literal folding: Int op Int -> Int/Bool (cross-statement
+                // constant folding lands via ConstProp on the stmt level)
+                (BinOp::Add, Expr::Int(a), Expr::Int(b)) => Some(Expr::Int(a + b)),
+                (BinOp::Sub, Expr::Int(a), Expr::Int(b)) => Some(Expr::Int(a - b)),
+                (BinOp::Mul, Expr::Int(a), Expr::Int(b)) => Some(Expr::Int(a * b)),
+                (BinOp::Div, Expr::Int(a), Expr::Int(b)) if *b != 0 => Some(Expr::Int(a / b)),
+                (BinOp::Mod, Expr::Int(a), Expr::Int(b)) if *b != 0 => Some(Expr::Int(a % b)),
+                (BinOp::Eq, Expr::Int(a), Expr::Int(b)) => Some(Expr::Bool(a == b)),
+                (BinOp::Neq, Expr::Int(a), Expr::Int(b)) => Some(Expr::Bool(a != b)),
+                (BinOp::Lt, Expr::Int(a), Expr::Int(b)) => Some(Expr::Bool(a < b)),
+                (BinOp::Gt, Expr::Int(a), Expr::Int(b)) => Some(Expr::Bool(a > b)),
+                (BinOp::Le, Expr::Int(a), Expr::Int(b)) => Some(Expr::Bool(a <= b)),
+                (BinOp::Ge, Expr::Int(a), Expr::Int(b)) => Some(Expr::Bool(a >= b)),
+                // identity rules
                 (BinOp::Add, _, Expr::Int(0)) => Some((**l).clone()),
                 (BinOp::Add, Expr::Int(0), _) => Some((**r).clone()),
                 (BinOp::Sub, _, Expr::Int(0)) => Some((**l).clone()),
@@ -781,6 +889,80 @@ enum Mutation {
     StatementSwap,
     DeadCodeRemoval,
     Simplify,
+    DeadBranch,
+    ConstProp,
+    HoistInvariant,
+    EarlyExit,
+}
+
+/// Constant condition truthiness — for dead-branch elimination.
+fn const_truthy(e: &Expr) -> Option<bool> {
+    match e {
+        Expr::Bool(b) => Some(*b),
+        Expr::Int(n) => Some(*n != 0),
+        Expr::Null => Some(false),
+        _ => None,
+    }
+}
+
+/// Pure literal — safe to substitute across statements.
+fn is_const_expr(e: &Expr) -> bool {
+    matches!(e, Expr::Int(_) | Expr::Float(_) | Expr::Str(_) | Expr::Bool(_) | Expr::Null)
+}
+
+/// All variables written anywhere inside a statement block (recursive).
+fn collect_assigned(stmts: &[Stmt]) -> std::collections::HashSet<String> {
+    let mut out = std::collections::HashSet::new();
+    fn go(v: &[Stmt], out: &mut std::collections::HashSet<String>) {
+        for st in v {
+            match st {
+                Stmt::Assign(n, _) | Stmt::Let(n, _) => { out.insert(n.clone()); }
+                Stmt::LetDestructure(ns, _) => { for n in ns { out.insert(n.clone()); } }
+                Stmt::IndexAssign(Expr::Var(n), _, _)
+                | Stmt::FieldAssign(Expr::Var(n), _, _) => { out.insert(n.clone()); }
+                Stmt::If(_, t, e) => {
+                    go(t, out);
+                    if let Some(eb) = e { go(eb, out); }
+                }
+                Stmt::While(_, b) => go(b, out),
+                Stmt::For(var, _, b) => { out.insert(var.clone()); go(b, out); }
+                Stmt::Try(b, _, h) => { go(b, out); go(h, out); }
+                Stmt::Match(_, arms, els) => {
+                    for (_, b) in arms { go(b, out); }
+                    if let Some(eb) = els { go(eb, out); }
+                }
+                _ => {}
+            }
+        }
+    }
+    go(stmts, &mut out);
+    out
+}
+
+/// Does `e` read any variable in `vars`? Conservative — unknown
+/// composite exprs count as "uses" (never hoist what we can't prove).
+fn expr_uses(e: &Expr, vars: &std::collections::HashSet<String>) -> bool {
+    match e {
+        Expr::Var(n) => vars.contains(n),
+        Expr::Int(_) | Expr::Float(_) | Expr::Str(_) | Expr::Bool(_) | Expr::Null => false,
+        Expr::BinOp(l, _, r) => expr_uses(l, vars) || expr_uses(r, vars),
+        Expr::UnaryOp(_, x) => expr_uses(x, vars),
+        Expr::Call(_, _, args) | Expr::List(args) | Expr::Interp(args) =>
+            args.iter().any(|a| expr_uses(a, vars)),
+        Expr::MethodCall(o, _, args) =>
+            expr_uses(o, vars) || args.iter().any(|a| expr_uses(a, vars)),
+        Expr::FieldAccess(o, _) => expr_uses(o, vars),
+        Expr::Index(o, i) => expr_uses(o, vars) || expr_uses(i, vars),
+        Expr::SafeGet(o, _, args) =>
+            expr_uses(o, vars)
+                || args.as_ref().map(|a| a.iter().any(|x| expr_uses(x, vars))).unwrap_or(false),
+        Expr::StructLit(_, fields) => fields.iter().any(|(_, v)| expr_uses(v, vars)),
+        Expr::ListComp(head, _, iter, cond) =>
+            expr_uses(head, vars) || expr_uses(iter, vars)
+                || cond.as_ref().map(|c| expr_uses(c, vars)).unwrap_or(false),
+        Expr::Lambda(_, _) => true, // closures may capture loop vars
+        _ => true,
+    }
 }
 
 fn type_str(t: &Type) -> String {
@@ -803,6 +985,10 @@ fn mutation_name(m: Mutation) -> &'static str {
         Mutation::StatementSwap => "statement swap",
         Mutation::DeadCodeRemoval => "dead code removal",
         Mutation::Simplify => "simplification",
+        Mutation::DeadBranch => "dead-branch elimination",
+        Mutation::ConstProp => "constant propagation",
+        Mutation::HoistInvariant => "loop-invariant hoisting",
+        Mutation::EarlyExit => "early-exit fusion",
     }
 }
 
