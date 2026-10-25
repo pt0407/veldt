@@ -1395,7 +1395,7 @@ impl Interpreter {
                     _ => Err("serve() expects (port_int, closure)".into()),
                 }
             }
-            "re_match" | "re_find" | "re_replace" | "re_split" => {
+            "re_match" | "re_find" | "re_replace" | "re_split" | "re_captures" => {
                 if args.len() < 2 { return Err("regex builtin expects (string, pattern)".into()); }
                 let (s, pat) = match (&args[0], &args[1]) {
                     (Value::Str(s), Value::Str(p)) => (s.clone(), p.clone()),
@@ -1418,6 +1418,17 @@ impl Interpreter {
                     "re_split" => {
                         let parts: Vec<Value> = re.split(&s).map(|p| Value::Str(p.to_string())).collect();
                         Ok(Some(Value::List(parts)))
+                    }
+                    "re_captures" => {
+                        // re_captures(s, pat) -> list of capture-group strings (or null)
+                        Ok(Some(match re.captures(&s) {
+                            Some(caps) => Value::List(
+                                caps.iter()
+                                    .map(|m| m.map(|g| Value::Str(g.as_str().to_string()))
+                                              .unwrap_or(Value::Null))
+                                    .collect()),
+                            None => Value::Null,
+                        }))
                     }
                     _ => unreachable!(),
                 }
