@@ -437,6 +437,60 @@ require(['vs/editor/editor.main'], function() {
     tabSize: 4,
   });
 
+  // Autocomplete: keywords, builtins, and garden function names
+  monaco.languages.registerCompletionItemProvider('javascript', {
+    provideCompletionItems: function(model, position) {
+      const word = model.getWordUntilPosition(position);
+      const range = {
+        startLineNumber: position.lineNumber,
+        endLineNumber: position.lineNumber,
+        startColumn: word.startColumn,
+        endColumn: word.endColumn,
+      };
+      const kw = ['fn','let','if','else','while','for','in','return','grow','struct',
+        'test','try','catch','import','match','null','true','false','and','or','not'];
+      const builtins = ['print','len','push','keys','dict','set','int','float','str','bool',
+        'sqrt','floor','ceil','abs','max','min','range','type','has','get','remove',
+        'map','filter','reduce','sum','sorted','reverse','unique','join',
+        'fetch','json_parse','json_stringify','read_file','write_file','append_file',
+        'exec','env','sleep','time_ms','date','render','call_best',
+        'spawn','join','pmap','re_match','re_find','re_replace','re_split',
+        'db_open','db_exec','db_query','db_close','serve'];
+      const items = [];
+      kw.forEach(k => items.push({
+        label: k, kind: monaco.languages.CompletionItemKind.Keyword,
+        insertText: k, range }));
+      builtins.forEach(b => items.push({
+        label: b, kind: monaco.languages.CompletionItemKind.Function,
+        insertText: b + '()', range }));
+      // garden functions from live data
+      (gardenData?.functions || []).forEach(f => {
+        items.push({
+          label: f.name, kind: monaco.languages.CompletionItemKind.Method,
+          detail: `${f.variants.length} variants in garden`,
+          insertText: f.name, range });
+      });
+      return { suggestions: items };
+    }
+  });
+
+  // Hover: garden function health/fitness
+  monaco.languages.registerHoverProvider('javascript', {
+    provideHover: function(model, position) {
+      const word = model.getWordAtPosition(position);
+      if (!word || !gardenData) return null;
+      const fam = (gardenData.functions || []).find(f => f.name === word.word);
+      if (!fam) return null;
+      const healthy = fam.variants.filter(v => v.health === 'healthy').length;
+      const best = fam.variants.reduce((a,b) => a.fitness > b.fitness ? a : b);
+      const probes = (gardenData.probes || []).find(p => p.name === word.word);
+      return { contents: [
+        { value: `**${word.word}** — garden lineage` },
+        { value: `${fam.variants.length} variants (${healthy} healthy) · fittest #${best.id} @ ${best.fitness}%${probes ? ` · ${probes.count} probes` : ''}` },
+      ]};
+    }
+  });
+
   // Register Veldt language keywords
   monaco.languages.setMonarchTokensProvider('javascript', {
     tokenizer: {

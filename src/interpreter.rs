@@ -80,6 +80,9 @@ pub struct Interpreter {
     // SQLite connections (id -> connection)
     db_connections: HashMap<i64, rusqlite::Connection>,
     next_db_id: i64,
+    // spawned threads: task id -> join handle returning Result<json, err>
+    tasks: HashMap<i64, std::thread::JoinHandle<Result<String, String>>>,
+    next_task_id: i64,
 }
 
 pub struct FunctionVariant {
@@ -111,6 +114,8 @@ impl Interpreter {
             trace: false,
             db_connections: HashMap::new(),
             next_db_id: 1,
+            tasks: HashMap::new(),
+            next_task_id: 0,
         }
     }
 
@@ -733,6 +738,20 @@ impl Interpreter {
         Ok(result)
     }
 
+    /// Runs a garden function on a spawned thread with a fresh interpreter.
+    /// Shared-nothing: args arrive as JSON strings, result leaves as JSON.
+    fn thread_run(fname: &str, json_args: Vec<String>) -> Result<String, String> {
+        let mut veldt = crate::veldt::Veldt::new();
+        veldt.load().map_err(|e| format!("garden load failed: {}", e))?;
+        let mut interp = Interpreter::new();
+        veldt.load_into_interpreter(&mut interp);
+        let args: Result<Vec<Value>, _> = json_args.iter()
+            .map(|s| serde_json::from_str(s)).collect();
+        let args = args.map_err(|e| format!("bad spawn args: {}", e))?;
+        let result = interp.call_function(fname, None, args)?;
+        serde_json::to_string(&result).map_err(|e| format!("result not serializable: {}", e))
+    }
+
     fn call_closure(&mut self, params: Vec<Param>, body: Vec<Stmt>, captured: Rc<RefCell<HashMap<String, Value>>>, args: Vec<Value>) -> Result<Value, String> {
         if args.len() != params.len() {
             return Err(format!("Closure expects {} args but got {}", params.len(), args.len()));
@@ -1121,6 +1140,71 @@ impl Interpreter {
                     }
                 }
                 Ok(Some(Value::Set(items)))
+            }
+            "spawn" => {
+                // spawn("fn_name", [args]) -> task id
+                // Runs a GARDEN function on an OS thread with its own
+                // interpreter. Shared-nothing: args/results are marshalled
+                // via JSON. Only functions persisted in the garden can spawn.
+                let fname = match args.get(0) {
+                    Some(Value::Str(s)) => s.clone(),
+                    _ => return Err("spawn() expects a function name string".into()),
+                };
+                let fargs = match args.get(1) {
+                    Some(Value::List(l)) => l.clone(),
+                    Some(_) => return Err("spawn() args must be a list".into()),
+                    None => Vec::new(),
+                };
+                let json_args: Result<Vec<String>, _> = fargs.iter()
+                    .map(|a| serde_json::to_string(a)).collect();
+                let json_args = json_args.map_err(|e| format!("spawn arg not serializable: {}", e))?;
+                let handle = std::thread::spawn(move || Self::thread_run(&fname, json_args));
+                self.next_task_id += 1;
+                self.tasks.insert(self.next_task_id, handle);
+                Ok(Some(Value::Int(self.next_task_id)))
+            }
+            "join" => {
+                // join(task_id) -> result value; blocks until done
+                let id = match args.get(0) {
+                    Some(Value::Int(n)) => *n,
+                    _ => return Err("join() expects a task id".into()),
+                };
+                match self.tasks.remove(&id) {
+                    Some(h) => match h.join() {
+                        Ok(Ok(json)) => Ok(Some(
+                            serde_json::from_str(&json).unwrap_or(Value::Null))),
+                        Ok(Err(e)) => Err(format!("spawned task failed: {}", e)),
+                        Err(_) => Err("spawned task panicked".into()),
+                    },
+                    None => Err(format!("No task with id {}", id)),
+                }
+            }
+            "pmap" => {
+                // pmap("fn_name", list) -> list of results, one thread per item
+                let fname = match args.get(0) {
+                    Some(Value::Str(s)) => s.clone(),
+                    _ => return Err("pmap() expects a function name string".into()),
+                };
+                let items = match args.get(1) {
+                    Some(Value::List(l)) => l.clone(),
+                    _ => return Err("pmap() expects (name, list)".into()),
+                };
+                let mut handles = Vec::new();
+                for item in &items {
+                    let ja = serde_json::to_string(item)
+                        .map_err(|e| format!("pmap arg not serializable: {}", e))?;
+                    let fname2 = fname.clone();
+                    handles.push(std::thread::spawn(move || Self::thread_run(&fname2, vec![ja])));
+                }
+                let mut results = Vec::new();
+                for h in handles {
+                    match h.join() {
+                        Ok(Ok(json)) => results.push(serde_json::from_str(&json).unwrap_or(Value::Null)),
+                        Ok(Err(e)) => return Err(format!("pmap worker failed: {}", e)),
+                        Err(_) => return Err("pmap worker panicked".into()),
+                    }
+                }
+                Ok(Some(Value::List(results)))
             }
             "call_best" => {
                 // call_best("name", arg1, arg2, ...) — dispatch to the
