@@ -98,6 +98,24 @@ fn main() {
             }
             import_garden(&args[2]);
         }
+        "registry" => {
+            let port: u16 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(7878);
+            run_registry(port);
+        }
+        "push" => {
+            if args.len() < 3 {
+                eprintln!("Usage: veldt push <url>   (posts garden to a registry)");
+                process::exit(1);
+            }
+            push_garden(&args[2]);
+        }
+        "pull" => {
+            if args.len() < 3 {
+                eprintln!("Usage: veldt pull <url>   (fetch garden from a registry)");
+                process::exit(1);
+            }
+            import_garden(&format!("{}/api/garden", args[2].trim_end_matches('/')));
+        }
         "garden" => {
             let mut veldt = veldt::Veldt::new();
             if let Err(e) = veldt.load() {
@@ -447,6 +465,110 @@ fn print_usage() {
   veldt run --trace <file>     Trace every executed statement
   veldt run --evolve <file>    Run 1 evolve cycle after the program");
     println!("  veldt visual                 Open visual ecosystem viewer in browser");
+}
+
+// === Garden registry: a tiny host where gardens meet ===
+//
+// POST /api/garden  — accepts a SavedVeldt JSON body; each (name,id)
+// variant is merged into the pool (incoming wins on id conflict).
+// GET  /api/garden  — returns the pool so clients can pull it.
+// Pool persists at ~/.veldt/registry.json.
+
+#[derive(Default)]
+struct RegistryPool {
+    gardens: std::collections::HashMap<String, serde_json::Value>,
+}
+
+fn registry_pool_path() -> std::path::PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+    std::path::PathBuf::from(home).join(".veldt").join("registry.json")
+}
+
+fn registry_get() -> String {
+    let p = registry_pool_path();
+    if p.exists() {
+        std::fs::read_to_string(&p).unwrap_or_else(|_| "{}".into())
+    } else {
+        "{}".into()
+    }
+}
+
+fn registry_post(body: &str) -> Result<String, String> {
+    let incoming: serde_json::Value = serde_json::from_str(body)
+        .map_err(|e| format!("bad garden json: {}", e))?;
+    let mut pool: serde_json::Value = serde_json::from_str(&registry_get())
+        .unwrap_or(serde_json::json!({}));
+    // merge function families + traces; newest entries win per (name,id)
+    if let (Some(inc), Some(pool_obj)) = (
+        incoming.get("functions").and_then(|f| f.as_object()),
+        pool.get_mut("functions").and_then(|f| f.as_object_mut()),
+    ) {
+        for (name, variants) in inc {
+            let pool_family = pool_obj.entry(name.clone())
+                .or_insert_with(|| serde_json::json!([]));
+            if let (Some(pv), Some(iv)) =
+                (pool_family.as_array_mut(), variants.as_array()) {
+                for entry in iv {
+                    let id = entry.get("id").and_then(|i| i.as_u64());
+                    if let Some(pos) = pv.iter().position(|e|
+                        e.get("id").and_then(|i| i.as_u64()) == id) {
+                        pv[pos] = entry.clone();
+                    } else {
+                        pv.push(entry.clone());
+                    }
+                }
+            }
+        }
+    } else if let Some(inc) = incoming.get("functions") {
+        pool.as_object_mut()
+            .map(|o| o.insert("functions".into(), inc.clone()));
+    }
+    let out = serde_json::to_string(&pool).map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(registry_pool_path().parent().unwrap()).ok();
+    std::fs::write(registry_pool_path(), &out).map_err(|e| e.to_string())?;
+    Ok(format!("merged — pool now holds {} families",
+        pool.get("functions").and_then(|f| f.as_object())
+            .map(|o| o.len()).unwrap_or(0)))
+}
+
+fn run_registry(port: u16) {
+    let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+    rt.block_on(async {
+        use axum::{Router, routing::{get, post}};
+        let app = Router::new()
+            .route("/api/garden", get(|| async { registry_get() }))
+            .route("/api/garden", post(|body: String| async move {
+                match registry_post(&body) {
+                    Ok(msg) => msg,
+                    Err(e) => format!("error: {}", e),
+                }
+            }));
+        let addr = format!("0.0.0.0:{}", port);
+        println!("Garden registry on http://{}/api/garden", addr);
+        println!("  veldt push http://<host>:{}  — send your garden here", port);
+        println!("  veldt pull http://<host>:{}  — take the pool with you", port);
+        let listener = tokio::net::TcpListener::bind(&addr).await
+            .expect("bind registry port");
+        axum::serve(listener, app).await.expect("registry serve");
+    });
+}
+
+fn push_garden(url: &str) {
+    let mut veldt = veldt::Veldt::new();
+    if let Err(e) = veldt.load() { eprintln!("Error: {}", e); process::exit(1); }
+    let body = match std::fs::read_to_string(veldt.garden_path.join("veldt.json")) {
+        Ok(b) => b,
+        Err(e) => { eprintln!("No garden to push: {}", e); process::exit(1); }
+    };
+    let endpoint = format!("{}/api/garden", url.trim_end_matches('/'));
+    let client = reqwest::blocking::Client::builder()
+        .user_agent("Veldt/0.3").timeout(std::time::Duration::from_secs(30))
+        .build().expect("http client");
+    match client.post(&endpoint).body(body).send() {
+        Ok(r) => println!("Pushed garden -> {} ({})", url,
+            r.text().unwrap_or_default()),
+        Err(e) => { eprintln!("Push failed: {}", e); process::exit(1); }
+    }
 }
 
 fn start_repl() {

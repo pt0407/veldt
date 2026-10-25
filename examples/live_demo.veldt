@@ -1,0 +1,20 @@
+# The Living Garden demo — plant wasteful code, evolve, adopt the winner.
+# Run: veldt run examples/live_demo.veldt  (records real call traces)
+# Then: veldt evolve 5 && veldt lineage score && veldt run examples/live_demo.veldt
+
+# score(n): sums 2*n — but carries per-iteration waste (i*0) and junk
+# constants the garden can strip. Equivalent target: return n * 2.
+grow fn score(n: int) test score(3) == 6, score(5) == 10, score(0) == 0 {
+    let total = 0
+    let i = 0
+    while i < n {
+        total = total + 2 + i * 0      # dead multiply every iteration
+        i = i + 1
+    }
+    return total * 1 + 0
+}
+
+# real calls — each one records a trace into the garden as evidence
+print("score(10) = " + call_best("score", 10))
+print("score(100) = " + call_best("score", 100))
+print("score(-4) = " + call_best("score", -4))
