@@ -213,6 +213,22 @@ fn main() {
         "docs" => {
             print_docs(args.get(2).map(|s| s.as_str()));
         }
+        "perf" => {
+            // Phase 3 micro-bench: ops/sec on three workloads
+            let mut veldt = veldt::Veldt::new();
+            let _ = veldt.load();
+            let cases = [
+                ("arith loop", "let i = 0\nlet a = 0\nwhile i < 50000 {\n    a += i * 2\n    i += 1\n}"),
+                ("fn recursion", "fn f(n: int) { if n < 2 { return n } return f(n-1) + f(n-2) }\nlet _ = f(16)"),
+                ("list ops", "let xs = []\nlet i = 0\nwhile i < 2000 {\n    xs = xs.push(i)\n    i += 1\n}\nlet _ = xs.len()"),
+            ];
+            for (name, src) in cases {
+                let t = std::time::Instant::now();
+                let r = agent::execute_source(src, &mut veldt);
+                let ms = t.elapsed().as_millis();
+                println!("{:<16} {:>6}ms {}", name, ms, if r.success { "ok" } else { "FAIL" });
+            }
+        }
         "stats" => {
             let mut veldt = veldt::Veldt::new();
             if let Err(e) = veldt.load() {
