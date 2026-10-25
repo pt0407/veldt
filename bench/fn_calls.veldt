@@ -1,0 +1,7 @@
+# function call overhead — measures env alloc + param binding
+fn f(a: int, b: int) { return a + b * 2 }
+let t = time_ms()
+let acc = 0
+let i = 0
+while i < 30000 { acc = f(acc % 100, i % 50)  i = i + 1 }
+print("fn_calls: " + (time_ms() - t) + "ms  (acc=" + acc + ")")

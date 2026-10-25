@@ -1,0 +1,9 @@
+# repeated concatenation — the O(n^2) trap, measures string ops
+let t = time_ms()
+let s = ""
+let i = 0
+while i < 5000 {
+    s = s + "x"
+    i = i + 1
+}
+print("string_build: " + (time_ms() - t) + "ms  (len=" + s.len() + ")")
