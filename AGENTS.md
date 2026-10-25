@@ -40,6 +40,9 @@ Rules: (1) claim a roadmap bullet in the spec before starting it;
 (3) merge `origin/main` before pushing.
 
 ## Handoff log (append, newest first)
+- [Devin] PHASE 0 DONE (all 12 boxes ticked in roadmap): stack traces
+  landed last — call_function/call_closure push (name,line) frames,
+  error path dumps "called from line N in f" (CLI + agent + REPL).
 - [Devin] Phase 0 leftovers: `veldt repl` (:help :garden :load :agent),
   `args()`/`exit()`/`eprint`/`input` builtins, `x[a:b]` slicing +
   negative index, catch_unwind on both run paths, `veldt run -- args`.

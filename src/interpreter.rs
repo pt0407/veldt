@@ -87,7 +87,7 @@ pub struct Interpreter {
     pub traces: HashMap<String, Vec<(Vec<String>, String)>>,
     pub trace_calls: bool,
     pub args: Vec<String>,
-    pub call_stack: Vec<(String, u32)>,
+    pub call_stack: Vec<(String, usize)>,
     pub exit_code: Option<i64>,
 }
 
@@ -794,11 +794,18 @@ impl Interpreter {
             self.vars.borrow_mut().insert(param.name.clone(), val);
         }
 
-        // Execute body
-        let result = match self.exec_block(&body)? {
-            FlowControl::Return(v) => v.unwrap_or(Value::Null),
-            FlowControl::Normal => Value::Null,
+        // Execute body — frame stays on the stack if the call fails,
+        // so the error path can print a real call trace.
+        self.call_stack.push((name.to_string(), self.current_line));
+        let result = match self.exec_block(&body) {
+            Ok(FlowControl::Return(v)) => v.unwrap_or(Value::Null),
+            Ok(FlowControl::Normal) => Value::Null,
+            Err(e) => {
+                self.vars = old_vars;
+                return Err(e);
+            }
         };
+        self.call_stack.pop();
 
         // Restore scope
         self.vars = old_vars;
@@ -849,11 +856,18 @@ impl Interpreter {
             self.vars.borrow_mut().insert(param.name.clone(), val);
         }
 
-        // Execute body
-        let result = match self.exec_block(&body)? {
-            FlowControl::Return(v) => v.unwrap_or(Value::Null),
-            FlowControl::Normal => Value::Null,
+        // Execute body — frame stays on the stack if the call fails,
+        // so the error path can print a real call trace.
+        self.call_stack.push(("<closure>".to_string(), self.current_line));
+        let result = match self.exec_block(&body) {
+            Ok(FlowControl::Return(v)) => v.unwrap_or(Value::Null),
+            Ok(FlowControl::Normal) => Value::Null,
+            Err(e) => {
+                self.vars = old_vars;
+                return Err(e);
+            }
         };
+        self.call_stack.pop();
 
         // Restore param bindings in the shared env (prevent param leakage),
         // then restore caller scope

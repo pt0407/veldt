@@ -14,25 +14,25 @@ break/continue; coarse errors.
 
 Every one of these is hit within the first hour of writing real scripts.
 
-- [ ] `veldt repl` — interactive loop: multiline detection (open braces),
+- [x] `veldt repl` — interactive loop: multiline detection (open braces),
       persistent env across lines, `:help`, `:garden`, `:load file`
-- [ ] `args()` builtin — script argv. `veldt run prog.veldt -- a b c` →
+- [x] `args()` builtin — script argv. `veldt run prog.veldt -- a b c` →
       `args()` returns `["a","b","c"]`
 - [x] `veldt run -e "code"` — inline eval, and `veldt -e "code"`
 - [x] `break` / `continue` — new Stmt variants + FlowControl::Break/Continue
       threaded through loops and match arms
 - [x] `x in list` / `k in dict` / `substr in str` — BinOp::In membership
       (Token::In already exists; add to parse_comparison precedence)
-- [ ] String/list slicing: `s[a:b]`, `xs[a:b]`, `xs[-1]` negative index.
+- [x] String/list slicing: `s[a:b]`, `xs[a:b]`, `xs[-1]` negative index.
       Extend Expr::Index eval — parse `expr[lo..hi]` optional range
 - [x] `+=`, `-=`, `*=`, `/=` — lexer tokens, desugar to Assign
-- [ ] `exit(code)` builtin — set process exit status; `veldt run` propagates
-- [ ] `read_stdin()` / `input()` already exists? verify; `print(..., flush=false)`
+- [x] `exit(code)` builtin — set process exit status; `veldt run` propagates
+- [x] `read_stdin()` / `input()` (added) + eprint? verify; `print(..., flush=false)`
       or `eprint` for stderr output
-- [ ] Stack traces on runtime errors — interpreter keeps a (name, line) call
+- [x] Stack traces on runtime errors — interpreter keeps a (name, line) call
       stack; error prints `error at line N in f called from line M in main`
-- [ ] Shebang support — `#!` line already lexes as comment; verify end-to-end
-- [ ] Catch interpreter panics: `catch_unwind` in run path → clean error
+- [x] Shebang support (`#` comments cover `#!`) — `#!` line already lexes as comment; verify end-to-end
+- [x] Catch interpreter panics: `catch_unwind` in run path → clean error
 
 ## Phase 1 — Stdlib depth (~1-2 weeks)
 

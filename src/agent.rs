@@ -76,6 +76,7 @@ pub fn execute_source(source: &str, veldt: &mut Veldt) -> ExecResult {
 
     let mut interp = Interpreter::new();
     interp.trace_calls = true;
+    interp.call_stack.clear();
     veldt.load_into_interpreter(&mut interp);
 
     interp.print_buffer = Some(String::new());
@@ -97,6 +98,10 @@ pub fn execute_source(source: &str, veldt: &mut Veldt) -> ExecResult {
             } else {
                 output.push_str(&format!("Runtime error: {}\n", e));
             }
+            for (n, l) in interp.call_stack.iter().rev() {
+                output.push_str(&format!("  called from line {} in {}\n", l, n));
+            }
+            interp.call_stack.clear();
             false
         }
     };

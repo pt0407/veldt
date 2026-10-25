@@ -346,6 +346,10 @@ fn run_repl_source(interp: &mut interpreter::Interpreter, src: &str) {
                                 } else {
                                     println!("Runtime error: {}", e);
                                 }
+                                for (n, l) in interp.call_stack.iter().rev() {
+                                    println!("  called from line {} in {}", l, n);
+                                }
+                                interp.call_stack.clear();
                             }
                         }
                         Err(_) => println!("Interpreter panicked"),
@@ -523,6 +527,9 @@ fn run_program(path: &str, trace: bool, evolve_after: bool) {
             eprintln!("Runtime error (line {}): {}", line, e);
         } else {
             eprintln!("Runtime error: {}", e);
+        }
+        for (n, l) in interp.call_stack.iter().rev() {
+            eprintln!("  called from line {} in {}", l, n);
         }
         // Still save veldt — the program may have grown code before failing
     }
