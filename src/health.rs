@@ -79,6 +79,19 @@ impl HealthChecker {
             score += trace_score * 0.4; // up to +0.4 for matching real usage
         }
 
+        // Phase 4: asymptotic efficiency — run this variant and the incumbent
+        // fittest on big-scale probes, compare step counts. >1 = faster.
+        if !probes.is_empty() {
+            let big: Vec<&crate::veldt::Probe> = probes.iter().filter(|p| p.scale > 0).collect();
+            if !big.is_empty() {
+                let eff = Self::measure_efficiency(entry, functions, variables, structs, &big);
+                entry.efficiency = eff;
+                // log-scale bonus: 2x faster => +0.17, 2x slower => -0.17
+                let bonus = eff.ln().clamp(-1.0, 1.0) * 0.25;
+                score += bonus;
+            }
+        }
+
         TrialResult::Pass(score, steps)
     }
 
@@ -156,6 +169,54 @@ impl HealthChecker {
             }
         }
         if used == 0 { 0.0 } else { ok as f64 / used as f64 }
+    }
+
+    /// Asymptotic efficiency: incumbent-steps / this-steps on big probes.
+    /// Bigger inputs amplify step-count differences, so O(n) vs O(n^2)
+    /// becomes visible to selection.
+    fn measure_efficiency(entry: &FunctionEntry,
+                          functions: &std::collections::HashMap<String, Vec<FunctionEntry>>,
+                          variables: &std::collections::HashMap<String, crate::veldt::VariableEntry>,
+                          structs: &std::collections::HashMap<String, crate::veldt::StructEntry>,
+                          big_probes: &[&crate::veldt::Probe]) -> f64 {
+        let mut interp = Interpreter::with_step_limit(200000);
+        Self::load_snapshot_into_interp(functions, variables, structs, &mut interp);
+        // add this variant
+        interp.functions.entry(entry.name.clone()).or_insert_with(Vec::new)
+            .push(crate::interpreter::FunctionVariant {
+                id: entry.id, fitness: entry.fitness,
+                def: crate::interpreter::FunctionDef {
+                    params: entry.params.clone(), body: entry.body.clone(),
+                },
+            });
+
+        // incumbent = fittest OTHER variant in the family
+        let incumbent_id = functions.get(&entry.name)
+            .and_then(|vs| vs.iter()
+                .filter(|v| v.id != entry.id && matches!(v.health, Health::Healthy))
+                .max_by(|a, b| a.fitness.partial_cmp(&b.fitness).unwrap_or(std::cmp::Ordering::Equal))
+                .map(|v| v.id));
+
+        let mut my_steps = 0u64;
+        let mut base_steps = 0u64;
+        let mut used = 0;
+        for p in big_probes.iter().take(10) {
+            let args: Vec<Value> = p.args.iter()
+                .filter_map(|s| serde_json::from_str(s).ok()).collect();
+            if args.len() != entry.params.len() { continue; }
+            let before = interp.step_count;
+            let _ = interp.call_function(&entry.name, Some(entry.id), args.clone());
+            my_steps += interp.step_count - before;
+            used += 1;
+            if let Some(id) = incumbent_id {
+                let before = interp.step_count;
+                let _ = interp.call_function(&entry.name, Some(id), args);
+                base_steps += interp.step_count - before;
+            }
+        }
+        if used == 0 || my_steps == 0 { return 1.0; }
+        if base_steps == 0 { return 1.0; }
+        (base_steps as f64 / my_steps as f64).clamp(0.05, 20.0)
     }
 
     fn load_snapshot_into_interp(
