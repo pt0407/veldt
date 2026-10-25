@@ -171,26 +171,46 @@ pub fn respond(task: &str, editor_source: &str, veldt: &mut Veldt) -> AgentRespo
         .collect();
 
     let has = |pats: &[&str]| pats.iter().any(|p| t.contains(p));
+    let hasw = |pats: &[&str]| pats.iter().any(|p| words.contains(p));
+    let gen = || has(&["write", "make", "create", "grow", "function", "implement", "build", "code"]);
 
-    if has(&["prune", "kill "]) || words.contains(&"kill") {
+    if hasw(&["prune", "kill"]) {
         return prune_intent(&words, veldt);
     }
-    if has(&["clear"]) {
+    if hasw(&["clear"]) {
         return plain("That one's on you — the Clear Garden button is up top. I don't do extinctions.");
     }
-    if has(&["evolve", "mutate", "generation"]) {
+    if hasw(&["adopt"]) {
+        return adopt_intent(&words, veldt);
+    }
+    if hasw(&["evolve", "mutate", "generation"]) {
         return evolve_intent(&words, veldt);
     }
-    if has(&["sick", "heal", "tend", "fix the garden", "mend"]) {
+    if hasw(&["heal", "tend", "mend"]) || has(&["sick", "fix the garden"]) {
         return tend_intent(veldt);
+    }
+    if hasw(&["improve", "optimize", "optimise", "faster", "upgrade"]) {
+        return improve_intent(&t, &words, veldt);
+    }
+    if hasw(&["suggest", "surprise"]) {
+        return suggest_intent(&words, veldt);
     }
     if has(&["garden", "status", "alive", "what's growing", "what is growing", "what have you", "ecosystem"]) {
         return status_intent(veldt);
     }
-    if has(&["run", "execute", "try this", "try the"]) && !has(&["write", "make", "create", "grow", "function"]) {
+    if hasw(&["show", "explain", "source", "inspect"]) || has(&["what does", "look like"]) {
+        return show_intent(&words, veldt);
+    }
+    if has(&["obituar", "why did", "why'd"]) || hasw(&["deaths", "died", "dead"]) {
+        return obituary_intent(&words, veldt);
+    }
+    if hasw(&["test", "trial", "retrial"]) && !gen() {
+        return test_intent(&words, veldt);
+    }
+    if has(&["run", "execute", "try this", "try the"]) && !gen() {
         return run_intent(editor_source, veldt);
     }
-    if has(&["write", "make", "create", "grow", "function", "implement", "build", "code"]) {
+    if gen() {
         return generate_intent(&t, &words, veldt);
     }
     if has(&["help", "what can you", "hi", "hello", "hey", "who are you"]) {
@@ -219,13 +239,17 @@ fn help_intent() -> AgentResponse {
     plain(
         "I'm the Gardener — I write Veldt code and tend the ecosystem. No LLM, just templates and the garden's own machinery.\n\
          Try:\n\
-         • \"write a fibonacci function\" — I generate code, run it, plant it\n\
-         • \"run this\" — execute what's in the editor\n\
-         • \"evolve 5\" — run evolution cycles\n\
-         • \"tend the garden\" — heal every sick variant\n\
-         • \"prune fib#2\" — kill a specific variant\n\
-         • \"what's alive?\" — garden census\n\
-         Known species: fib, factorial, prime, gcd, power, sort, reverse, palindrome, sum, mean, max, min, fizzbuzz, collatz, evens, doubles, vowels, digits, leapyear, clamp, words."
+         • \"write a fibonacci function\" — generate, run, plant\n\
+         • \"count primes\" — I notice the dependency and plant is_prime first\n\
+         • \"parallel\" — pmap demo across threads\n\
+         • \"improve fib\" — grow a faster strain into the lineage\n\
+         • \"show fib\" — pretty-print the fittest variant\n\
+         • \"test fib\" — re-trial every variant\n\
+         • \"adopt fib#2\" — favor a variant in dispatch\n\
+         • \"obituaries\" — recent deaths\n\
+         • \"surprise me\" — plant a random new species\n\
+         • \"run this\" · \"evolve 5\" · \"tend\" · \"prune x#N\" · \"what's alive?\"\n\
+         Known species: fib, factorial, prime, count primes, gcd, power, sort, quicksort, reverse, palindrome, sum, mean, max, min, fizzbuzz, collatz, evens, doubles, vowels, digits, leapyear, clamp, words, parallel."
     )
 }
 
@@ -401,12 +425,256 @@ fn status_intent(veldt: &Veldt) -> AgentResponse {
     plain(&text)
 }
 
+// === Inspection & selection-pressure intents ===
+
+/// First word that matches a garden lineage name, or a name#N pair.
+fn find_lineage<'a>(words: &[&'a str], veldt: &Veldt) -> Option<String> {
+    for w in words {
+        let base = w.split('#').next().unwrap_or(w);
+        if !base.is_empty() && veldt.functions.contains_key(base) {
+            return Some(base.to_string());
+        }
+    }
+    None
+}
+
+/// Parse a bare word that looks like a function name (optionally name#N).
+fn parse_variant_ref(words: &[&str]) -> Option<(String, Option<u32>)> {
+    for w in words {
+        if let Some(pos) = w.find('#') {
+            let name = &w[..pos];
+            if let Ok(id) = w[pos + 1..].parse::<u32>() {
+                if !name.is_empty() {
+                    return Some((name.to_string(), Some(id)));
+                }
+            }
+        }
+    }
+    None
+}
+
+fn show_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
+    let (name, want_id) = match parse_variant_ref(words) {
+        Some(x) => x,
+        None => match find_lineage(words, veldt) {
+            Some(n) => (n, None),
+            None => {
+                let cand = words.iter().skip_while(|w| **w == "show" || **w == "me" || **w == "explain" || **w == "the" || **w == "source" || **w == "of" || **w == "inspect").next();
+                return match cand {
+                    Some(c) => plain(&format!("No lineage called '{}' lives in the garden.", c)),
+                    None => plain("Show what? Name a lineage — e.g. \"show fib\" or \"show fib#2\"."),
+                };
+            }
+        },
+    };
+    let variants = match veldt.functions.get(&name) {
+        Some(v) if !v.is_empty() => v,
+        _ => return plain(&format!("No lineage called '{}' lives in the garden.", name)),
+    };
+    let entry = match want_id {
+        Some(id) => match variants.iter().find(|e| e.id == id) {
+            Some(e) => e,
+            None => return plain(&format!("{}#{} isn't in the garden.", name, id)),
+        },
+        None => match veldt.get_fittest_variant(&name) {
+            Some(e) => e,
+            None => return plain(&format!("Every {} variant is dead — check the obituaries.", name)),
+        },
+    };
+    let body = crate::fmt::format_program(&entry.body);
+    let params: Vec<String> = entry.params.iter()
+        .map(|p| format!("{}", p.name))
+        .collect();
+    let health_str = match &entry.health {
+        Health::Healthy => "healthy".into(),
+        Health::Sick(e) => format!("sick: {}", e),
+        Health::Dying => "dying".into(),
+    };
+    AgentResponse {
+        steps: vec![step("obs", format!("{}#{} — {} | fitness {:.2} | {}", name, entry.id, health_str, entry.fitness, entry.origin))],
+        reply: format!("{}#{} — {} | {} variant{} in lineage:", name, entry.id, health_str, variants.len(), if variants.len() == 1 { "" } else { "s" }),
+        code: Some(format!("fn {}({}) {{\n{}\n}}", name, params.join(", "), body)),
+        ran: false,
+        output: None,
+        success: None,
+        events: Vec::new(),
+    }
+}
+
+fn adopt_intent(words: &[&str], veldt: &mut Veldt) -> AgentResponse {
+    let (name, id) = match parse_variant_ref(words) {
+        Some((n, Some(i))) => (n, i),
+        _ => return plain("Adopt which? Give me a variant — e.g. \"adopt fib#2\"."),
+    };
+    let mut found = false;
+    if let Some(variants) = veldt.functions.get_mut(&name) {
+        for v in variants.iter_mut() {
+            if v.id == id {
+                v.fitness = 1_000_000.0;
+                found = true;
+            } else {
+                v.fitness = v.fitness.min(1_000.0);
+            }
+        }
+    }
+    if !found {
+        return AgentResponse {
+            steps: vec![step("err", format!("{}#{} isn't in the garden.", name, id))],
+            reply: format!("No variant named {}#{} lives here.", name, id),
+            code: None, ran: false, output: None, success: None, events: Vec::new(),
+        };
+    }
+    AgentResponse {
+        steps: vec![
+            step("act", format!("Boosting {}#{} fitness to dominance.", name, id)),
+            step("ok", "Dispatch will prefer it until it dies or is un-adopted by a fitter birth."),
+        ],
+        reply: format!("Adopted {}#{} — plain `{}(...)` calls now route to it.", name, id, name),
+        code: None, ran: false, output: None, success: None,
+        events: vec![format!("[ADOPTED] {}#{}", name, id)],
+    }
+}
+
+fn test_intent(words: &[&str], veldt: &mut Veldt) -> AgentResponse {
+    let name = match find_lineage(words, veldt) {
+        Some(n) => n,
+        None => {
+            let cand = words.iter().find(|w| **w != "test" && **w != "the" && **w != "family" && **w != "trial").map(|s| s.to_string());
+            return match cand {
+                Some(c) => plain(&format!("No lineage called '{}' lives in the garden.", c)),
+                None => plain("Test which family? e.g. \"test fib\" — re-trials every variant."),
+            };
+        }
+    };
+    let ids: Vec<u32> = veldt.functions[&name].iter().map(|e| e.id).collect();
+    let mut steps = vec![step("plan", format!("Re-trialing {} variants of {}.", ids.len(), name))];
+    let mut events = Vec::new();
+    let mut healthy = 0;
+    for id in ids {
+        let mut entry = veldt.functions[&name].iter().find(|e| e.id == id).cloned().unwrap();
+        HealthChecker::check_at_birth(&mut entry, veldt);
+        let ok = matches!(entry.health, Health::Healthy);
+        if ok { healthy += 1; }
+        let health_str = match &entry.health {
+            Health::Healthy => "healthy".into(),
+            Health::Sick(e) => format!("sick: {}", e),
+            Health::Dying => "dying".into(),
+        };
+        let msg = format!("{}#{} — {} (trial: {:.2})", name, id, health_str, entry.trial_score);
+        steps.push(step(if ok { "ok" } else { "err" }, msg.clone()));
+        events.push(format!("[TRIAL] {}", msg));
+        if let Some(vs) = veldt.functions.get_mut(&name) {
+            for e in vs.iter_mut() {
+                if e.id == id { *e = entry.clone(); break; }
+            }
+        }
+    }
+    AgentResponse {
+        steps,
+        reply: format!("Trials done: {}/{} variants of {} are healthy.", healthy, events.len(), name),
+        code: None, ran: false, output: None, success: None, events,
+    }
+}
+
+fn obituary_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
+    // optional lineage filter: any word matching a name that has obituaries
+    let filter: Option<String> = words.iter()
+        .find(|w| veldt.obituaries.iter().any(|o| &o.name == **w))
+        .map(|s| s.to_string());
+    let obits: Vec<&crate::veldt::Obituary> = veldt.obituaries.iter().rev()
+        .filter(|o| filter.as_ref().map(|f| &o.name == f).unwrap_or(true))
+        .take(10)
+        .collect();
+    if obits.is_empty() {
+        return match &filter {
+            Some(f) => plain(&format!("Nothing named '{}' has ever died.", f)),
+            None => plain("No deaths yet — the garden has only known life."),
+        };
+    }
+    let mut text = String::from("Recent deaths:\n");
+    for o in &obits {
+        text.push_str(&format!("  {}#{} — died at age {} | {}\n", o.name, o.id, o.age, o.cause_of_death));
+    }
+    plain(text.trim_end())
+}
+
+fn suggest_intent(words: &[&str], veldt: &mut Veldt) -> AgentResponse {
+    let surprise = words.contains(&"surprise") || words.contains(&"plant") || words.contains(&"random");
+    let unplanted: Vec<&'static str> = catalog().iter()
+        .map(|t| t.canonical)
+        .filter(|c| !veldt.functions.contains_key(*c))
+        .collect();
+    if !surprise {
+        return if unplanted.is_empty() {
+            plain("You've grown every species I know. Try \"improve fib\" for a faster strain, or \"evolve\" to breed rivals.")
+        } else {
+            plain(&format!("Species not yet in your garden: {}\nSay \"surprise me\" and I'll plant one.", unplanted.join(", ")))
+        };
+    }
+    // deterministic pseudo-random pick seeded by run_count
+    let pick = unplanted.get((veldt.run_count as usize) % unplanted.len().max(1));
+    match pick {
+        Some(&canonical) => {
+            let tmpl = catalog().into_iter().find(|t| t.canonical == canonical).unwrap();
+            generate_from_template(&tmpl, canonical.to_string(), veldt)
+        }
+        None => plain("You've grown every species I know. Try \"improve fib\" for a faster strain, or \"evolve\" to breed rivals."),
+    }
+}
+
+fn improve_intent(t: &str, words: &[&str], veldt: &mut Veldt) -> AgentResponse {
+    // Known fast strains: lineage keyword -> (improved body template, planted-into-lineage)
+    // The improved organism enters the SAME lineage and competes on merit.
+    if t.contains("fib") {
+        let name = "fib";
+        let code = r#"fn @N@_pair(n: int) {
+    if n == 0 {
+        return [0, 1]
+    }
+    let half = @N@_pair(n / 2)
+    let a = half[0]
+    let b = half[1]
+    let c = a * (2 * b - a)
+    let d = a * a + b * b
+    if n % 2 == 0 {
+        return [c, d]
+    }
+    return [d, c + d]
+}
+
+grow fn @N@(n: int) test @N@(0) == 0, @N@(1) == 1, @N@(10) == 55 {
+    return @N@_pair(n)[0]
+}
+
+print("@N@(30) = " + @N@(30))
+"#.replace("@N@", name);
+        let note = if veldt.functions.contains_key(name) {
+            "This strain is O(log n) — it should out-compete the naive one on trial speed. Run \"evolve\" to watch."
+        } else {
+            "No fib lineage yet, so this strain plants as the founding variant."
+        };
+        return grow_and_report_stages(
+            vec![StageSpec { label: "fast-doubling fib".into(), code }],
+            Some(note.to_string()),
+            veldt,
+        );
+    }
+    let target = find_lineage(words, veldt);
+    match target {
+        Some(n) => plain(&format!(
+            "I don't know a faster strain for {} — my improvements are limited to fib (fast-doubling). Try \"evolve\" and let mutation try instead.", n)),
+        None => plain("Improve what? I know a fast-doubling strain for fib — say \"improve fib\". For others, \"evolve\" is the path."),
+    }
+}
+
 // === Code generation ===
 
 struct Template {
     keywords: &'static [&'static str],
     canonical: &'static str,
     desc: &'static str,
+    // canonical names of garden lineages this one calls — planted first if absent
+    needs: &'static [&'static str],
     // Veldt source with @N@ as the function-name placeholder
     make: &'static str,
 }
@@ -417,6 +685,7 @@ fn catalog() -> Vec<Template> {
             keywords: &["fib", "fibonacci"],
             canonical: "fib",
             desc: "fibonacci number",
+            needs: &[],
             make: r#"grow fn @N@(n: int) test @N@(0) == 0, @N@(1) == 1, @N@(10) == 55 {
     if n <= 1 {
         return n
@@ -440,6 +709,7 @@ print("@N@(10) = " + @N@(10))
             keywords: &["factorial", "fact"],
             canonical: "factorial",
             desc: "factorial",
+            needs: &[],
             make: r#"grow fn @N@(n: int) test @N@(0) == 1, @N@(5) == 120 {
     if n <= 1 {
         return 1
@@ -460,6 +730,7 @@ print("@N@(10) = " + @N@(10))
             keywords: &["prime"],
             canonical: "is_prime",
             desc: "primality test",
+            needs: &[],
             make: r#"grow fn @N@(n: int) test @N@(2) == true, @N@(7) == true, @N@(4) == false {
     if n < 2 {
         return false
@@ -485,6 +756,7 @@ print("@N@(100) = " + @N@(100))
             keywords: &["gcd", "greatest common", "common divisor"],
             canonical: "gcd",
             desc: "greatest common divisor",
+            needs: &[],
             make: r#"grow fn @N@(a: int, b: int) test @N@(12, 8) == 4, @N@(17, 5) == 1 {
     while b != 0 {
         let temp = b
@@ -501,6 +773,7 @@ print("@N@(48, 36) = " + @N@(48, 36))
             keywords: &["power", "exponent", "pow"],
             canonical: "power",
             desc: "integer power",
+            needs: &[],
             make: r#"grow fn @N@(base: int, exp: int) test @N@(2, 10) == 1024, @N@(3, 3) == 27 {
     let result = 1
     let i = 0
@@ -518,6 +791,7 @@ print("@N@(2, 16) = " + @N@(2, 16))
             keywords: &["sort", "ordered", "ascending"],
             canonical: "bubble_sort",
             desc: "bubble sort",
+            needs: &[],
             make: r#"grow fn @N@(nums: list<int>) test @N@([3, 1, 2]) == [1, 2, 3] {
     let result = nums
     let n = len(result)
@@ -544,6 +818,7 @@ print("@N@([5, 2, 9, 1, 7]) = " + @N@([5, 2, 9, 1, 7]))
             keywords: &["reverse"],
             canonical: "reverse_str",
             desc: "string reversal",
+            needs: &[],
             make: r#"grow fn @N@(s: str) test @N@("hello") == "olleh" {
     let chars = s.chars()
     let result = ""
@@ -562,6 +837,7 @@ print(@N@("veldt"))
             keywords: &["palindrome"],
             canonical: "is_palindrome",
             desc: "palindrome check",
+            needs: &[],
             make: r#"grow fn @N@(s: str) test @N@("racecar") == true, @N@("hello") == false {
     let chars = s.chars()
     let n = len(chars)
@@ -582,6 +858,7 @@ print("@N@(racecar) = " + @N@("racecar"))
             keywords: &["sum", "total", "add up"],
             canonical: "sum",
             desc: "list sum",
+            needs: &[],
             make: r#"grow fn @N@(nums: list<int>) test @N@([1, 2, 3]) == 6 {
     let total = 0
     for n in nums {
@@ -597,6 +874,7 @@ print("@N@([10, 20, 30]) = " + @N@([10, 20, 30]))
             keywords: &["mean", "average"],
             canonical: "mean",
             desc: "list average",
+            needs: &[],
             make: r#"grow fn @N@(nums: list<int>) test @N@([1, 2, 3, 4, 5]) == 3 {
     let total = 0
     let count = 0
@@ -617,6 +895,7 @@ print("@N@([2, 4, 6, 8]) = " + @N@([2, 4, 6, 8]))
             keywords: &["maximum", "largest", "max"],
             canonical: "max_of",
             desc: "list maximum",
+            needs: &[],
             make: r#"grow fn @N@(nums: list<int>) test @N@([3, 7, 2, 9, 1]) == 9 {
     let best = nums[0]
     for n in nums {
@@ -634,6 +913,7 @@ print("@N@([4, 8, 15, 16, 23, 42]) = " + @N@([4, 8, 15, 16, 23, 42]))
             keywords: &["minimum", "smallest", "min"],
             canonical: "min_of",
             desc: "list minimum",
+            needs: &[],
             make: r#"grow fn @N@(nums: list<int>) test @N@([3, 7, 2, 9, 1]) == 1 {
     let best = nums[0]
     for n in nums {
@@ -651,6 +931,7 @@ print("@N@([4, 8, 15, 16, 23, 42]) = " + @N@([4, 8, 15, 16, 23, 42]))
             keywords: &["fizzbuzz", "fizz"],
             canonical: "fizzbuzz",
             desc: "fizzbuzz",
+            needs: &[],
             make: r#"grow fn @N@(n: int) test @N@(3) == "fizz", @N@(5) == "buzz", @N@(15) == "fizzbuzz", @N@(7) == "7" {
     if n % 15 == 0 {
         return "fizzbuzz"
@@ -675,6 +956,7 @@ while i <= 15 {
             keywords: &["collatz", "hailstone"],
             canonical: "collatz_steps",
             desc: "collatz step counter",
+            needs: &[],
             make: r#"grow fn @N@(n: int) test @N@(6) == 8, @N@(1) == 0 {
     let steps = 0
     let x = n
@@ -696,6 +978,7 @@ print("@N@(27) = " + @N@(27))
             keywords: &["even", "evens", "filter"],
             canonical: "evens",
             desc: "filter even numbers",
+            needs: &[],
             make: r#"grow fn @N@(nums: list<int>) test @N@([1, 2, 3, 4]) == [2, 4] {
     let result = []
     for n in nums {
@@ -713,6 +996,7 @@ print("@N@([1, 2, 3, 4, 5, 6]) = " + @N@([1, 2, 3, 4, 5, 6]))
             keywords: &["double", "map"],
             canonical: "doubles",
             desc: "double every element",
+            needs: &[],
             make: r#"grow fn @N@(nums: list<int>) test @N@([1, 2, 3]) == [2, 4, 6] {
     let result = []
     for n in nums {
@@ -728,6 +1012,7 @@ print("@N@([1, 2, 3, 4]) = " + @N@([1, 2, 3, 4]))
             keywords: &["vowel"],
             canonical: "count_vowels",
             desc: "vowel counter",
+            needs: &[],
             make: r#"grow fn @N@(s: str) test @N@("hello") == 2 {
     let vowels = "aeiou"
     let count = 0
@@ -746,6 +1031,7 @@ print(@N@("the quick brown fox"))
             keywords: &["digit", "digits"],
             canonical: "digit_sum",
             desc: "digit sum",
+            needs: &[],
             make: r#"grow fn @N@(n: int) test @N@(123) == 6, @N@(0) == 0 {
     let total = 0
     let x = n
@@ -763,6 +1049,7 @@ print("@N@(9875) = " + @N@(9875))
             keywords: &["leap", "leapyear", "leap year"],
             canonical: "is_leap_year",
             desc: "leap year check",
+            needs: &[],
             make: r#"grow fn @N@(y: int) test @N@(2000) == true, @N@(1900) == false, @N@(2024) == true {
     if y % 400 == 0 {
         return true
@@ -780,6 +1067,7 @@ print("@N@(2026) = " + @N@(2026))
             keywords: &["clamp", "bound", "limit"],
             canonical: "clamp",
             desc: "clamp to a range",
+            needs: &[],
             make: r#"grow fn @N@(x: int, lo: int, hi: int) test @N@(5, 0, 10) == 5, @N@(-3, 0, 10) == 0, @N@(99, 0, 10) == 10 {
     if x < lo {
         return lo
@@ -797,6 +1085,7 @@ print("@N@(42, 0, 10) = " + @N@(42, 0, 10))
             keywords: &["word", "words", "count words"],
             canonical: "count_words",
             desc: "word counter",
+            needs: &[],
             make: r#"grow fn @N@(text: str) test @N@("the quick brown fox") == 4 {
     let words = text.split(" ")
     return len(words)
@@ -805,7 +1094,76 @@ print("@N@(42, 0, 10) = " + @N@(42, 0, 10))
 print(@N@("code is alive"))
 "#,
         },
+        Template {
+            keywords: &["count prime", "prime count", "primes under", "how many prime"],
+            canonical: "count_primes",
+            desc: "prime counter — depends on is_prime",
+            needs: &["is_prime"],
+            make: r#"grow fn @N@(limit: int) test @N@(10) == 4, @N@(2) == 0 {
+    let count = 0
+    let i = 2
+    while i < limit {
+        if is_prime(i) {
+            count = count + 1
+        }
+        i = i + 1
+    }
+    return count
+}
+
+print("@N@(100) = " + @N@(100))
+"#,
+        },
+        Template {
+            keywords: &["parallel", "pmap", "spawn", "threads", "concurrent"],
+            canonical: "parallel_primes",
+            desc: "pmap demo — runs garden is_prime on a thread per item",
+            needs: &["is_prime"],
+            make: r#"let inputs = [2, 3, 4, 5, 10, 13, 17, 97, 100, 101]
+let results = pmap("is_prime", inputs)
+print("inputs:  " + inputs)
+print("results: " + results)
+"#,
+        },
+        Template {
+            keywords: &["quicksort", "quick sort", "qsort", "hoare"],
+            canonical: "quick_sort",
+            desc: "quicksort",
+            needs: &[],
+            make: r#"grow fn @N@(nums: list<int>) test @N@([3, 1, 2]) == [1, 2, 3], @N@([]) == [], @N@([5, 2, 9, 1, 7]) == [1, 2, 5, 7, 9] {
+    if len(nums) <= 1 {
+        return nums
+    }
+    let pivot = nums[0]
+    let less = []
+    let more = []
+    let i = 1
+    while i < len(nums) {
+        if nums[i] < pivot {
+            less = less.push(nums[i])
+        } else {
+            more = more.push(nums[i])
+        }
+        i = i + 1
+    }
+    let result = @N@(less)
+    result = result.push(pivot)
+    let right = @N@(more)
+    for x in right {
+        result = result.push(x)
+    }
+    return result
+}
+
+print(@N@([5, 2, 9, 1, 7, 3]))
+"#,
+        },
     ]
+}
+
+pub struct StageSpec {
+    pub label: String,
+    pub code: String,
 }
 
 fn generate_intent(t: &str, words: &[&str], veldt: &mut Veldt) -> AgentResponse {
@@ -821,22 +1179,173 @@ grow fn {}(x: int) test {}(0) == 0 {{
 
 print("{}(0) = " + {}(0))
 "#, name, name, name, name);
-        return grow_and_report(&name, "a stub function", code, veldt);
+        return grow_and_report_stages(
+            vec![StageSpec { label: format!("stub function {}", name), code }],
+            None, veldt,
+        );
     }
     plain(
-        "I'm not sure what to write. Name a species I know — fib, factorial, prime, gcd, power, sort, reverse, palindrome, sum, mean, max, min, fizzbuzz, collatz, evens, doubles, vowels, digits, leapyear, clamp, words — or say \"a function called NAME\" for a stub."
+        "I'm not sure what to write. Name a species I know — fib, factorial, prime, count primes, gcd, power, sort, quicksort, reverse, palindrome, sum, mean, max, min, fizzbuzz, collatz, evens, doubles, vowels, digits, leapyear, clamp, words, parallel — or say \"a function called NAME\" for a stub."
     )
 }
 
+/// A keyword matches if it's a substring of the task, OR if its words
+/// appear consecutively in the task where each pair shares a prefix of
+/// the shorter word (so "counts primes" hits "count prime", "digit"
+/// hits "digits"). Shorter words must be >=3 chars to match.
+fn keyword_match(kw: &str, t: &str, words: &[&str]) -> bool {
+    if t.contains(kw) {
+        return true;
+    }
+    let kw_words: Vec<&str> = kw.split(' ').filter(|w| !w.is_empty()).collect();
+    'outer: for start in 0..words.len() {
+        if start + kw_words.len() > words.len() {
+            break;
+        }
+        for (i, k) in kw_words.iter().enumerate() {
+            let w = words[start + i];
+            if k.len().min(w.len()) < 3 || !(k.starts_with(w) || w.starts_with(k)) {
+                continue 'outer;
+            }
+        }
+        return true;
+    }
+    false
+}
+
 fn try_templates(t: &str, words: &[&str], veldt: &mut Veldt) -> Option<AgentResponse> {
+    // Longest matching keyword wins — "counts primes" should route to
+    // count_primes (kw "count prime"), not is_prime (kw "prime").
+    let mut best: Option<(Template, usize)> = None;
     for tmpl in catalog() {
-        if tmpl.keywords.iter().any(|k| t.contains(k) || words.contains(k)) {
-            let name = extract_name(words).unwrap_or_else(|| tmpl.canonical.to_string());
-            let code = tmpl.make.replace("@N@", &name);
-            return Some(grow_and_report(&name, tmpl.desc, code, veldt));
+        let score = tmpl.keywords.iter()
+            .filter(|k| keyword_match(k, t, words))
+            .map(|k| k.len())
+            .max();
+        if let Some(s) = score {
+            if best.as_ref().map(|(_, bs)| s > *bs).unwrap_or(true) {
+                best = Some((tmpl, s));
+            }
         }
     }
-    None
+    best.map(|(tmpl, _)| {
+        let name = extract_name(words).unwrap_or_else(|| tmpl.canonical.to_string());
+        generate_from_template(&tmpl, name, veldt)
+    })
+}
+
+// Resolve a template's dependency chain into an ordered stage list:
+// any `needs` lineage absent from the garden gets planted first, then
+// the requested organism itself. Recursive — deps can have deps.
+fn resolve_stages(tmpl: &Template, name: String, veldt: &Veldt, stages: &mut Vec<StageSpec>, visiting: &mut Vec<String>) -> Result<(), String> {
+    for dep in tmpl.needs {
+        let dep_present = veldt.functions.get(*dep)
+            .map(|v| v.iter().any(|e| matches!(e.health, Health::Healthy | Health::Sick(_))))
+            .unwrap_or(false)
+            || stages.iter().any(|s| s.label.contains(dep));
+        if dep_present { continue; }
+        if visiting.contains(&dep.to_string()) {
+            return Err(format!("dependency cycle at {}", dep));
+        }
+        let dep_tmpl = catalog().into_iter().find(|t| t.canonical == *dep)
+            .ok_or_else(|| format!("needs {} but I don't know how to write it", dep))?;
+        visiting.push(dep.to_string());
+        resolve_stages(&dep_tmpl, dep.to_string(), veldt, stages, visiting)?;
+        visiting.pop();
+    }
+    stages.push(StageSpec {
+        label: format!("{} ({})", name, tmpl.desc),
+        code: tmpl.make.replace("@N@", &name),
+    });
+    Ok(())
+}
+
+fn generate_from_template(tmpl: &Template, name: String, veldt: &mut Veldt) -> AgentResponse {
+    let mut stages = Vec::new();
+    let mut visiting = Vec::new();
+    if let Err(e) = resolve_stages(tmpl, name, veldt, &mut stages, &mut visiting) {
+        return AgentResponse {
+            steps: vec![step("err", e.clone())],
+            reply: format!("Can't write that: {}.", e),
+            code: None, ran: false, output: None, success: None, events: Vec::new(),
+        };
+    }
+    grow_and_report_stages(stages, None, veldt)
+}
+
+// The agent loop's observe phase: run each generated program through the
+// real pipeline in order, narrating what the garden did with each. The
+// veldt is saved between stages so later stages (pmap/spawn threads, or
+// calls into freshly-planted deps) see the new organisms.
+fn grow_and_report_stages(stages: Vec<StageSpec>, note: Option<String>, veldt: &mut Veldt) -> AgentResponse {
+    let mut steps = Vec::new();
+    let mut events = Vec::new();
+    let mut all_code = String::new();
+    let mut combined_output = String::new();
+    let mut births = 0;
+    let multi = stages.len() > 1;
+
+    if multi {
+        steps.push(step("plan", format!("{} stages — dependencies first.", stages.len())));
+    }
+    for (i, stage) in stages.iter().enumerate() {
+        if multi {
+            steps.push(step("plan", format!("Stage {}/{}: {}", i + 1, stages.len(), stage.label)));
+        } else {
+            steps.push(step("plan", format!("Writing {}. Health-checked at birth, then planted.", stage.label)));
+        }
+        steps.push(step("act", "Generated Veldt source (see code below)."));
+        steps.push(step("act", "Running it through the interpreter."));
+        if !all_code.is_empty() { all_code.push_str("\n"); }
+        all_code.push_str(&stage.code);
+
+        let result = execute_source(&stage.code, veldt);
+        for ev in &result.events {
+            let kind = if ev.contains("sick") || ev.contains("OBITUARY") { "obs" } else { "ok" };
+            steps.push(step(kind, ev.clone()));
+            if ev.contains("[BIRTH]") { births += 1; }
+            events.push(ev.clone());
+        }
+        if !result.output.trim().is_empty() {
+            combined_output.push_str(&result.output);
+        }
+        if !result.success {
+            steps.push(step("err", format!("Stage {} failed — see output.", i + 1)));
+            return AgentResponse {
+                steps,
+                reply: format!("Died at stage {}/{} ({}). The code is below if you want to patch it by hand.", i + 1, stages.len(), stage.label),
+                code: Some(all_code),
+                ran: true,
+                output: Some(combined_output),
+                success: Some(false),
+                events,
+            };
+        }
+        // persist between stages: spawned threads (spawn/pmap) and calls
+        // into freshly-grown deps resolve against the on-disk garden.
+        let _ = veldt.save();
+    }
+
+    if births > 0 {
+        steps.push(step("ok", "It lives. The new variant competes with its lineage from here — run \"evolve\" to breed rivals."));
+    }
+    let reply = match (births, note) {
+        (0, Some(n)) => n,
+        (0, None) => "Ran it.".to_string(),
+        (1, note) => format!("Planted — it's alive in the garden now.{} The code is below; hit Insert to keep it in your editor.",
+            note.map(|n| format!(" {}", n)).unwrap_or_default()),
+        (n, note) => format!("Planted {} organisms — all alive.{} The code is below; hit Insert to keep it in your editor.", n,
+            note.map(|x| format!(" {}", x)).unwrap_or_default()),
+    };
+    AgentResponse {
+        steps,
+        reply,
+        code: Some(all_code),
+        ran: true,
+        output: if combined_output.is_empty() { None } else { Some(combined_output) },
+        success: Some(true),
+        events,
+    }
 }
 
 // Pull a user-supplied function name out of phrases like
@@ -853,33 +1362,123 @@ fn extract_name(words: &[&str]) -> Option<String> {
     None
 }
 
-// The agent loop's observe phase: run the generated program through the
-// real pipeline and narrate what the garden did with it.
-fn grow_and_report(name: &str, desc: &str, code: String, veldt: &mut Veldt) -> AgentResponse {
-    let mut steps = vec![
-        step("plan", format!("Writing {} — \"{}\". Health-checked at birth, then planted.", name, desc)),
-        step("act", "Generated Veldt source (see code below)."),
-        step("act", "Running it through the interpreter."),
-    ];
-    let result = execute_source(&code, veldt);
-    for ev in &result.events {
-        let kind = if ev.contains("sick") || ev.contains("OBITUARY") { "obs" } else { "ok" };
-        steps.push(step(kind, ev.clone()));
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Route the on-disk garden (and therefore spawn/pmap's Veldt::new())
+    // into a per-test temp dir so tests never touch the real garden.
+    // Returns a lock guard: HOME is process-global, so agent tests are
+    // serialized — otherwise parallel threads could swap each other's
+    // garden mid-pmap.
+    fn fresh_veldt() -> (Veldt, std::sync::MutexGuard<'static, ()>) {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static N: AtomicUsize = AtomicUsize::new(0);
+        let id = N.fetch_add(1, Ordering::SeqCst);
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let home = std::env::temp_dir()
+            .join(format!("veldt-agent-test-{}-{}-{}", std::process::id(), id, nanos));
+        let garden = home.join(".veldt").join("garden");
+        std::env::set_var("HOME", &home);
+        (Veldt::with_path(garden), guard)
     }
-    let (reply, success) = if result.success {
-        steps.push(step("ok", "It lives. The new variant competes with its lineage from here — run \"evolve\" to breed rivals."));
-        (format!("Planted {} — it's alive in the garden now. The code is below; hit Insert to keep it in your editor.", name), true)
-    } else {
-        steps.push(step("err", "The seed didn't take — see output."));
-        (format!("I wrote {}, but it failed on its first run. The code is below if you want to patch it by hand.", name), false)
-    };
-    AgentResponse {
-        steps,
-        reply,
-        code: Some(code),
-        ran: true,
-        output: Some(result.output),
-        success: Some(success),
-        events: result.events,
+
+    #[test]
+    fn every_template_runs_and_births_healthy() {
+        for tmpl in catalog() {
+            let (mut veldt, _guard) = fresh_veldt();
+            let mut stages = Vec::new();
+            let mut visiting = Vec::new();
+            resolve_stages(&tmpl, tmpl.canonical.to_string(), &veldt, &mut stages, &mut visiting)
+                .unwrap_or_else(|e| panic!("{}: resolve failed: {}", tmpl.canonical, e));
+            assert_eq!(stages.len(), 1 + tmpl.needs.len(), "{}: wrong stage count", tmpl.canonical);
+            let mut last_events = Vec::new();
+            for (i, s) in stages.iter().enumerate() {
+                let res = execute_source(&s.code, &mut veldt);
+                assert!(res.success, "{} stage {} failed: {}", tmpl.canonical, i, res.output);
+                last_events = res.events;
+                let _ = veldt.save();
+            }
+            if tmpl.make.contains("grow fn") {
+                assert!(last_events.iter().any(|e| e.contains("[BIRTH]") && e.contains("healthy")),
+                    "{}: no healthy birth: {:?}", tmpl.canonical, last_events);
+            }
+        }
+    }
+
+    #[test]
+    fn deps_resolve_and_plant_first() {
+        let (mut veldt, _guard) = fresh_veldt();
+        let resp = respond("write a function that counts primes", "", &mut veldt);
+        assert_eq!(resp.success, Some(true), "failed: {:?}", resp.output);
+        let births = resp.events.iter().filter(|e| e.contains("[BIRTH]")).count();
+        assert_eq!(births, 2, "expected is_prime + count_primes: {:?}", resp.events);
+        assert!(veldt.functions.contains_key("is_prime"));
+        assert!(veldt.functions.contains_key("count_primes"));
+    }
+
+    #[test]
+    fn parallel_demo_runs_pmap() {
+        let (mut veldt, _guard) = fresh_veldt();
+        let resp = respond("write something parallel", "", &mut veldt);
+        assert_eq!(resp.success, Some(true), "failed: {:?}", resp.output);
+        let out = resp.output.unwrap_or_default();
+        assert!(out.contains("results:"), "pmap output missing: {}", out);
+    }
+
+    #[test]
+    fn improve_grows_competing_strain() {
+        let (mut veldt, _guard) = fresh_veldt();
+        let resp = respond("write a fibonacci function", "", &mut veldt);
+        assert_eq!(resp.success, Some(true));
+        let resp = respond("improve fib", "", &mut veldt);
+        assert_eq!(resp.success, Some(true), "improve failed: {:?}", resp.output);
+        assert!(veldt.functions["fib"].len() >= 2, "expected 2+ fib variants");
+    }
+
+    #[test]
+    fn show_returns_fittest_source() {
+        let (mut veldt, _guard) = fresh_veldt();
+        respond("write a fibonacci function", "", &mut veldt);
+        let resp = respond("show fib", "", &mut veldt);
+        let code = resp.code.unwrap_or_default();
+        assert!(code.contains("fn fib("), "bad show output: {}", code);
+        assert!(code.contains("return"), "missing body: {}", code);
+    }
+
+    #[test]
+    fn adopt_boosts_variant() {
+        let (mut veldt, _guard) = fresh_veldt();
+        respond("write a fibonacci function", "", &mut veldt);
+        let resp = respond("adopt fib#1", "", &mut veldt);
+        assert!(resp.reply.contains("Adopted"));
+        assert!(veldt.functions["fib"][0].fitness > 900_000.0);
+    }
+
+    #[test]
+    fn test_intent_retrials() {
+        let (mut veldt, _guard) = fresh_veldt();
+        respond("write a fibonacci function", "", &mut veldt);
+        let resp = respond("test fib", "", &mut veldt);
+        assert!(resp.events.iter().any(|e| e.contains("[TRIAL] fib#1 — healthy")));
+    }
+
+    #[test]
+    fn stub_and_surprise_and_status() {
+        let (mut veldt, _guard) = fresh_veldt();
+        let resp = respond("write a function called quux", "", &mut veldt);
+        assert_eq!(resp.success, Some(true));
+        assert!(veldt.functions.contains_key("quux"));
+
+        let resp = respond("surprise me", "", &mut veldt);
+        assert_eq!(resp.success, Some(true));
+        let births = resp.events.iter().filter(|e| e.contains("[BIRTH]")).count();
+        assert!(births >= 1);
+
+        let resp = respond("what's alive?", "", &mut veldt);
+        assert!(resp.reply.contains("Garden census"));
     }
 }

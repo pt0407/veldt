@@ -322,6 +322,26 @@
   }
   .agent-input:focus { border-color: var(--border-bright); }
   .agent-thinking { color: var(--text-dim); font-style: italic; font-size: 11px; }
+  .agent-suggest {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    justify-content: center;
+    margin-top: 14px;
+  }
+  .chip {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-family: inherit;
+    font-size: 11px;
+    font-style: normal;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .chip:hover { border-color: var(--border-bright); color: var(--moss-bright); }
 
   /* Center: Editor + Output */
   .center-panel {
@@ -501,10 +521,17 @@
     <div class="agent-panel" id="agentPanel" style="display:none">
       <div class="agent-messages" id="agentMessages">
         <div class="agent-empty">
-          The Gardener tends this veldt.<br><br>
-          "write a fibonacci function"<br>
-          "run this" · "evolve 5"<br>
-          "tend the garden" · "what's alive?"
+          The Gardener tends this veldt.
+          <div class="agent-suggest">
+            <button class="chip" onclick="askAgent('write a fibonacci function')">write a fibonacci function</button>
+            <button class="chip" onclick="askAgent('improve fib')">improve fib</button>
+            <button class="chip" onclick="askAgent('write something parallel')">parallel</button>
+            <button class="chip" onclick="askAgent('surprise me')">surprise me</button>
+            <button class="chip" onclick="askAgent('show fib')">show fib</button>
+            <button class="chip" onclick="askAgent('tend the garden')">tend the garden</button>
+            <button class="chip" onclick="askAgent('obituaries')">obituaries</button>
+            <button class="chip" onclick="askAgent('what\'s alive?')">what's alive?</button>
+          </div>
         </div>
       </div>
       <div class="agent-input-row">
@@ -1045,6 +1072,11 @@ function renderAgentResponse(data) {
 
   msgs.appendChild(div);
   agentScroll();
+}
+
+function askAgent(text) {
+  document.getElementById('agentInput').value = text;
+  sendAgentTask();
 }
 
 async function sendAgentTask() {

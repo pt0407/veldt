@@ -127,6 +127,36 @@ fn main() {
                 process::exit(1);
             }
         }
+        "agent" => {
+            if args.len() < 3 {
+                eprintln!("Usage: veldt agent \"task\"");
+                process::exit(1);
+            }
+            let task = args[2..].join(" ");
+            let mut veldt = veldt::Veldt::new();
+            if let Err(e) = veldt.load() {
+                eprintln!("Error loading veldt: {}", e);
+                process::exit(1);
+            }
+            let resp = agent::respond(&task, "", &mut veldt);
+            for s in &resp.steps {
+                let marker = match s.kind {
+                    "plan" => ">", "act" => "*", "obs" => "-", "ok" => "+", "err" => "x",
+                    _ => " ",
+                };
+                eprintln!("{} {}", marker, s.text);
+            }
+            println!("{}", resp.reply);
+            if let Some(code) = &resp.code {
+                println!("\n{}", code);
+            }
+            if let Some(out) = &resp.output {
+                if !out.trim().is_empty() {
+                    println!("{}", out.trim_end());
+                }
+            }
+            veldt.save().unwrap_or_else(|e| eprintln!("Save error: {}", e));
+        }
         "clear" => {
             let mut veldt = veldt::Veldt::new();
             veldt.clear();
@@ -187,6 +217,7 @@ fn print_usage() {
     println!("  veldt prune <name#N>         Manually kill a specific variant");
     println!("  veldt clear                  Clear the entire veldt");
     println!("  veldt evolve [N]             Run N evolution cycles (garden self-grows)");
+    println!("  veldt agent \"task\"          Ask the Gardener (rule-based coding agent)");
     println!("  veldt studio [port]          Start Veldt Studio IDE (default port 7777)
   veldt fmt <file>             Print canonical formatted source (--write to overwrite)
   veldt test <name>            Re-trial all variants of a function family
