@@ -720,7 +720,17 @@ impl Parser {
             Token::Str(s) => s,
             t => return Err(format!("Expected string path after import but got {:?}", t)),
         };
-        Ok(Stmt::Import(path))
+        let alias = match self.peek() {
+            Token::Ident(kw) if kw == "as" => {
+                self.advance();
+                match self.advance() {
+                    Token::Ident(n) => Some(n),
+                    t => return Err(format!("Expected module name after 'as' but got {:?}", t)),
+                }
+            }
+            _ => None,
+        };
+        Ok(Stmt::Import(path, alias))
     }
 
     fn parse_match(&mut self) -> Result<Stmt, String> {

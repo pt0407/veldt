@@ -106,8 +106,11 @@ fn format_stmt(s: &Stmt, depth: usize, out: &mut String) {
             format_body(handler, depth + 1, out);
             out.push_str(&format!("{}}}\n", pad));
         }
-        Stmt::Import(path) => {
-            out.push_str(&format!("{}import \"{}\"\n", pad, path));
+        Stmt::Import(path, alias) => {
+            match alias {
+                Some(a) => out.push_str(&format!("{}import \"{}\" as {}\n", pad, path, a)),
+                None => out.push_str(&format!("{}import \"{}\"\n", pad, path)),
+            }
         }
         Stmt::Match(scrutinee, arms, else_arm) => {
             out.push_str(&format!("{}match {} {{\n", pad, fmt_expr(scrutinee)));

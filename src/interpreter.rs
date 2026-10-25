@@ -56,6 +56,7 @@ impl std::fmt::Display for Value {
     }
 }
 
+#[derive(Clone)]
 pub struct FunctionDef {
     pub params: Vec<Param>,
     pub body: Vec<Stmt>,
@@ -88,8 +89,10 @@ pub struct Interpreter {
     pub trace_calls: bool,
     pub argv: Vec<String>,
     pub call_stack: Vec<(String, usize)>,
+    pub importing: Vec<String>,
 }
 
+#[derive(Clone)]
 pub struct FunctionVariant {
     pub id: u32,
     pub def: FunctionDef,
@@ -125,6 +128,7 @@ impl Interpreter {
             trace_calls: false,
             argv: Vec::new(),
             call_stack: Vec::new(),
+            importing: Vec::new(),
         }
     }
 
@@ -343,15 +347,56 @@ impl Interpreter {
                     }
                 }
             }
-            Stmt::Import(path) => {
-                let content = std::fs::read_to_string(&path)
-                    .map_err(|e| format!("Cannot import '{}': {}", path, e))?;
+            Stmt::Import(path, alias) => {
+                // Search: as-given first, then VELDTPATH dirs (POSIX : / Win ;)
+                let content = std::fs::read_to_string(&path).or_else(|_| {
+                    std::env::var("VELDTPATH").unwrap_or_default()
+                        .split(if cfg!(windows) { ';' } else { ':' })
+                        .filter(|d| !d.is_empty())
+                        .find_map(|d| std::fs::read_to_string(format!("{}/{}", d, path)).ok())
+                        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "not found"))
+                }).map_err(|e| format!("Cannot import '{}': {}", path, e))?;
+                if self.importing.iter().any(|p| p == path) {
+                    return Err(format!("Circular import: {}", path));
+                }
                 let mut lexer = crate::lexer::Lexer::new(&content);
                 let tokens = lexer.tokenize()?;
                 let lines = lexer.token_lines.clone();
                 let mut parser = crate::parser::Parser::new_with_lines(tokens, lines);
                 let program = parser.parse_program()?;
-                self.exec_block(&program)
+                match alias {
+                    None => {
+                        self.importing.push(path.clone());
+                        let r = self.exec_block(&program);
+                        self.importing.pop();
+                        r
+                    }
+                    Some(alias) => {
+                        // Namespaced import: exec in a fresh interpreter,
+                        // then register its defs under `alias::name`.
+                        let mut sub = Interpreter::new();
+                        sub.argv = self.argv.clone();
+                        sub.importing = self.importing.clone();
+                        sub.importing.push(path.clone());
+                        sub.exec_block(&program)
+                            .map_err(|e| format!("Import '{}' failed: {}", path, e))?;
+                        for (name, defs) in sub.functions {
+                            let mangled = format!("{}::{}", alias, name);
+                            // v1: also expose bare name so module-internal
+                            // calls resolve — collision = first importer wins
+                            self.functions.entry(name).or_insert_with(|| defs.clone());
+                            self.functions.insert(mangled, defs);
+                        }
+                        for (n, v) in sub.vars.borrow().iter() {
+                            self.vars.borrow_mut()
+                                .insert(format!("{}::{}", alias, n), v.clone());
+                        }
+                        let mut marker = HashMap::new();
+                        marker.insert("__mod".to_string(), Value::Str(alias.clone()));
+                        self.vars.borrow_mut().insert(alias.clone(), Value::Dict(marker));
+                        Ok(FlowControl::Normal)
+                    }
+                }
             }
             Stmt::LetDestructure(names, expr) => {
                 let val = self.eval_expr(expr)?;
@@ -506,6 +551,17 @@ impl Interpreter {
             Expr::FieldAccess(obj, field) => {
                 let obj_val = self.eval_expr(obj)?;
                 match obj_val {
+                    // Module member: `lib.CONST` -> vars["lib::CONST"]
+                    Value::Dict(ref d) if d.contains_key("__mod") => {
+                        let m = match d.get("__mod") {
+                            Some(Value::Str(s)) => s.clone(),
+                            _ => unreachable!(),
+                        };
+                        self.vars.borrow()
+                            .get(&format!("{}::{}", m, field))
+                            .cloned()
+                            .ok_or_else(|| format!("Module {} has no member '{}'", m, field))
+                    }
                     Value::Struct(_, fields) => {
                         fields.get(field)
                             .cloned()
@@ -1778,6 +1834,15 @@ impl Interpreter {
     }
 
     fn eval_method_call(&mut self, obj: Value, method: &str, args: Vec<Value>) -> Result<Value, String> {
+        // Module dispatch: `lib.f()` — obj is the module marker dict
+        if let Value::Dict(d) = &obj {
+            if let Some(Value::Str(m)) = d.get("__mod") {
+                let fname = format!("{}::{}", m, method);
+                if self.functions.contains_key(&fname) {
+                    return self.call_function(&fname, None, args);
+                }
+            }
+        }
         match (&obj, method) {
             // String methods
             (Value::Str(s), "upper") => Ok(Value::Str(s.to_uppercase())),
