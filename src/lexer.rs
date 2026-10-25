@@ -9,7 +9,7 @@ pub enum Token {
     InterpStr(Vec<String>), // alternating literal, expr-source, literal, ...
     Ident(String),
     // Keywords
-    Let, Fn, If, Else, While, For, Return, Print, Grow, Struct, Test, Try, Catch, Import, In, Match, Arrow,
+    Let, Fn, If, Else, While, For, Return, Print, Grow, Struct, Test, Try, Catch, Import, In, Match, Arrow, Break, Continue, PlusEq, MinusEq, StarEq, SlashEq,
     Question, NullCoal, SafeAccess, Pipe,
     True, False, Null, And, Or, Not,
     // Type names
@@ -291,6 +291,8 @@ impl Lexer {
             "try" => Token::Try,
             "catch" => Token::Catch,
             "import" => Token::Import,
+            "break" => Token::Break,
+            "continue" => Token::Continue,
             "in" => Token::In,
             "match" => Token::Match,
             "true" => Token::True,
@@ -362,10 +364,10 @@ impl Lexer {
                     self.token_lines.push(tok_line); tokens.push(tok);
                     self.last_was_ident_no_space = is_ident;
                 }
-                Some('+') => { self.advance(); self.token_lines.push(tok_line); tokens.push(Token::Plus); self.last_was_ident_no_space = false; }
-                Some('-') => { self.advance(); self.token_lines.push(tok_line); tokens.push(Token::Minus); self.last_was_ident_no_space = false; }
-                Some('*') => { self.advance(); self.token_lines.push(tok_line); tokens.push(Token::Star); self.last_was_ident_no_space = false; }
-                Some('/') => { self.advance(); self.token_lines.push(tok_line); tokens.push(Token::Slash); self.last_was_ident_no_space = false; }
+                Some('+') => { self.advance(); let t = if self.peek() == Some('=') { self.advance(); Token::PlusEq } else { Token::Plus }; self.token_lines.push(tok_line); tokens.push(t); self.last_was_ident_no_space = false; }
+                Some('-') => { self.advance(); let t = if self.peek() == Some('=') { self.advance(); Token::MinusEq } else { Token::Minus }; self.token_lines.push(tok_line); tokens.push(t); self.last_was_ident_no_space = false; }
+                Some('*') => { self.advance(); let t = if self.peek() == Some('=') { self.advance(); Token::StarEq } else { Token::Star }; self.token_lines.push(tok_line); tokens.push(t); self.last_was_ident_no_space = false; }
+                Some('/') => { self.advance(); let t = if self.peek() == Some('=') { self.advance(); Token::SlashEq } else { Token::Slash }; self.token_lines.push(tok_line); tokens.push(t); self.last_was_ident_no_space = false; }
                 Some('%') => { self.advance(); self.token_lines.push(tok_line); tokens.push(Token::Percent); self.last_was_ident_no_space = false; }
                 Some('(') => { self.advance(); self.token_lines.push(tok_line); tokens.push(Token::LParen); self.last_was_ident_no_space = false; }
                 Some(')') => { self.advance(); self.token_lines.push(tok_line); tokens.push(Token::RParen); self.last_was_ident_no_space = false; }

@@ -256,13 +256,18 @@ impl Interpreter {
                     Ok(FlowControl::Normal)
                 }
             }
+            Stmt::Break => Err("__veldt_break__".into()),
+            Stmt::Continue => Err("__veldt_continue__".into()),
             Stmt::While(cond, body) => {
                 loop {
                     let c = self.eval_expr(cond)?;
                     if !self.is_truthy(&c) { break; }
-                    match self.exec_block(body)? {
-                        FlowControl::Return(v) => return Ok(FlowControl::Return(v)),
-                        FlowControl::Normal => {}
+                    match self.exec_block(body) {
+                        Err(e) if e == "__veldt_break__" => break,
+                        Err(e) if e == "__veldt_continue__" => continue,
+                        Err(e) => return Err(e),
+                        Ok(FlowControl::Return(v)) => return Ok(FlowControl::Return(v)),
+                        _ => {}
                     }
                 }
                 Ok(FlowControl::Normal)
@@ -273,9 +278,12 @@ impl Interpreter {
                     Value::List(items) => {
                         for item in items {
                             self.vars.borrow_mut().insert(var.clone(), item);
-                            match self.exec_block(body)? {
-                                FlowControl::Return(v) => return Ok(FlowControl::Return(v)),
-                                FlowControl::Normal => {}
+                            match self.exec_block(body) {
+                                Err(e) if e == "__veldt_break__" => break,
+                                Err(e) if e == "__veldt_continue__" => continue,
+                                Err(e) => return Err(e),
+                                Ok(FlowControl::Return(v)) => return Ok(FlowControl::Return(v)),
+                                _ => {}
                             }
                         }
                         Ok(FlowControl::Normal)
@@ -624,6 +632,13 @@ impl Interpreter {
                 (Value::Int(a), Value::Float(b)) => Ok(Value::Float((*a as f64) % b)),
                 (Value::Float(a), Value::Int(b)) => Ok(Value::Float(a % (*b as f64))),
                 _ => Err("Cannot modulo these types".into()),
+            },
+            BinOp::In => match (l, r) {
+                (v, Value::List(items)) => Ok(Value::Bool(
+                    items.iter().any(|i| self.values_eq(&v, i)))),
+                (Value::Str(a), Value::Str(b)) => Ok(Value::Bool(b.contains(a.as_str()))),
+                (Value::Str(k), Value::Dict(d)) => Ok(Value::Bool(d.contains_key(k.as_str()))),
+                _ => Err("right side of 'in' must be a list, dict, or string".into()),
             },
             BinOp::Eq => Ok(Value::Bool(self.values_eq(l, r))),
             BinOp::Neq => Ok(Value::Bool(!self.values_eq(l, r))),

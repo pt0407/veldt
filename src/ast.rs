@@ -25,7 +25,7 @@ pub enum BinOp {
     Add, Sub, Mul, Div, Mod,
     Eq, Neq, Lt, Gt, Le, Ge,
     And, Or,
-    NullCoal,
+    NullCoal, In,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -93,6 +93,8 @@ pub enum Stmt {
     Match(Expr, Vec<(Expr, Vec<Stmt>)>, Option<Vec<Stmt>>), // match expr { pat => body, ... else => body }
     // destructuring: let [a, b] = expr  (from a list)
     LetDestructure(Vec<String>, Expr),
+    Break,
+    Continue,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -181,6 +181,7 @@ impl Parser {
         loop {
             let op = match self.peek() {
                 Token::EqEq => BinOp::Eq,
+                Token::In => BinOp::In,
                 Token::Neq => BinOp::Neq,
                 _ => break,
             };
@@ -526,6 +527,8 @@ impl Parser {
             Token::Let => self.parse_let(),
             Token::Fn => self.parse_fn(),
             Token::If => self.parse_if(),
+            Token::Break => { self.advance(); Ok(Stmt::Break) }
+            Token::Continue => { self.advance(); Ok(Stmt::Continue) }
             Token::While => self.parse_while(),
             Token::For => self.parse_for(),
             Token::Return => self.parse_return(),
@@ -538,6 +541,21 @@ impl Parser {
             Token::Ident(_) => {
                 // Parse as expression, then check for assignment
                 let target = self.parse_expr()?;
+                if let Some(op) = match self.peek() {
+                    Token::PlusEq => Some(BinOp::Add),
+                    Token::MinusEq => Some(BinOp::Sub),
+                    Token::StarEq => Some(BinOp::Mul),
+                    Token::SlashEq => Some(BinOp::Div),
+                    _ => None,
+                } {
+                    self.advance();
+                    let rhs = self.parse_expr()?;
+                    if let Expr::Var(name) = target {
+                        return Ok(Stmt::Assign(name.clone(),
+                            Expr::BinOp(Box::new(Expr::Var(name)), op, Box::new(rhs))));
+                    }
+                    return Err("+=/-=/*=//= only work on plain variables".into());
+                }
                 if self.check(&Token::Eq) {
                     self.advance(); // =
                     let value = self.parse_expr()?;

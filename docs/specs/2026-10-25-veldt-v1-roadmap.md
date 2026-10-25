@@ -18,14 +18,14 @@ Every one of these is hit within the first hour of writing real scripts.
       persistent env across lines, `:help`, `:garden`, `:load file`
 - [ ] `args()` builtin — script argv. `veldt run prog.veldt -- a b c` →
       `args()` returns `["a","b","c"]`
-- [ ] `veldt run -e "code"` — inline eval, and `veldt -e "code"`
-- [ ] `break` / `continue` — new Stmt variants + FlowControl::Break/Continue
+- [x] `veldt run -e "code"` — inline eval, and `veldt -e "code"`
+- [x] `break` / `continue` — new Stmt variants + FlowControl::Break/Continue
       threaded through loops and match arms
-- [ ] `x in list` / `k in dict` / `substr in str` — BinOp::In membership
+- [x] `x in list` / `k in dict` / `substr in str` — BinOp::In membership
       (Token::In already exists; add to parse_comparison precedence)
 - [ ] String/list slicing: `s[a:b]`, `xs[a:b]`, `xs[-1]` negative index.
       Extend Expr::Index eval — parse `expr[lo..hi]` optional range
-- [ ] `+=`, `-=`, `*=`, `/=` — lexer tokens, desugar to Assign
+- [x] `+=`, `-=`, `*=`, `/=` — lexer tokens, desugar to Assign
 - [ ] `exit(code)` builtin — set process exit status; `veldt run` propagates
 - [ ] `read_stdin()` / `input()` already exists? verify; `print(..., flush=false)`
       or `eprint` for stderr output

@@ -28,6 +28,8 @@ fn format_stmt(s: &Stmt, depth: usize, out: &mut String) {
         Stmt::Assign(name, e) => {
             out.push_str(&format!("{}{} = {}\n", pad, name, fmt_expr(e)));
         }
+        Stmt::Break => out.push_str(&format!("{}break\n", pad)),
+        Stmt::Continue => out.push_str(&format!("{}continue\n", pad)),
         Stmt::FieldAssign(obj, f, e) => {
             out.push_str(&format!("{}{}.{} = {}\n", pad, fmt_postfix(obj), f, fmt_expr(e)));
         }
@@ -173,7 +175,7 @@ fn prec(op: &BinOp) -> u8 {
         BinOp::Or => 2,
         BinOp::And => 3,
         BinOp::Eq | BinOp::Neq => 4,
-        BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge => 5,
+        BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge | BinOp::In => 5,
         BinOp::Add | BinOp::Sub => 6,
         BinOp::Mul | BinOp::Div | BinOp::Mod => 7,
     }
@@ -186,6 +188,7 @@ fn op_str(op: &BinOp) -> &'static str {
         BinOp::Eq => "==", BinOp::Neq => "!=",
         BinOp::Lt => "<", BinOp::Gt => ">", BinOp::Le => "<=", BinOp::Ge => ">=",
         BinOp::And => "and", BinOp::Or => "or", BinOp::NullCoal => "??",
+        BinOp::In => "in",
     }
 }
 

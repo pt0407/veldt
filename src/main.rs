@@ -41,7 +41,16 @@ fn main() {
                 eprintln!("Usage: veldt run <file.veldt>");
                 process::exit(1);
             }
-            run_program(&args[2], args.iter().any(|a| a == "--trace"), args.iter().any(|a| a == "--evolve"));
+            if args[2] == "-e" {
+                // veldt run -e "code" — inline eval via temp file
+                let code = args[3..].iter().filter(|a| !a.starts_with("--")).cloned().collect::<Vec<_>>().join(" ");
+                let tmp = std::env::temp_dir().join(format!("veldt-eval-{}.veldt", std::process::id()));
+                std::fs::write(&tmp, &code).unwrap_or_else(|e| { eprintln!("eval temp write: {}", e); process::exit(1); });
+                run_program(tmp.to_str().unwrap(), args.iter().any(|a| a == "--trace"), args.iter().any(|a| a == "--evolve"));
+                let _ = std::fs::remove_file(&tmp);
+            } else {
+                run_program(&args[2], args.iter().any(|a| a == "--trace"), args.iter().any(|a| a == "--evolve"));
+            }
         }
         "fmt" => {
             if args.len() < 3 {
