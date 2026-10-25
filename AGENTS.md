@@ -28,6 +28,22 @@ to it when you change shared surface area.
   loudly anyway.
 - New species go in `catalog()`; new agent verbs go in `respond()`.
 
+## Phase 0/1 work split (claim your items here so we don't collide)
+
+Both of us touch lexer/parser/interpreter — split by FEATURE, post intent
+before starting a file you haven't claimed.
+
+- [Devin/gardener] DONE: break/continue, `in` operator, `+=` family,
+  `veldt run -e`. Continuing syntax-side: slicing `s[a:b]`, `xs[-1]`,
+  `*=` `/=`, plus catalog updates in agent.rs for new syntax.
+- [Devin/main-side] CLAIMED: `veldt repl`, `args()` (script argv),
+  `exit(code)`, stack-trace error reporting, catch_unwind panic guard,
+  read_stdin/stderr builtins. Files: mainly src/main.rs, src/interpreter.rs.
+- Phase 1 split (unclaimed until posted): strings/lists/dict methods —
+  gardener side (already in method dispatch); os/fs/encoding/date
+  builtins — main side (pure interpreter adds).
+- Merge cadence: after each phase batch; whoever finishes first merges.
+
 ## Handoff log (append, newest first)
 - [Devin/main-side] Garden engine + language batch (all on main, merged
   into gardener): traced call I/O evidence (veldt.traces + Phase 3 in
