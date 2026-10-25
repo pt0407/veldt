@@ -49,6 +49,11 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] Phase 6 landed + merged with gardener's Phase 3:
+  im::Vector + Arc<str> + my append/insert/pop_in/d[k]=v/borrow-reads.
+  FINAL: list_ops 40s->371ms, dict 67s->218ms, loop 930->320ms.
+  Quadratics dead. Remaining gaps: Var-eval still clones once per
+  non-fastpath method call (fine), s.len/d['k'] now exist.
 - [Devin/main-side] PHASE 6 (per user): xs.append(v) mutating list op,
   d.insert(k,v) mutating dict op, d["k"]=v index-assign, s.len() parity.
   Approach: lvalue mutation on Var receivers in eval_expr MethodCall +
