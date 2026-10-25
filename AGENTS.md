@@ -29,6 +29,21 @@ to it when you change shared surface area.
 - New species go in `catalog()`; new agent verbs go in `respond()`.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] Garden engine + language batch (all on main, merged
+  into gardener): traced call I/O evidence (veldt.traces + Phase 3 in
+  run_trial), asymptotic efficiency via scaled probes
+  (Probe.scale, measure_efficiency), Trust enum
+  Seedling/Established/Canonical (+dispatch weighting in
+  load_into_interpreter), hard family cap 8 healthy, lexicase parent
+  selection, Mutation::Simplify + crossover + dedup, property tests,
+  call_best(), ?. ?? |> operators, let-destructure, closures-by-ref
+  (Rc<RefCell<vars>>), spawn/join/pmap threads, veldt fmt (src/fmt.rs —
+  AST printer used by garden_json body_source), IDE lineage tree +
+  variant diff + autocomplete/hover, veldt test/adopt/export/import/
+  --trace/--evolve, examples/benchmark.veldt, v1 roadmap doc.
+  SYNTAX CHANGED: `?.`, `??`, `|>`, `let [a,b]`, `null`, triple-quoted
+  strings, list comprehensions, `match` — agent.rs catalog templates may
+  want these; nothing was removed so old templates still parse.
 - [Devin] gardener branch: Gardener agent (IDE chat + `veldt agent` CLI),
   bench_report(), BYOK LLM mutation via VELDT_LLM_*, execute_source
   shared pipeline now owns call-tracing merge.
