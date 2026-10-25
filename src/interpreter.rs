@@ -59,7 +59,7 @@ impl std::fmt::Display for Value {
 #[derive(Clone)]
 pub struct FunctionDef {
     pub params: Vec<Param>,
-    pub body: Vec<Stmt>,
+    pub body: Rc<Vec<Stmt>>, // Rc — per-call clone was cloning the whole AST
 }
 
 pub struct Interpreter {
@@ -246,7 +246,7 @@ impl Interpreter {
                     fitness: 1.0,
                     def: FunctionDef {
                         params: params.clone(),
-                        body: body.clone(),
+                        body: Rc::new(body.clone()),
                     },
                 };
                 self.functions.entry(name.clone())
@@ -331,7 +331,7 @@ impl Interpreter {
                 if let GrowItem::Fn(name, params, body, _tests) = item {
                     let def = FunctionDef {
                         params: params.clone(),
-                        body: body.clone(),
+                        body: Rc::new(body.clone()),
                     };
                     let variant = FunctionVariant { id: 1, fitness: 1.0, def };
                     self.functions.entry(name.clone()).or_default().push(variant);
@@ -514,7 +514,7 @@ impl Interpreter {
                         Some(a) => {
                             let mut av = Vec::new();
                             for e in a { av.push(self.eval_expr(e)?); }
-                            self.eval_method_call(o, name, av)
+                            self.eval_method_call(&o, name, av)
                         }
                         None => match o {
                             Value::Struct(_, fields) => Ok(fields.get(name).cloned().unwrap_or(Value::Null)),
@@ -557,7 +557,7 @@ impl Interpreter {
                 for a in args {
                     arg_vals.push(self.eval_expr(a)?);
                 }
-                self.eval_method_call(obj_val, method, arg_vals)
+                self.eval_method_call(&obj_val, method, arg_vals)
             }
             Expr::FieldAccess(obj, field) => {
                 let obj_val = self.eval_expr(obj)?;
@@ -876,7 +876,7 @@ impl Interpreter {
         // Execute body — frame stays on the stack if the call fails,
         // so the error path can print a real call trace.
         self.call_stack.push((name.to_string(), self.current_line));
-        let result = match self.exec_block(&body) {
+        let result = match self.exec_block(&body[..]) {
             Ok(FlowControl::Return(v)) => v.unwrap_or(Value::Null),
             Ok(FlowControl::Normal) => Value::Null,
             Err(e) => {
@@ -2043,9 +2043,9 @@ impl Interpreter {
         }
     }
 
-    fn eval_method_call(&mut self, obj: Value, method: &str, args: Vec<Value>) -> Result<Value, String> {
+    fn eval_method_call(&mut self, obj: &Value, method: &str, args: Vec<Value>) -> Result<Value, String> {
         // Module dispatch: `lib.f()` — obj is the module marker dict
-        if let Value::Dict(d) = &obj {
+        if let Value::Dict(d) = obj {
             if let Some(Value::Str(m)) = d.get("__mod") {
                 let fname = format!("{}::{}", m, method);
                 if self.functions.contains_key(&fname) {
@@ -2053,7 +2053,7 @@ impl Interpreter {
                 }
             }
         }
-        match (&obj, method) {
+        match (obj, method) {
             // String methods
             (Value::Str(s), "upper") => Ok(Value::Str(s.to_uppercase())),
             (Value::Str(s), "lower") => Ok(Value::Str(s.to_lowercase())),

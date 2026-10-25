@@ -108,7 +108,7 @@ impl HealthChecker {
             fitness: entry.fitness,
             def: crate::interpreter::FunctionDef {
                 params: entry.params.clone(),
-                body: entry.body.clone(),
+                body: entry.body.clone().into(),
             },
         };
         interp.functions.entry(entry.name.clone())
@@ -147,7 +147,7 @@ impl HealthChecker {
             fitness: entry.fitness,
             def: crate::interpreter::FunctionDef {
                 params: entry.params.clone(),
-                body: entry.body.clone(),
+                body: entry.body.clone().into(),
             },
         };
         interp.functions.entry(entry.name.clone())
@@ -186,7 +186,7 @@ impl HealthChecker {
             .push(crate::interpreter::FunctionVariant {
                 id: entry.id, fitness: entry.fitness,
                 def: crate::interpreter::FunctionDef {
-                    params: entry.params.clone(), body: entry.body.clone(),
+                    params: entry.params.clone(), body: entry.body.clone().into(),
                 },
             });
 
@@ -233,7 +233,7 @@ impl HealthChecker {
                         fitness: entry.fitness,
                         def: crate::interpreter::FunctionDef {
                             params: entry.params.clone(),
-                            body: entry.body.clone(),
+                            body: entry.body.clone().into(),
                         },
                     };
                     interp.functions.entry(name.clone())
@@ -266,7 +266,7 @@ impl HealthChecker {
             fitness: entry.fitness,
             def: crate::interpreter::FunctionDef {
                 params: entry.params.clone(),
-                body: entry.body.clone(),
+                body: entry.body.clone().into(),
             },
         };
         interp.functions.entry(entry.name.clone())
@@ -331,7 +331,7 @@ impl HealthChecker {
             fitness: entry.fitness,
             def: crate::interpreter::FunctionDef {
                 params: entry.params.clone(),
-                body: entry.body.clone(),
+                body: entry.body.clone().into(),
             },
         };
         interp.functions.entry(entry.name.clone())

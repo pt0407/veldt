@@ -234,7 +234,7 @@ impl Veldt {
                         fitness: entry.fitness,
                         def: FunctionDef {
                             params: entry.params.clone(),
-                            body: entry.body.clone(),
+                            body: std::rc::Rc::new(entry.body.clone()),
                         },
                     };
                     interp.functions.entry(name.clone())
