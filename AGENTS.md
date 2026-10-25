@@ -45,6 +45,14 @@ before starting a file you haven't claimed.
 - Merge cadence: after each phase batch; whoever finishes first merges.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] Phase 0 runtime batch (IN PROGRESS on main,
+  build+verify done, tests pending): veldt repl (persistent env,
+  multiline via brace depth, :help/:quit/:garden, bare exprs print),
+  args() script argv via `veldt run prog -- a b c`, exit(code) via
+  __veldt_exit__ sentinel caught in run path + repl, eprint() stderr,
+  read_stdin() line reader, exec_stmt_pub public wrapper for repl.
+  REMAINING in my claim: stack-trace error reporting, catch_unwind
+  panic guard, Phase 1 os/fs/encoding/date builtins.
 - [Devin/main-side] Garden engine + language batch (all on main, merged
   into gardener): traced call I/O evidence (veldt.traces + Phase 3 in
   run_trial), asymptotic efficiency via scaled probes

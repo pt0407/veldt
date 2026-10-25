@@ -50,6 +50,9 @@ fn main() {
             }
             fmt_file(&args[2], args.iter().any(|a| a == "--write" || a == "-w"));
         }
+        "repl" => {
+            start_repl();
+        }
         "test" => {
             if args.len() < 3 {
                 eprintln!("Usage: veldt test <name>");
@@ -257,6 +260,7 @@ fn print_usage() {
     println!("  veldt agent \"task\"          Ask the Gardener (rule-based coding agent)");
     println!("  veldt bench                  Benchmark the Gardener's species + intents");
     println!("  veldt studio [port]          Start Veldt Studio IDE (default port 7777)
+  veldt repl                   Interactive shell (persistent env)
   veldt fmt <file>             Print canonical formatted source (--write to overwrite)
   veldt test <name>            Re-trial all variants of a function family
   veldt adopt <name#N>         Canonicalize a variant (dispatch picks it)
@@ -265,6 +269,78 @@ fn print_usage() {
   veldt run --trace <file>     Trace every executed statement
   veldt run --evolve <file>    Run 1 evolve cycle after the program");
     println!("  veldt visual                 Open visual ecosystem viewer in browser");
+}
+
+fn start_repl() {
+    use std::io::{BufRead, Write};
+    let mut veldt = veldt::Veldt::new();
+    let _ = veldt.load();
+    let mut interp = interpreter::Interpreter::new();
+    veldt.load_into_interpreter(&mut interp);
+
+    println!("veldt {} — repl. :help for commands, ctrl-d to quit", env!("CARGO_PKG_VERSION"));
+    let stdin = std::io::stdin();
+    let mut buf = String::new();
+    let mut depth: i64 = 0;
+    loop {
+        print!("{}", if buf.is_empty() { "veldt> " } else { "  ... " });
+        std::io::stdout().flush().ok();
+        let mut line = String::new();
+        match stdin.lock().read_line(&mut line) {
+            Ok(0) | Err(_) => { println!(); break; }
+            Ok(_) => {}
+        }
+        let trimmed = line.trim();
+        if buf.is_empty() {
+            if trimmed.is_empty() { continue; }
+            if trimmed.starts_with(':') {
+                match trimmed {
+                    ":quit" | ":q" => break,
+                    ":garden" => { let _ = veldt.load(); veldt.print_lineage(
+                        veldt.functions.keys().next().map(|s| s.as_str()).unwrap_or("(none)")); }
+                    ":help" | _ => {
+                        println!(":help  this help"); println!(":quit  exit");
+                        println!(":garden  show first lineage"); println!("exprs print their value");
+                    }
+                }
+                continue;
+            }
+        }
+        buf.push_str(&line);
+        depth += line.matches('{').count() as i64 - line.matches('}').count() as i64;
+        if depth > 0 { continue; }
+        depth = 0;
+        let src = buf.clone();
+        buf.clear();
+
+        let mut lx = lexer::Lexer::new(&src);
+        let tokens = match lx.tokenize() { Ok(t) => t, Err(e) => { eprintln!("lex: {}", e); continue; } };
+        let mut p = parser::Parser::new_with_lines(tokens, lx.token_lines.clone());
+        let stmts = match p.parse_program() { Ok(s) => s, Err(e) => { eprintln!("parse: {}", e); continue; } };
+        // print value of trailing bare expressions
+        let n = stmts.len();
+        for (i, stmt) in stmts.iter().enumerate() {
+            match interp.exec_stmt_pub(stmt) {
+                Ok(_) => {
+                    if i + 1 == n {
+                        if let ast::Stmt::ExprStmt(e) = stmt {
+                            if let Ok(v) = interp.eval_expr_in_scope(e) {
+                                println!("{}", v);
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    if e.starts_with("__veldt_exit__:") {
+                        println!("bye");
+                        return;
+                    }
+                    eprintln!("{}", e);
+                    break;
+                }
+            }
+        }
+    }
 }
 
 fn fmt_file(path: &str, write: bool) {
@@ -390,6 +466,11 @@ fn run_program(path: &str, trace: bool, evolve_after: bool) {
     let mut interp = interpreter::Interpreter::new();
     interp.trace = trace;
     interp.trace_calls = true;
+    // script argv: everything after '--' in the veldt args
+    let all_args: Vec<String> = env::args().collect();
+    if let Some(pos) = all_args.iter().position(|a| a == "--") {
+        interp.argv = all_args[pos+1..].to_vec();
+    }
     veldt.load_into_interpreter(&mut interp);
 
     // Run the program
