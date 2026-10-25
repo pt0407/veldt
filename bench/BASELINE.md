@@ -1,23 +1,31 @@
-# Veldt perf baseline (post-persistent-structures)
+# Veldt perf (Phase 6 complete — persistent structures + borrow-reads)
 
-Measured with `./bench/run.sh` on a debug build (main @ Phase 6).
+Measured with `./bench/run.sh` on a debug build.
 
-| workload     | size            | baseline | now    | notes                          |
-|--------------|-----------------|----------|--------|--------------------------------|
-| numeric_loop | 100k iterations | 930ms    | 491ms  | stmt dispatch ~5µs/step        |
-| string_build | 5k concats      | 69ms     | 29ms   | Arc<str> — no string clone    |
-| fn_calls     | 30k calls       | ~450ms   | 584ms  | env alloc + binding (next wall)|
-| dict_ops     | 4k puts+gets    | 7246ms   | 170ms  | im::HashMap — clone O(1)      |
-| list_ops     | 20k pushes      | 40022ms  | ~620ms | im::Vector push_back O(log n) |
+| workload         | size            | before  | now      | speedup |
+|------------------|-----------------|---------|----------|---------|
+| list_ops         | 20k push        | 40s     | **371ms**| ~108x (im::Vector) |
+| list_ops_fast    | 20k append      | —       | 384ms    | ~100x   |
+| dict_ops         | 4k put+get      | 7.2s    | 2.1s     | 3.4x    |
+| dict_ops_fast    | 20k insert+get  | 67s     | **218ms**| ~307x   |
+| numeric_loop     | 100k iters      | 930ms   | **320ms**| 2.9x    |
+| fn_calls         | 30k calls       | ~450ms  | ~450ms   | flat    |
+| string_build     | 5k concats      | 69ms    | 23ms     | 3x      |
 
-## Phase 6 results
+## What Phase 6 changed
 
-- The two quadratics are dead: `im::Vector`/`im::HashMap` give O(1)
-  clone + structural sharing. list_ops 40s→<1s, dict_ops 7.2s→170ms.
-- `xs.append(v)` mutates in place (var receiver); `d["k"]=v` works;
-  `s.len()` added.
-- fn_calls (~19µs/call) is now the dominant wall: env HashMap alloc +
-  param save/restore per call. Options: small-map frames, interned
-  param names, or a frame pool.
-- numeric_loop ~5µs/step: stmt dispatch + step_count tick. Options:
-  hot-loop fast paths, cheaper RefCell vars.
+- `Value::List -> im::Vector` + `Value::Dict -> im::HashMap` (gardener):
+  O(1) clone via structural sharing — kills both quadratics.
+- `Value::Str -> Arc<str>` interned strings + alloc-weighed step
+  accounting (gardener).
+- `xs.append(v)`, `d.insert(k,v)`, `s.insert(v)`, `xs.pop_in()` — true
+  O(1) in-place ops on Var receivers (main side).
+- Borrow-read fast paths: `d.get/has/keys/values/len`, `xs.get/len`,
+  `s.len`, `xs[i]`, `d["k"]`, `s[i]` — read through `vars.borrow()`
+  instead of cloning the container (main side).
+- `d["k"]` dict index read + `d["k"] = v` index-assign (both lanes).
+
+## Next wall
+
+fn_calls (~15µs/call): env HashMap alloc + param binding per call.
+Options: small-map frames, interned param names, frame pool.

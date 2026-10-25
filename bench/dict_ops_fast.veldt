@@ -1,0 +1,9 @@
+# dict insert mutating — O(1) per write vs put's full-map clone
+let t = time_ms()
+let d = dict()
+let i = 0
+while i < 20000 { d.insert("k" + i, i)  i = i + 1 }
+let acc = 0
+i = 0
+while i < 20000 { acc = acc + d.get("k" + i)  i = i + 1 }
+print("dict_ops_fast: " + (time_ms() - t) + "ms  (acc=" + acc + ")")

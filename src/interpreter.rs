@@ -235,14 +235,14 @@ impl Interpreter {
                             _ => Err("Index must be an integer".into()),
                         }
                     }
-                    Value::Dict(mut entries) => {
+                    Value::Dict(mut map) => {
                         let key = match index {
-                            Value::Str(s) => s.to_string(),
-                            _ => return Err("Dict index must be a string".into()),
+                            Value::Str(k) => k.to_string(),
+                            _ => return Err("Dict key must be a string".into()),
                         };
-                        entries.insert(key, new_val);
+                        map.insert(key, new_val);
                         if let Expr::Var(var_name) = obj_expr {
-                            self.vars.borrow_mut().insert(var_name.clone(), Value::Dict(entries));
+                            self.vars.borrow_mut().insert(var_name.clone(), Value::Dict(map));
                         } else {
                             return Err("Can only assign index on a variable".into());
                         }
@@ -576,18 +576,111 @@ impl Interpreter {
                 self.call_function(name, *variant, arg_vals)
             }
             Expr::MethodCall(obj, method, args) => {
-                // Phase 6: `xs.append(v)` mutates the var's list in place —
-                // no clone when the persistent vector is uniquely held.
-                if method == "append" {
-                    if let Expr::Var(name) = &**obj {
-                        if args.len() != 1 { return Err("append() expects 1 arg".into()); }
-                        let v = self.eval_expr(&args[0])?;
-                        let mut vars = self.vars.borrow_mut();
-                        return match vars.get_mut(name) {
-                            Some(Value::List(l)) => { l.push_back(v); Ok(Value::Null) }
-                            Some(_) => Err("append() on non-list".into()),
-                            None => Err(format!("Undefined variable: {}", name)),
+                // Mutating ops on a variable receiver — O(1) in place, no
+                // whole-container clone. xs.append(v) is the fast path vs
+                // xs = xs.push(v).
+                if let Expr::Var(name) = &**obj {
+                    // Borrow-read fast paths: read via vars.borrow() instead
+                    // of cloning the whole container for the call.
+                    // On any miss we fall through to the normal eval below.
+                    if let "get" | "has" = method.as_str() {
+                        if let Some(key) = args.get(0)
+                            .map(|e| self.eval_expr(e)).transpose()? {
+                            let vars = self.vars.borrow();
+                            let hit: Option<Result<Value, String>> = match vars.get(name) {
+                                Some(Value::Dict(map)) => Some(match &key {
+                                    Value::Str(k) => Ok(if method == "get" {
+                                        map.get(&**k).cloned().unwrap_or(Value::Null)
+                                    } else {
+                                        Value::Bool(map.contains_key(&**k))
+                                    }),
+                                    _ => Err("dict key must be a string".into()),
+                                }),
+                                Some(Value::List(items)) => Some(match &key {
+                                    Value::Int(i) => {
+                                        let idx = if *i < 0 { items.len() as i64 + i } else { *i };
+                                        Ok(if method == "get" {
+                                            items.get(idx as usize).cloned().unwrap_or(Value::Null)
+                                        } else {
+                                            Value::Bool(idx >= 0 && (idx as usize) < items.len())
+                                        })
+                                    }
+                                    _ => Err("list index must be an int".into()),
+                                }),
+                                Some(Value::Set(items)) => Some(Ok(
+                                    Value::Bool(items.iter().any(|x| self.values_eq(x, &key))))),
+                                _ => None,
+                            };
+                            if let Some(r) = hit { return r; }
+                            drop(vars);
+                        }
+                    }
+                    if let "len" | "keys" | "values" | "is_empty" = method.as_str() {
+                        let vars = self.vars.borrow();
+                        let hit: Option<Value> = match (vars.get(name), method.as_str()) {
+                            (Some(Value::Dict(m)), "len") => Some(Value::Int(m.len() as i64)),
+                            (Some(Value::List(l)), "len") => Some(Value::Int(l.len() as i64)),
+                            (Some(Value::Set(l)), "len") => Some(Value::Int(l.len() as i64)),
+                            (Some(Value::Str(s)), "len") => Some(Value::Int(s.chars().count() as i64)),
+                            (Some(Value::Dict(m)), "keys") =>
+                                Some(Value::List(m.keys().map(|k| Value::Str(k.clone().into())).collect())),
+                            (Some(Value::Dict(m)), "values") =>
+                                Some(Value::List(m.values().cloned().collect())),
+                            (Some(Value::Dict(m)), "is_empty") => Some(Value::Bool(m.is_empty())),
+                            (Some(Value::List(l)), "is_empty") => Some(Value::Bool(l.is_empty())),
+                            _ => None,
                         };
+                        if let Some(v) = hit { return Ok(v); }
+                        drop(vars);
+                    }
+                    match method.as_str() {
+                        "append" => {
+                            let v = args.get(0)
+                                .map(|e| self.eval_expr(e)).transpose()?
+                                .ok_or("append() expects 1 argument")?;
+                            let mut vars = self.vars.borrow_mut();
+                            return match vars.get_mut(name) {
+                                Some(Value::List(items)) => {
+                                    items.push_back(v); Ok(Value::Null)
+                                }
+                                Some(_) => Err("append() needs a list variable".into()),
+                                None => Err(format!("Undefined variable: {}", name)),
+                            };
+                        }
+                        "insert" => {
+                            if args.is_empty() { return Err("insert() needs args".into()); }
+                            let first = self.eval_expr(&args[0])?;
+                            let second = args.get(1)
+                                .map(|e| self.eval_expr(e)).transpose()?;
+                            let mut vars = self.vars.borrow_mut();
+                            return match vars.get_mut(name) {
+                                Some(Value::Dict(map)) => {
+                                    match (first, second) {
+                                        (Value::Str(k), Some(v)) => { map.insert(k.to_string(), v); Ok(Value::Null) }
+                                        _ => Err("dict.insert(key, value) needs a string key + value".into()),
+                                    }
+                                }
+                                Some(Value::Set(set)) => {
+                                    if !set.iter().any(|x| self.values_eq(x, &first)) {
+                                        set.push(first);
+                                    }
+                                    Ok(Value::Null)
+                                }
+                                Some(_) => Err("insert() needs a dict or set variable".into()),
+                                None => Err(format!("Undefined variable: {}", name)),
+                            };
+                        }
+                        "pop_in" => {
+                            let mut vars = self.vars.borrow_mut();
+                            return match vars.get_mut(name) {
+                                Some(Value::List(items)) => {
+                                    Ok(items.pop_back().unwrap_or(Value::Null))
+                                }
+                                Some(_) => Err("pop_in() needs a list variable".into()),
+                                None => Err(format!("Undefined variable: {}", name)),
+                            };
+                        }
+                        _ => {}
                     }
                 }
                 let obj_val = self.eval_expr(obj)?;
@@ -688,9 +781,38 @@ impl Interpreter {
                 }
             }
             Expr::Index(obj, index) => {
+                // Var fast path: xs[i] / d["k"] / s[i] read through a shared
+                // borrow instead of cloning the whole container first.
+                if let Expr::Var(name) = &**obj {
+                    let idx_val = self.eval_expr(index)?;
+                    let vars = self.vars.borrow();
+                    let hit: Option<Result<Value, String>> = match (vars.get(name), &idx_val) {
+                        (Some(Value::Dict(map)), Value::Str(k)) =>
+                            Some(Ok(map.get(&**k).cloned().unwrap_or(Value::Null))),
+                        (Some(Value::List(items)), Value::Int(i)) => {
+                            let j = if *i < 0 { items.len() as i64 + i } else { *i };
+                            if j < 0 || j as usize >= items.len() {
+                                Some(Err(format!("Index {} out of bounds (len {})", i, items.len())))
+                            } else {
+                                Some(Ok(items[j as usize].clone()))
+                            }
+                        }
+                        (Some(Value::Str(s)), Value::Int(i)) => {
+                            let j = if *i < 0 { s.chars().count() as i64 + i } else { *i };
+                            Some(s.chars().nth(j as usize)
+                                .map(|c| Value::Str(c.to_string().into()))
+                                .ok_or_else(|| format!("Index {} out of bounds", i)))
+                        }
+                        _ => None,
+                    };
+                    if let Some(r) = hit { return r; }
+                    drop(vars);
+                }
                 let obj_val = self.eval_expr(obj)?;
                 let idx_val = self.eval_expr(index)?;
                 match (&obj_val, &idx_val) {
+                    (Value::Dict(map), Value::Str(k)) =>
+                        Ok(map.get(&**k).cloned().unwrap_or(Value::Null)),
                     (Value::List(items), Value::Int(i)) => {
                         let j = if *i < 0 { items.len() as i64 + i } else { *i };
                         if j < 0 || j as usize >= items.len() {
@@ -2096,6 +2218,7 @@ impl Interpreter {
             (Value::Str(s), "upper") => Ok(Value::Str(s.to_uppercase().into())),
             (Value::Str(s), "lower") => Ok(Value::Str(s.to_lowercase().into())),
             (Value::Str(s), "trim") => Ok(Value::Str(s.trim().to_string().into())),
+            (Value::Str(s), "len") => Ok(Value::Int(s.chars().count() as i64)),
             (Value::Str(s), "split") => {
                 if args.len() != 1 { return Err("split() expects 1 argument".into()); }
                 match &args[0] {
@@ -2179,6 +2302,7 @@ impl Interpreter {
                 }
             }
             (Value::Str(s), "trim") => Ok(Value::Str(s.trim().to_string().into())),
+            (Value::Str(s), "len") => Ok(Value::Int(s.chars().count() as i64)),
             // === Phase 1 stdlib: strings ===
             (Value::Str(s), "replace") => match (args.get(0), args.get(1)) {
                 (Some(Value::Str(f)), Some(Value::Str(t))) =>
