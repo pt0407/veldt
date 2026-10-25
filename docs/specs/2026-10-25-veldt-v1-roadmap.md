@@ -58,14 +58,13 @@ Every one of these is hit within the first hour of writing real scripts.
 
 ## Phase 2 — Modules & namespacing (~1 week)
 
-- [ ] `import "lib.veldt" as lib` → `lib.f()`, `lib.CONST` — interpreter
-      keeps a module map; FieldAccess on a module value dispatches to that
-      module's env
-- [ ] Search path: relative to importing file first, then `VELDTPATH` dirs,
-      then a shipped `stdlib/` (prefix install)
-- [ ] `import "lib.veldt"` (no alias) keeps current merge-into-globals
+- [x] `import "lib.veldt" as lib` → `lib.f()`, `lib.CONST` — module marker
+      dict + `alias::name` function registry (devin)
+- [x] Search path: VELDTPATH dirs (: / ; sep) — done; importing-file-relative
+      + shipped `stdlib/` still open
+- [x] `import "lib.veldt"` (no alias) keeps current merge-into-globals
       behavior for backwards compat
-- [ ] Circular import guard — track in-progress paths, error cleanly
+- [x] Circular import guard — in-progress path stack, error cleanly
 - [ ] Ship a `stdlib/` dir with the binary (include_str! or install layout):
       `stdlib/str.veldt`, `stdlib/math.veldt`, `stdlib/http.veldt` wrappers
 

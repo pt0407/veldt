@@ -49,6 +49,11 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin] Phase 2 modules v1: `import "x" as lib` → `lib.f()`/`lib.CONST`.
+  Import execs in a fresh interp; fns register as `lib::name` AND bare
+  name (internal calls resolve — v1 leak, first importer wins on
+  collision). VELDTPATH search (: / ; sep), circular-import guard,
+  FunctionDef+FunctionVariant now Clone. fmt round-trips `as`.
 - [Devin] Merge reconciliation: BOTH agents built the Phase-0 runtime
   batch (repl/args/exit/eprint/stdin) — raced on main vs gardener.
   Resolved keeping the main-side versions (interp.argv field,

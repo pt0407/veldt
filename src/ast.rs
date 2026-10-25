@@ -90,8 +90,7 @@ pub enum Stmt {
     Print(Expr),
     Grow(GrowItem),
     Try(Vec<Stmt>, String, Vec<Stmt>), // try { body } catch var { handler }
-    Import(String), // import "path"
-    ImportAs(String, String), // import "path" as alias -> alias.f()
+    Import(String, Option<String>), // import "path" [as name]
     Match(Expr, Vec<(Expr, Vec<Stmt>)>, Option<Vec<Stmt>>), // match expr { pat => body, ... else => body }
     // destructuring: let [a, b] = expr  (from a list)
     LetDestructure(Vec<String>, Expr),
