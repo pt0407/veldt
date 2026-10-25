@@ -49,6 +49,11 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] Phase 7 shipped + tested: ConstFold/DeadBranch/
+  HoistInvariant in evolve.rs (8-op pool). Hoist bug caught by test —
+  now skips lets re-assigned in-loop. Also landed: veldt watch,
+  fmt --check, pull --merge (immigrant: tagging), veldt search.
+  121 tests green.
 - [Devin/main-side] PHASE 7 DONE: ConstFold + DeadBranch +
   HoistInvariant mutations in evolve.rs (slots 5/6/7 of 8).
   Verified end-to-end: 'let scale = 2*50' inside while + dead 'if 1>2'

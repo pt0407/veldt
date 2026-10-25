@@ -43,11 +43,15 @@ Methods: `push pop get set len map filter reduce any all sort
 reverse join take skip slice find contains index_of unique flat
 sum min max zip enumerate group_by`. `push`/`put` return new values.
 
+Mutating (O(1), in-place): `xs.append(v)` `xs.pop_in()` — no copy.
+
 ## Dicts & sets
 
 `d.get(k)` `d.put(k,v)` (returns new dict) `d.has(k)` `d.keys()`
-`d.values()` `d.delete(k)` `d.merge(d2)`; sets: `add has remove
-union intersect difference to_list`.
+`d.values()` `d.delete(k)` `d.merge(d2)` `d["k"]` read + `d["k"]=v`
+assign; `d.insert(k,v)` in-place O(1); `s.insert(v)` set insert;
+`s.len()`/`s[i]` on strings; sets: `add has remove union intersect
+difference to_list`.
 
 ## Math
 
@@ -92,6 +96,13 @@ loads the garden. **Only garden-persisted functions can be spawned.**
 | `spawn` | `spawn("name", [args])` → handle | real OS thread |
 | `join` | `join(handle)` → result | errors propagate |
 | `pmap` | `pmap("name", list)` → list | thread per item |
+
+## CLI extras
+
+`veldt watch <file>` rerun on save; `veldt fmt <file> --check` CI gate;
+`veldt registry [port]` shared garden pool; `veldt push/pull <url>`;
+`veldt pull <url> --merge` adds immigrants (provenance-tagged);
+`veldt search <url> <name>` query families.
 
 ## The garden
 
