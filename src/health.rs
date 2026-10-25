@@ -196,6 +196,7 @@ impl HealthChecker {
             Type::List(_) => Value::List(vec![]),
             Type::Fn => Value::Null,
             Type::Struct(_) => Value::Null,
+            Type::Any => Value::Null,
         }
     }
 

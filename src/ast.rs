@@ -11,6 +11,7 @@ pub enum Type {
     List(Box<Type>),
     Fn,
     Struct(String),
+    Any,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -38,6 +39,7 @@ pub enum Expr {
     Str(String),
     Interp(Vec<Expr>), // string interpolation: alternating Str and expression parts, concatenated
     Bool(bool),
+    Null,
     List(Vec<Expr>),
     Var(String),
     BinOp(Box<Expr>, BinOp, Box<Expr>),

@@ -10,7 +10,7 @@ pub enum Token {
     Ident(String),
     // Keywords
     Let, Fn, If, Else, While, For, Return, Print, Grow, Struct, Test, Try, Catch, Import, In, Match, Arrow,
-    True, False, And, Or, Not,
+    True, False, Null, And, Or, Not,
     // Type names
     TypeInt, TypeStr, TypeBool, TypeList, TypeFloat, TypeFn,
     // Operators
@@ -149,6 +149,80 @@ impl Lexer {
         }
     }
 
+    fn read_triple_string(&mut self) -> Result<Token, String> {
+        // Skip opening """
+        self.advance(); self.advance(); self.advance();
+        let mut s = String::new();
+        let mut parts: Vec<String> = Vec::new();
+        let mut has_interp = false;
+        loop {
+            match self.peek() {
+                None => return Err("Unterminated triple-quoted string".into()),
+                Some('"') => {
+                    // Check for closing """
+                    if self.peek_at(1) == Some('"') && self.peek_at(2) == Some('"') {
+                        self.advance(); self.advance(); self.advance();
+                        break;
+                    }
+                    self.advance();
+                    s.push('"');
+                }
+                Some('\\') => {
+                    self.advance();
+                    match self.advance() {
+                        Some('n') => s.push('\n'),
+                        Some('t') => s.push('\t'),
+                        Some('"') => s.push('"'),
+                        Some('\\') => s.push('\\'),
+                        Some('{') => s.push('{'),
+                        Some('}') => s.push('}'),
+                        Some(c) => s.push(c),
+                        None => return Err("Unterminated triple-quoted string".into()),
+                    }
+                }
+                Some('{') => {
+                    self.advance();
+                    if self.peek() == Some('{') {
+                        self.advance();
+                        s.push('{');
+                        continue;
+                    }
+                    has_interp = true;
+                    parts.push(std::mem::take(&mut s));
+                    let mut expr_src = String::new();
+                    let mut depth = 1;
+                    loop {
+                        match self.advance() {
+                            None => return Err("Unterminated interpolation in string".into()),
+                            Some('}') => {
+                                depth -= 1;
+                                if depth == 0 { break; }
+                                expr_src.push('}');
+                            }
+                            Some('{') => {
+                                depth += 1;
+                                expr_src.push('{');
+                            }
+                            Some(c) => expr_src.push(c),
+                        }
+                    }
+                    parts.push(expr_src);
+                }
+                Some(c) => {
+                    self.advance();
+                    s.push(c);
+                    if c == '\n' { self.line += 1; }
+                }
+            }
+        }
+        if has_interp {
+            parts.push(s);
+            Ok(Token::InterpStr(parts))
+        } else {
+            Ok(Token::Str(s))
+        }
+    }
+
     fn read_number(&mut self) -> Result<Token, String> {
         let start = self.pos;
         while let Some(c) = self.peek() {
@@ -220,6 +294,7 @@ impl Lexer {
             "match" => Token::Match,
             "true" => Token::True,
             "false" => Token::False,
+            "null" => Token::Null,
             "and" => Token::And,
             "or" => Token::Or,
             "not" => Token::Not,
@@ -263,9 +338,16 @@ impl Lexer {
                     }
                 }
                 Some('"') => {
-                    let tok = self.read_string()?;
-                    self.token_lines.push(tok_line); tokens.push(tok);
-                    self.last_was_ident_no_space = false;
+                    // Check for triple-quoted string """
+                    if self.peek_at(1) == Some('"') && self.peek_at(2) == Some('"') {
+                        let tok = self.read_triple_string()?;
+                        self.token_lines.push(tok_line); tokens.push(tok);
+                        self.last_was_ident_no_space = false;
+                    } else {
+                        let tok = self.read_string()?;
+                        self.token_lines.push(tok_line); tokens.push(tok);
+                        self.last_was_ident_no_space = false;
+                    }
                 }
                 Some(c) if c.is_ascii_digit() => {
                     let tok = self.read_number()?;

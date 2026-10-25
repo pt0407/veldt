@@ -358,6 +358,10 @@ impl Parser {
                 self.advance();
                 Ok(Expr::Bool(false))
             }
+            Token::Null => {
+                self.advance();
+                Ok(Expr::Null)
+            }
             Token::LParen => {
                 self.advance();
                 let e = self.parse_expr()?;
@@ -421,7 +425,7 @@ impl Parser {
                 self.parse_ident_postfix("float".into())
             }
             Token::Fn => {
-                // Lambda: fn(params) { body }
+                // Lambda: fn(params) { body } — types optional
                 self.advance(); // fn
                 self.expect(&Token::LParen, "(")?;
                 let mut params = Vec::new();
@@ -431,8 +435,11 @@ impl Parser {
                             Token::Ident(n) => n,
                             t => return Err(format!("Expected parameter name but got {:?}", t)),
                         };
-                        self.expect(&Token::Colon, ":")?;
-                        let ptype = self.parse_type()?;
+                        let ptype = if self.match_tok(&Token::Colon) {
+                            self.parse_type()?
+                        } else {
+                            Type::Any
+                        };
                         params.push(Param { name: pname, typ: ptype });
                         if !self.match_tok(&Token::Comma) { break; }
                     }

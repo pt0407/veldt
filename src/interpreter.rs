@@ -372,6 +372,7 @@ impl Interpreter {
                 Ok(Value::Str(result))
             }
             Expr::Bool(b) => Ok(Value::Bool(*b)),
+            Expr::Null => Ok(Value::Null),
             Expr::List(items) => {
                 let mut vals = Vec::new();
                 for item in items {
@@ -692,6 +693,15 @@ impl Interpreter {
         Ok(result)
     }
 
+    fn call_closure_value(&mut self, closure: &Value, args: Vec<Value>) -> Result<Value, String> {
+        match closure {
+            Value::Closure(params, body, captured) => {
+                self.call_closure(params.clone(), body.clone(), captured.clone(), args)
+            }
+            _ => Err("Expected a closure".into()),
+        }
+    }
+
     fn try_builtin(&mut self, name: &str, args: &[Value]) -> Result<Option<Value>, String> {
         match name {
             "range" => {
@@ -811,6 +821,75 @@ impl Interpreter {
                         }
                     }
                     _ => Err("write_file() expects (path, content) strings".into()),
+                }
+            }
+            "fetch" => {
+                if args.len() < 1 { return Err("fetch() expects a URL string".into()); }
+                match &args[0] {
+                    Value::Str(url) => {
+                        let client = reqwest::blocking::Client::builder()
+                            .user_agent("Veldt/0.3")
+                            .timeout(std::time::Duration::from_secs(30))
+                            .build()
+                            .map_err(|e| format!("HTTP client error: {}", e))?;
+                        let mut req = client.get(url);
+                        // Optional headers as dict: fetch(url, headers_dict)
+                        if args.len() >= 2 {
+                            if let Value::Dict(h) = &args[1] {
+                                for (k, v) in h {
+                                    if let Value::Str(sv) = v {
+                                        req = req.header(k, sv);
+                                    }
+                                }
+                            }
+                        }
+                        match req.send() {
+                            Ok(resp) => {
+                                let status = resp.status().as_u16() as i64;
+                                let body = resp.text().unwrap_or_default();
+                                let mut result = std::collections::HashMap::new();
+                                result.insert("status".to_string(), Value::Int(status));
+                                result.insert("body".to_string(), Value::Str(body));
+                                Ok(Some(Value::Dict(result)))
+                            }
+                            Err(e) => Err(format!("Fetch error: {}", e)),
+                        }
+                    }
+                    _ => Err("fetch() expects a URL string".into()),
+                }
+            }
+            "post" => {
+                if args.len() < 2 { return Err("post() expects (url, body) strings".into()); }
+                match (&args[0], &args[1]) {
+                    (Value::Str(url), Value::Str(body_str)) => {
+                        let client = reqwest::blocking::Client::builder()
+                            .user_agent("Veldt/0.3")
+                            .timeout(std::time::Duration::from_secs(30))
+                            .build()
+                            .map_err(|e| format!("HTTP client error: {}", e))?;
+                        let mut req = client.post(url).header("Content-Type", "application/json").body(body_str.clone());
+                        if args.len() >= 3 {
+                            if let Value::Dict(h) = &args[2] {
+                                for (k, v) in h {
+                                    if let Value::Str(sv) = v {
+                                        req = req.header(k, sv);
+                                    }
+                                }
+                            }
+                        }
+                        match req.send() {
+                            Ok(resp) => {
+                                let status = resp.status().as_u16() as i64;
+                                let body = resp.text().unwrap_or_default();
+                                let mut result = std::collections::HashMap::new();
+                                result.insert("status".to_string(), Value::Int(status));
+                                result.insert("body".to_string(), Value::Str(body));
+                                Ok(Some(Value::Dict(result)))
+                            }
+                            Err(e) => Err(format!("Post error: {}", e)),
+                        }
+                    }
+                    _ => Err("post() expects (url, body) strings".into()),
                 }
             }
             "input" => {
@@ -1089,6 +1168,23 @@ impl Interpreter {
                     _ => Err("index_of() expects a string".into()),
                 }
             }
+            (Value::Str(s), "trim") => Ok(Value::Str(s.trim().to_string())),
+            (Value::Str(s), "ltrim") => Ok(Value::Str(s.trim_start().to_string())),
+            (Value::Str(s), "rtrim") => Ok(Value::Str(s.trim_end().to_string())),
+            (Value::Str(s), "to_lower") => Ok(Value::Str(s.to_lowercase())),
+            (Value::Str(s), "to_upper") => Ok(Value::Str(s.to_uppercase())),
+            (Value::Str(s), "split_lines") => {
+                let parts: Vec<Value> = s.lines().map(|l| Value::Str(l.to_string())).collect();
+                Ok(Value::List(parts))
+            }
+            (Value::Str(s), "count") => {
+                if args.len() != 1 { return Err("count() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::Str(sub) => Ok(Value::Int(s.matches(sub).count() as i64)),
+                    _ => Err("count() expects a string".into()),
+                }
+            }
+            (Value::Str(s), "is_empty") => Ok(Value::Bool(s.is_empty())),
             // List methods
             (Value::List(items), "push") => {
                 let mut new_items = items.clone();
@@ -1138,10 +1234,55 @@ impl Interpreter {
                 let mut sorted = items.clone();
                 sorted.sort_by(|a, b| match (a, b) {
                     (Value::Int(a), Value::Int(b)) => a.cmp(b),
+                    (Value::Float(a), Value::Float(b)) => a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal),
+                    (Value::Int(a), Value::Float(b)) => (*a as f64).partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal),
+                    (Value::Float(a), Value::Int(b)) => a.partial_cmp(&(*b as f64)).unwrap_or(std::cmp::Ordering::Equal),
                     (Value::Str(a), Value::Str(b)) => a.cmp(b),
                     _ => std::cmp::Ordering::Equal,
                 });
                 Ok(Value::List(sorted))
+            }
+            (Value::List(items), "map") => {
+                if args.len() != 1 { return Err("map() expects 1 closure argument".into()); }
+                let closure = args[0].clone();
+                let mut result = Vec::new();
+                for item in items {
+                    let r = self.call_closure_value(&closure, vec![item.clone()])?;
+                    result.push(r);
+                }
+                Ok(Value::List(result))
+            }
+            (Value::List(items), "filter") => {
+                if args.len() != 1 { return Err("filter() expects 1 closure argument".into()); }
+                let closure = args[0].clone();
+                let mut result = Vec::new();
+                for item in items.iter() {
+                    let r = self.call_closure_value(&closure, vec![item.clone()])?;
+                    if self.is_truthy(&r) {
+                        result.push(item.clone());
+                    }
+                }
+                Ok(Value::List(result))
+            }
+            (Value::List(items), "reduce") => {
+                if args.len() != 2 { return Err("reduce() expects (initial, closure) arguments".into()); }
+                let mut acc = args[0].clone();
+                let closure = args[1].clone();
+                for item in items {
+                    acc = self.call_closure_value(&closure, vec![acc, item.clone()])?;
+                }
+                Ok(acc)
+            }
+            (Value::List(items), "find") => {
+                if args.len() != 1 { return Err("find() expects 1 closure argument".into()); }
+                let closure = args[0].clone();
+                for item in items.iter() {
+                    let r = self.call_closure_value(&closure, vec![item.clone()])?;
+                    if self.is_truthy(&r) {
+                        return Ok(item.clone());
+                    }
+                }
+                Ok(Value::Null)
             }
             (Value::List(items), "slice") => {
                 if args.len() != 2 { return Err("slice() expects 2 arguments".into()); }

@@ -1,0 +1,113 @@
+# api_client.veldt — real-world HTTP API client
+# Fetches data from a public API, parses JSON, processes it with closures
+
+print("=== Veldt HTTP API Client ===")
+print("")
+
+# Fetch a joke from a public API
+print("Fetching from httpbin.org...")
+let resp = fetch("https://httpbin.org/json")
+let status = resp.get("status")
+print("HTTP Status: {status}")
+
+if status == 200 {
+    let body = resp.get("body")
+    print("Response length: {len(body)} chars")
+    print("")
+
+    # Parse JSON response
+    let data = json_parse(body)
+    print("Parsed JSON keys: {data.keys()}")
+    print("")
+
+    # Deep access into nested JSON
+    let slideshow = data.get("slideshow")
+    if slideshow != null {
+        let title = slideshow.get("title")
+        let slide_count = slideshow.get("slidecount")
+        print("Slideshow: {title}")
+        print("Slides: {slide_count}")
+        print("")
+
+        let slides = slideshow.get("slides")
+        if slides != null {
+            print("=== Slides ===")
+            for slide in slides {
+                let stitle = slide.get("title")
+                print("  - {stitle}")
+            }
+        }
+    }
+} else {
+    print("Request failed with status {status}")
+}
+print("")
+
+# Demo: process a list of numbers using functional methods
+print("=== Functional Data Processing ===")
+let nums = [5, 3, 8, 1, 9, 2, 7, 4, 6, 10]
+
+let squared = nums.map(fn(x) { return x * x })
+print("Squared: {squared}")
+
+let evens = nums.filter(fn(x) { return x % 2 == 0 })
+print("Evens: {evens}")
+
+let total = nums.reduce(0, fn(acc, x) { return acc + x })
+print("Sum: {total}")
+
+let max_val = nums.reduce(0, fn(acc, x) { if x > acc { return x } else { return acc } })
+print("Max: {max_val}")
+
+let sorted = nums.sort()
+print("Sorted: {sorted}")
+
+let first_big = nums.find(fn(x) { return x > 7 })
+print("First > 7: {first_big}")
+print("")
+
+# Demo: string processing
+print("=== String Processing ===")
+let text = """  Hello, World!
+  Veldt is awesome!
+  Multi-line strings work!  """
+
+let trimmed = text.trim()
+print("Trimmed:")
+print(trimmed)
+print("")
+
+let lines = trimmed.split_lines()
+print("Line count: {len(lines)}")
+
+let upper = trimmed.to_upper()
+print("Upper (first 30 chars): {upper.substr(0, 30)}...")
+print("")
+
+# Demo: list comprehension with closures
+print("=== Comprehensions ===")
+let doubles = [x * 2 for x in nums]
+let big_squares = [x * x for x in nums if x > 5]
+print("Doubles: {doubles}")
+print("Big squares: {big_squares}")
+print("")
+
+# Match on response
+print("=== Match ===")
+match status {
+    200 => print("OK - request succeeded")
+    404 => print("Not Found")
+    500 => print("Server Error")
+    else => print("Status: {status}")
+}
+print("")
+
+print("=== All features working ===")
+print("1. HTTP fetch (real API call)")
+print("2. JSON parsing (nested objects)")
+print("3. Closures (map/filter/reduce)")
+print("4. List comprehensions")
+print("5. Multi-line strings")
+print("6. String methods (trim, split_lines, to_upper, substr)")
+print("7. Match/switch")
+print("8. String interpolation")
