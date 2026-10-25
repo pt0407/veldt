@@ -49,6 +49,11 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] PHASE 6 (per user): xs.append(v) mutating list op,
+  d.insert(k,v) mutating dict op, d["k"]=v index-assign, s.len() parity.
+  Approach: lvalue mutation on Var receivers in eval_expr MethodCall +
+  IndexAssign on Dict — NOT the Rc<RefCell> Value refactor (gardener
+  owns that in the perf lane if desired; this is the ergonomic fix).
 - [Devin/main-side] PHASE 5 (per user): killer demo (seed removable
   waste -> evolve -> measurable step reduction -> call_best picks it)
   in examples/live_demo.veldt + demo/run_demo.sh, plus garden registry:
