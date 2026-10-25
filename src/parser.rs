@@ -117,7 +117,45 @@ impl Parser {
     // Expression parsing with precedence climbing
 
     pub fn parse_expr(&mut self) -> Result<Expr, String> {
-        self.parse_or()
+        self.parse_nullco()
+    }
+
+    fn parse_nullco(&mut self) -> Result<Expr, String> {
+        let mut left = self.parse_pipe()?;
+        while self.match_tok(&Token::NullCoal) {
+            let right = self.parse_pipe()?;
+            left = Expr::BinOp(Box::new(left), BinOp::NullCoal, Box::new(right));
+        }
+        Ok(left)
+    }
+
+    fn parse_pipe(&mut self) -> Result<Expr, String> {
+        let mut left = self.parse_or()?;
+        while self.match_tok(&Token::Pipe) {
+            // a |> f(b)  =>  f(a, b);  a |> f  =>  f(a)
+            let fname = match self.advance() {
+                Token::Ident(n) => n,
+                Token::TypeInt => "int".into(),
+                Token::TypeStr => "str".into(),
+                Token::TypeFloat => "float".into(),
+                Token::TypeBool => "bool".into(),
+                Token::TypeList => "list".into(),
+                t => return Err(format!("Expected function name after |> but got {:?}", t)),
+            };
+            let mut args = vec![left];
+            if self.check(&Token::LParen) {
+                self.advance();
+                if !self.check(&Token::RParen) {
+                    loop {
+                        args.push(self.parse_expr()?);
+                        if !self.match_tok(&Token::Comma) { break; }
+                    }
+                }
+                self.expect(&Token::RParen, ")")?;
+            }
+            left = Expr::Call(fname, None, args);
+        }
+        Ok(left)
     }
 
     fn parse_or(&mut self) -> Result<Expr, String> {
@@ -277,6 +315,25 @@ impl Parser {
         let mut expr = self.parse_primary()?;
         loop {
             match self.peek() {
+                Token::SafeAccess => {
+                    self.advance();
+                    let name = match self.advance() {
+                        Token::Ident(n) => n,
+                        t => return Err(format!("Expected field/method name after ?. but got {:?}", t)),
+                    };
+                    let args = if self.match_tok(&Token::LParen) {
+                        let mut args = Vec::new();
+                        if !self.check(&Token::RParen) {
+                            loop {
+                                args.push(self.parse_expr()?);
+                                if !self.match_tok(&Token::Comma) { break; }
+                            }
+                        }
+                        self.expect(&Token::RParen, ")")?;
+                        Some(args)
+                    } else { None };
+                    expr = Expr::SafeGet(Box::new(expr), name, args);
+                }
                 Token::Dot => {
                     self.advance();
                     let method = match self.advance() {
@@ -504,6 +561,23 @@ impl Parser {
 
     fn parse_let(&mut self) -> Result<Stmt, String> {
         self.advance(); // let
+        // Destructuring: let [a, b] = expr
+        if self.match_tok(&Token::LBracket) {
+            let mut names = Vec::new();
+            if !self.check(&Token::RBracket) {
+                loop {
+                    match self.advance() {
+                        Token::Ident(n) => names.push(n),
+                        t => return Err(format!("Expected name in destructure but got {:?}", t)),
+                    }
+                    if !self.match_tok(&Token::Comma) { break; }
+                }
+            }
+            self.expect(&Token::RBracket, "]")?;
+            self.expect(&Token::Eq, "=")?;
+            let expr = self.parse_expr()?;
+            return Ok(Stmt::LetDestructure(names, expr));
+        }
         let name = match self.advance() {
             Token::Ident(n) => n,
             t => return Err(format!("Expected variable name but got {:?}", t)),

@@ -612,11 +612,15 @@ mod tests {
         ], vec![Stmt::Return(Some(Expr::BinOp(
             Box::new(Expr::Var("a".into())),
             BinOp::Add,
-            Box::new(Expr::Var("b".into())),
+            Box::new(Expr::BinOp(
+                Box::new(Expr::Var("b".into())),
+                BinOp::Add,
+                Box::new(Expr::Int(1)),
+            )),
         )))], vec![TestAssert {
             call: Expr::Call("add".into(), None, vec![Expr::Int(2), Expr::Int(3)]),
-            expected: Some(Expr::Int(5)),
-        }], "fn add(a, b) { return a + b }");
+            expected: Some(Expr::Int(6)),
+        }], "fn add(a, b) { return a + b + 1 }");
 
         // Health check
         let mut entry = veldt.functions["add"][0].clone();

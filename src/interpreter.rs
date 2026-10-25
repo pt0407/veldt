@@ -3,6 +3,8 @@
 use crate::ast::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::rc::Rc;
+use std::cell::RefCell;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -15,7 +17,7 @@ pub enum Value {
     Dict(HashMap<String, Value>),
     Set(Vec<Value>),
     Struct(String, HashMap<String, Value>),
-    Closure(Vec<Param>, Vec<Stmt>, HashMap<String, Value>),
+    Closure(Vec<Param>, Vec<Stmt>, #[serde(skip)] Rc<RefCell<HashMap<String, Value>>>),
     Null,
 }
 
@@ -60,7 +62,7 @@ pub struct FunctionDef {
 }
 
 pub struct Interpreter {
-    pub vars: HashMap<String, Value>,
+    pub vars: Rc<RefCell<HashMap<String, Value>>>,
     pub functions: HashMap<String, Vec<FunctionVariant>>,
     pub structs: HashMap<String, Vec<(String, Type)>>,
     // track which veldt functions were called during this run
@@ -74,9 +76,13 @@ pub struct Interpreter {
     rng_state: u64,
     // Current source line for error reporting
     pub current_line: usize,
+    pub trace: bool,
     // SQLite connections (id -> connection)
     db_connections: HashMap<i64, rusqlite::Connection>,
     next_db_id: i64,
+    // spawned threads: task id -> join handle returning Result<json, err>
+    tasks: HashMap<i64, std::thread::JoinHandle<Result<String, String>>>,
+    next_task_id: i64,
 }
 
 pub struct FunctionVariant {
@@ -93,7 +99,7 @@ pub enum FlowControl {
 impl Interpreter {
     pub fn new() -> Self {
         Interpreter {
-            vars: HashMap::new(),
+            vars: Rc::new(RefCell::new(HashMap::new())),
             functions: HashMap::new(),
             structs: HashMap::new(),
             usage_log: Vec::new(),
@@ -105,8 +111,11 @@ impl Interpreter {
                 .map(|d| d.as_nanos() as u64)
                 .unwrap_or(0x1234567890ABCDEF),
             current_line: 0,
+            trace: false,
             db_connections: HashMap::new(),
             next_db_id: 1,
+            tasks: HashMap::new(),
+            next_task_id: 0,
         }
     }
 
@@ -152,13 +161,13 @@ impl Interpreter {
         match stmt {
             Stmt::Let(name, expr) => {
                 let val = self.eval_expr(expr)?;
-                self.vars.insert(name.clone(), val);
+                self.vars.borrow_mut().insert(name.clone(), val);
                 Ok(FlowControl::Normal)
             }
             Stmt::Assign(name, expr) => {
                 let val = self.eval_expr(expr)?;
-                if self.vars.contains_key(name) {
-                    self.vars.insert(name.clone(), val);
+                if self.vars.borrow().contains_key(name) {
+                    self.vars.borrow_mut().insert(name.clone(), val);
                     Ok(FlowControl::Normal)
                 } else {
                     Err(format!("Cannot assign to undefined variable: {}", name))
@@ -177,7 +186,7 @@ impl Interpreter {
                         // This is tricky — we need to find where the struct lives
                         // For now, we only support field assignment on variables
                         if let Expr::Var(var_name) = obj_expr {
-                            self.vars.insert(var_name.clone(), Value::Struct(name, fields));
+                            self.vars.borrow_mut().insert(var_name.clone(), Value::Struct(name, fields));
                         } else {
                             return Err("Can only assign fields on a variable".into());
                         }
@@ -199,7 +208,7 @@ impl Interpreter {
                                 }
                                 items[i as usize] = new_val;
                                 if let Expr::Var(var_name) = obj_expr {
-                                    self.vars.insert(var_name.clone(), Value::List(items));
+                                    self.vars.borrow_mut().insert(var_name.clone(), Value::List(items));
                                 } else {
                                     return Err("Can only assign index on a variable".into());
                                 }
@@ -258,7 +267,7 @@ impl Interpreter {
                 match iter_val {
                     Value::List(items) => {
                         for item in items {
-                            self.vars.insert(var.clone(), item);
+                            self.vars.borrow_mut().insert(var.clone(), item);
                             match self.exec_block(body)? {
                                 FlowControl::Return(v) => return Ok(FlowControl::Return(v)),
                                 FlowControl::Normal => {}
@@ -308,7 +317,7 @@ impl Interpreter {
                 match self.exec_block(body) {
                     Ok(flow) => Ok(flow),
                     Err(e) => {
-                        self.vars.insert(err_var.clone(), Value::Str(e));
+                        self.vars.borrow_mut().insert(err_var.clone(), Value::Str(e));
                         self.exec_block(handler)
                     }
                 }
@@ -322,6 +331,19 @@ impl Interpreter {
                 let mut parser = crate::parser::Parser::new_with_lines(tokens, lines);
                 let program = parser.parse_program()?;
                 self.exec_block(&program)
+            }
+            Stmt::LetDestructure(names, expr) => {
+                let val = self.eval_expr(expr)?;
+                match val {
+                    Value::List(items) => {
+                        for (i, n) in names.iter().enumerate() {
+                            let v = items.get(i).cloned().unwrap_or(Value::Null);
+                            self.vars.borrow_mut().insert(n.clone(), v);
+                        }
+                        Ok(FlowControl::Normal)
+                    }
+                    _ => Err("Cannot destructure non-list value".into()),
+                }
             }
             Stmt::Match(scrutinee, arms, else_arm) => {
                 let val = self.eval_expr(scrutinee)?;
@@ -394,14 +416,36 @@ impl Interpreter {
                 Ok(Value::List(vals))
             }
             Expr::Var(name) => {
-                self.vars.get(name)
-                    .cloned()
+                self.vars.borrow().get(name).cloned()
                     .ok_or_else(|| format!("Undefined variable: {}", name))
             }
             Expr::BinOp(left, op, right) => {
+                // Lazy: a ?? b — don't evaluate b if a is non-null
+                if *op == BinOp::NullCoal {
+                    let l = self.eval_expr(left)?;
+                    return if matches!(l, Value::Null) { self.eval_expr(right) } else { Ok(l) };
+                }
                 let l = self.eval_expr(left)?;
                 let r = self.eval_expr(right)?;
                 self.eval_binop(&l, op, &r)
+            }
+            Expr::SafeGet(obj, name, args) => {
+                let o = self.eval_expr(obj)?;
+                match o {
+                    Value::Null => Ok(Value::Null),
+                    _ => match args {
+                        Some(a) => {
+                            let mut av = Vec::new();
+                            for e in a { av.push(self.eval_expr(e)?); }
+                            self.eval_method_call(o, name, av)
+                        }
+                        None => match o {
+                            Value::Struct(_, fields) => Ok(fields.get(name).cloned().unwrap_or(Value::Null)),
+                            Value::Dict(d) => Ok(d.get(name).cloned().unwrap_or(Value::Null)),
+                            _ => Err(format!("Cannot access '{}' on this value", name)),
+                        }
+                    }
+                }
             }
             Expr::UnaryOp(op, expr) => {
                 let v = self.eval_expr(expr)?;
@@ -423,7 +467,8 @@ impl Interpreter {
                 }
                 // First check if it's a variable holding a closure
                 if variant.is_none() {
-                    if let Some(Value::Closure(params, body, captured)) = self.vars.get(name) {
+                    let closure_binding = self.vars.borrow().get(name).cloned();
+                if let Some(Value::Closure(params, body, captured)) = closure_binding {
                         return self.call_closure(params.clone(), body.clone(), captured.clone(), arg_vals);
                     }
                 }
@@ -458,7 +503,7 @@ impl Interpreter {
             }
             Expr::Lambda(params, body) => {
                 // Capture current variables as closure environment
-                Ok(Value::Closure(params.clone(), body.clone(), self.vars.clone()))
+                Ok(Value::Closure(params.clone(), body.clone(), Rc::clone(&self.vars)))
             }
             Expr::ListComp(expr, var, iter, cond) => {
                 let iter_val = self.eval_expr(iter)?;
@@ -470,7 +515,7 @@ impl Interpreter {
                 let mut result = Vec::new();
                 let old_vars = self.vars.clone();
                 for item in items {
-                    self.vars.insert(var.clone(), item);
+                    self.vars.borrow_mut().insert(var.clone(), item);
                     let include = match cond {
                         Some(c) => {
                             let cv = self.eval_expr(c)?;
@@ -606,6 +651,10 @@ impl Interpreter {
                 _ => Err("Cannot compare these types with >=".into()),
                 _ => Err("Cannot compare non-integers with >=".into()),
             },
+            BinOp::NullCoal => {
+                // already handled lazily in eval_expr; fallback for direct calls
+                if matches!(l, Value::Null) { Ok(r.clone()) } else { Ok(l.clone()) }
+            }
             BinOp::And => match (l, r) {
                 (Value::Bool(a), Value::Bool(b)) => Ok(Value::Bool(*a && *b)),
                 _ => Err("Cannot 'and' non-booleans".into()),
@@ -667,7 +716,7 @@ impl Interpreter {
 
         // Create new scope
         let old_vars = self.vars.clone();
-        self.vars.clear();
+        self.vars = Rc::new(RefCell::new(HashMap::new()));
 
         // Bind params
         if args.len() != params.len() {
@@ -675,7 +724,7 @@ impl Interpreter {
             return Err(format!("Function {} expects {} args but got {}", name, params.len(), args.len()));
         }
         for (param, val) in params.iter().zip(args.into_iter()) {
-            self.vars.insert(param.name.clone(), val);
+            self.vars.borrow_mut().insert(param.name.clone(), val);
         }
 
         // Execute body
@@ -689,16 +738,35 @@ impl Interpreter {
         Ok(result)
     }
 
-    fn call_closure(&mut self, params: Vec<Param>, body: Vec<Stmt>, captured: HashMap<String, Value>, args: Vec<Value>) -> Result<Value, String> {
+    /// Runs a garden function on a spawned thread with a fresh interpreter.
+    /// Shared-nothing: args arrive as JSON strings, result leaves as JSON.
+    fn thread_run(fname: &str, json_args: Vec<String>) -> Result<String, String> {
+        let mut veldt = crate::veldt::Veldt::new();
+        veldt.load().map_err(|e| format!("garden load failed: {}", e))?;
+        let mut interp = Interpreter::new();
+        veldt.load_into_interpreter(&mut interp);
+        let args: Result<Vec<Value>, _> = json_args.iter()
+            .map(|s| serde_json::from_str(s)).collect();
+        let args = args.map_err(|e| format!("bad spawn args: {}", e))?;
+        let result = interp.call_function(fname, None, args)?;
+        serde_json::to_string(&result).map_err(|e| format!("result not serializable: {}", e))
+    }
+
+    fn call_closure(&mut self, params: Vec<Param>, body: Vec<Stmt>, captured: Rc<RefCell<HashMap<String, Value>>>, args: Vec<Value>) -> Result<Value, String> {
         if args.len() != params.len() {
             return Err(format!("Closure expects {} args but got {}", params.len(), args.len()));
         }
 
         // Save current vars, set up closure scope with captured vars + params
         let old_vars = self.vars.clone();
+        // save param bindings that exist in the captured env so we can restore them
+        let mut param_restore: Vec<(String, Option<Value>)> = Vec::new();
+        for param in &params {
+            param_restore.push((param.name.clone(), captured.borrow().get(&param.name).cloned()));
+        }
         self.vars = captured;
         for (param, val) in params.iter().zip(args.into_iter()) {
-            self.vars.insert(param.name.clone(), val);
+            self.vars.borrow_mut().insert(param.name.clone(), val);
         }
 
         // Execute body
@@ -707,7 +775,14 @@ impl Interpreter {
             FlowControl::Normal => Value::Null,
         };
 
-        // Restore scope
+        // Restore param bindings in the shared env (prevent param leakage),
+        // then restore caller scope
+        for (pname, old_val) in param_restore {
+            match old_val {
+                Some(v) => { self.vars.borrow_mut().insert(pname, v); }
+                None => { self.vars.borrow_mut().remove(&pname); }
+            }
+        }
         self.vars = old_vars;
         Ok(result)
     }
@@ -721,7 +796,7 @@ impl Interpreter {
         }
     }
 
-    fn serve_requests(&mut self, port: i64, params: Vec<Param>, body: Vec<Stmt>, captured: HashMap<String, Value>) -> Result<(), String> {
+    fn serve_requests(&mut self, port: i64, params: Vec<Param>, body: Vec<Stmt>, captured: Rc<RefCell<HashMap<String, Value>>>) -> Result<(), String> {
         use std::net::TcpListener;
         use std::io::{BufRead, BufReader, Read, Write};
 
@@ -1066,6 +1141,71 @@ impl Interpreter {
                 }
                 Ok(Some(Value::Set(items)))
             }
+            "spawn" => {
+                // spawn("fn_name", [args]) -> task id
+                // Runs a GARDEN function on an OS thread with its own
+                // interpreter. Shared-nothing: args/results are marshalled
+                // via JSON. Only functions persisted in the garden can spawn.
+                let fname = match args.get(0) {
+                    Some(Value::Str(s)) => s.clone(),
+                    _ => return Err("spawn() expects a function name string".into()),
+                };
+                let fargs = match args.get(1) {
+                    Some(Value::List(l)) => l.clone(),
+                    Some(_) => return Err("spawn() args must be a list".into()),
+                    None => Vec::new(),
+                };
+                let json_args: Result<Vec<String>, _> = fargs.iter()
+                    .map(|a| serde_json::to_string(a)).collect();
+                let json_args = json_args.map_err(|e| format!("spawn arg not serializable: {}", e))?;
+                let handle = std::thread::spawn(move || Self::thread_run(&fname, json_args));
+                self.next_task_id += 1;
+                self.tasks.insert(self.next_task_id, handle);
+                Ok(Some(Value::Int(self.next_task_id)))
+            }
+            "join" => {
+                // join(task_id) -> result value; blocks until done
+                let id = match args.get(0) {
+                    Some(Value::Int(n)) => *n,
+                    _ => return Err("join() expects a task id".into()),
+                };
+                match self.tasks.remove(&id) {
+                    Some(h) => match h.join() {
+                        Ok(Ok(json)) => Ok(Some(
+                            serde_json::from_str(&json).unwrap_or(Value::Null))),
+                        Ok(Err(e)) => Err(format!("spawned task failed: {}", e)),
+                        Err(_) => Err("spawned task panicked".into()),
+                    },
+                    None => Err(format!("No task with id {}", id)),
+                }
+            }
+            "pmap" => {
+                // pmap("fn_name", list) -> list of results, one thread per item
+                let fname = match args.get(0) {
+                    Some(Value::Str(s)) => s.clone(),
+                    _ => return Err("pmap() expects a function name string".into()),
+                };
+                let items = match args.get(1) {
+                    Some(Value::List(l)) => l.clone(),
+                    _ => return Err("pmap() expects (name, list)".into()),
+                };
+                let mut handles = Vec::new();
+                for item in &items {
+                    let ja = serde_json::to_string(item)
+                        .map_err(|e| format!("pmap arg not serializable: {}", e))?;
+                    let fname2 = fname.clone();
+                    handles.push(std::thread::spawn(move || Self::thread_run(&fname2, vec![ja])));
+                }
+                let mut results = Vec::new();
+                for h in handles {
+                    match h.join() {
+                        Ok(Ok(json)) => results.push(serde_json::from_str(&json).unwrap_or(Value::Null)),
+                        Ok(Err(e)) => return Err(format!("pmap worker failed: {}", e)),
+                        Err(_) => return Err("pmap worker panicked".into()),
+                    }
+                }
+                Ok(Some(Value::List(results)))
+            }
             "call_best" => {
                 // call_best("name", arg1, arg2, ...) — dispatch to the
                 // currently-fittest variant of the named function
@@ -1094,6 +1234,65 @@ impl Interpreter {
                     }
                     _ => Err("serve() expects (port_int, closure)".into()),
                 }
+            }
+            "re_match" | "re_find" | "re_replace" | "re_split" => {
+                if args.len() < 2 { return Err("regex builtin expects (string, pattern)".into()); }
+                let (s, pat) = match (&args[0], &args[1]) {
+                    (Value::Str(s), Value::Str(p)) => (s.clone(), p.clone()),
+                    _ => return Err("regex expects (string, pattern)".into()),
+                };
+                let re = regex::Regex::new(&pat)
+                    .map_err(|e| format!("Bad regex: {}", e))?;
+                match name {
+                    "re_match" => Ok(Some(Value::Bool(re.is_match(&s)))),
+                    "re_find" => Ok(Some(match re.find(&s) {
+                        Some(m) => Value::Str(m.as_str().to_string()),
+                        None => Value::Null,
+                    })),
+                    "re_replace" => {
+                        match args.get(2) {
+                            Some(Value::Str(rep)) => Ok(Some(Value::Str(re.replace_all(&s, rep.as_str()).to_string()))),
+                            _ => Err("re_replace expects (string, pattern, replacement)".into()),
+                        }
+                    }
+                    "re_split" => {
+                        let parts: Vec<Value> = re.split(&s).map(|p| Value::Str(p.to_string())).collect();
+                        Ok(Some(Value::List(parts)))
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            "date" => {
+                // date() -> "YYYY-MM-DD HH:MM:SS" or date(fmt) with %Y %m %d %H %M %S tokens
+                let ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as i64;
+                let secs = ms / 1000;
+                let days = secs.div_euclid(86400);
+                let tod = secs.rem_euclid(86400);
+                let (h, mi, sc) = (tod / 3600, (tod % 3600) / 60, tod % 60);
+                // civil-from-days (Howard Hinnant)
+                let z = days + 719468;
+                let era = z.div_euclid(146097);
+                let doe = z.rem_euclid(146097);
+                let yoe = (doe - doe/1460 + doe/36524 - doe/146096) / 365;
+                let y = yoe + era * 400;
+                let doy = doe - (365*yoe + yoe/4 - yoe/100);
+                let mp = (5*doy + 2)/153;
+                let d = doy - (153*mp + 2)/5 + 1;
+                let m = if mp < 10 { mp + 3 } else { mp - 9 };
+                let y = if m <= 2 { y + 1 } else { y };
+                let base = format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}", y, m, d, h, mi, sc);
+                let out = match args.get(0) {
+                    Some(Value::Str(f)) => f
+                        .replace("%Y", &format!("{:04}", y))
+                        .replace("%m", &format!("{:02}", m))
+                        .replace("%d", &format!("{:02}", d))
+                        .replace("%H", &format!("{:02}", h))
+                        .replace("%M", &format!("{:02}", mi))
+                        .replace("%S", &format!("{:02}", sc)),
+                    _ => base,
+                };
+                Ok(Some(Value::Str(out)))
             }
             "render" => {
                 if args.len() != 2 { return Err("render() expects (template, data)".into()); }
@@ -1752,13 +1951,13 @@ mod tests {
     #[test]
     fn test_arithmetic() {
         let interp = run_src("let x = 1 + 2 * 3");
-        assert_eq!(interp.vars.get("x"), Some(&Value::Int(7)));
+        assert_eq!(interp.vars.borrow().get("x"), Some(&Value::Int(7)));
     }
 
     #[test]
     fn test_function_call() {
         let interp = run_src("fn add(a: int, b: int) { return a + b }\nlet x = add(3, 4)");
-        assert_eq!(interp.vars.get("x"), Some(&Value::Int(7)));
+        assert_eq!(interp.vars.borrow().get("x"), Some(&Value::Int(7)));
     }
 
     #[test]
@@ -1770,25 +1969,26 @@ mod tests {
     #[test]
     fn test_while_loop() {
         let interp = run_src("let i = 0\nwhile i < 5 { i = i + 1 }");
-        assert_eq!(interp.vars.get("i"), Some(&Value::Int(5)));
+        assert_eq!(interp.vars.borrow().get("i"), Some(&Value::Int(5)));
     }
 
     #[test]
     fn test_for_loop() {
         let interp = run_src("let sum = 0\nfor i in range(5) { sum = sum + i }");
-        assert_eq!(interp.vars.get("sum"), Some(&Value::Int(10)));
+        assert_eq!(interp.vars.borrow().get("sum"), Some(&Value::Int(10)));
     }
 
     #[test]
     fn test_string_concat() {
         let interp = run_src("let x = \"hello\" + \" \" + \"world\"");
-        assert_eq!(interp.vars.get("x"), Some(&Value::Str("hello world".into())));
+        assert_eq!(interp.vars.borrow().get("x"), Some(&Value::Str("hello world".into())));
     }
 
     #[test]
     fn test_struct() {
         let interp = run_src("struct Point { x: int, y: int }\nlet p = Point { x: 3, y: 4 }");
-        match interp.vars.get("p") {
+        let _p_val = interp.vars.borrow().get("p").cloned();
+        match _p_val {
             Some(Value::Struct(name, fields)) => {
                 assert_eq!(name, "Point");
                 assert_eq!(fields.get("x"), Some(&Value::Int(3)));
@@ -1801,19 +2001,20 @@ mod tests {
     #[test]
     fn test_field_access() {
         let interp = run_src("struct Point { x: int, y: int }\nlet p = Point { x: 3, y: 4 }\nlet z = p.x");
-        assert_eq!(interp.vars.get("z"), Some(&Value::Int(3)));
+        assert_eq!(interp.vars.borrow().get("z"), Some(&Value::Int(3)));
     }
 
     #[test]
     fn test_method_call() {
         let interp = run_src("let s = \"hello\"\nlet u = s.upper()");
-        assert_eq!(interp.vars.get("u"), Some(&Value::Str("HELLO".into())));
+        assert_eq!(interp.vars.borrow().get("u"), Some(&Value::Str("HELLO".into())));
     }
 
     #[test]
     fn test_list_methods() {
         let interp = run_src("let l = [1, 2, 3]\nlet l2 = l.push(4)");
-        match interp.vars.get("l2") {
+        let _l2_val = interp.vars.borrow().get("l2").cloned();
+        match _l2_val {
             Some(Value::List(items)) => {
                 assert_eq!(items.len(), 4);
                 assert_eq!(items[3], Value::Int(4));
@@ -1825,9 +2026,9 @@ mod tests {
     #[test]
     fn test_boolean_ops() {
         let interp = run_src("let x = true and false\nlet y = true or false\nlet z = not x");
-        assert_eq!(interp.vars.get("x"), Some(&Value::Bool(false)));
-        assert_eq!(interp.vars.get("y"), Some(&Value::Bool(true)));
-        assert_eq!(interp.vars.get("z"), Some(&Value::Bool(true)));
+        assert_eq!(interp.vars.borrow().get("x"), Some(&Value::Bool(false)));
+        assert_eq!(interp.vars.borrow().get("y"), Some(&Value::Bool(true)));
+        assert_eq!(interp.vars.borrow().get("z"), Some(&Value::Bool(true)));
     }
 
     #[test]

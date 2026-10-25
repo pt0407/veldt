@@ -3,6 +3,7 @@
 mod agent;
 mod ast;
 mod evolve;
+mod fmt;
 mod health;
 mod interpreter;
 mod lexer;
@@ -39,7 +40,39 @@ fn main() {
                 eprintln!("Usage: veldt run <file.veldt>");
                 process::exit(1);
             }
-            run_program(&args[2]);
+            run_program(&args[2], args.iter().any(|a| a == "--trace"), args.iter().any(|a| a == "--evolve"));
+        }
+        "fmt" => {
+            if args.len() < 3 {
+                eprintln!("Usage: veldt fmt <file.veldt> [--write]");
+                process::exit(1);
+            }
+            fmt_file(&args[2], args.iter().any(|a| a == "--write" || a == "-w"));
+        }
+        "test" => {
+            if args.len() < 3 {
+                eprintln!("Usage: veldt test <name>");
+                process::exit(1);
+            }
+            test_family(&args[2]);
+        }
+        "adopt" => {
+            if args.len() < 3 {
+                eprintln!("Usage: veldt adopt <name#N>");
+                process::exit(1);
+            }
+            adopt_variant(&args[2]);
+        }
+        "export" => {
+            let target = args.get(2).map(|s| s.as_str()).unwrap_or("veldt-export.json");
+            export_garden(target);
+        }
+        "import" => {
+            if args.len() < 3 {
+                eprintln!("Usage: veldt import <file>");
+                process::exit(1);
+            }
+            import_garden(&args[2]);
         }
         "garden" => {
             let mut veldt = veldt::Veldt::new();
@@ -154,11 +187,100 @@ fn print_usage() {
     println!("  veldt prune <name#N>         Manually kill a specific variant");
     println!("  veldt clear                  Clear the entire veldt");
     println!("  veldt evolve [N]             Run N evolution cycles (garden self-grows)");
-    println!("  veldt studio [port]          Start Veldt Studio IDE (default port 7777)");
+    println!("  veldt studio [port]          Start Veldt Studio IDE (default port 7777)
+  veldt fmt <file>             Print canonical formatted source (--write to overwrite)
+  veldt test <name>            Re-trial all variants of a function family
+  veldt adopt <name#N>         Canonicalize a variant (dispatch picks it)
+  veldt export [file]          Export the garden to a JSON file
+  veldt import <file>          Import a garden JSON file
+  veldt run --trace <file>     Trace every executed statement
+  veldt run --evolve <file>    Run 1 evolve cycle after the program");
     println!("  veldt visual                 Open visual ecosystem viewer in browser");
 }
 
-fn run_program(path: &str) {
+fn fmt_file(path: &str, write: bool) {
+    let src = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) => { eprintln!("Error reading {}: {}", path, e); process::exit(1); }
+    };
+    let mut lx = lexer::Lexer::new(&src);
+    let tokens = match lx.tokenize() { Ok(t) => t, Err(e) => { eprintln!("{}", e); process::exit(1); } };
+    let mut p = parser::Parser::new_with_lines(tokens, lx.token_lines.clone());
+    let stmts = match p.parse_program() { Ok(s) => s, Err(e) => { eprintln!("{}", e); process::exit(1); } };
+    let out = fmt::format_program(&stmts);
+    if write {
+        match std::fs::write(path, &out) {
+            Ok(_) => println!("Formatted {}", path),
+            Err(e) => eprintln!("Write failed: {}", e),
+        }
+    } else {
+        print!("{}", out);
+    }
+}
+
+fn test_family(name: &str) {
+    let mut veldt = veldt::Veldt::new();
+    if let Err(e) = veldt.load() { eprintln!("Error loading veldt: {}", e); process::exit(1); }
+    let ids: Vec<u32> = veldt.functions.get(name).map(|vs| vs.iter().map(|e| e.id).collect()).unwrap_or_default();
+    if ids.is_empty() { println!("No variants of '{}'", name); return; }
+    println!("=== Trials for {} ===", name);
+    for id in ids {
+        let mut e = veldt.functions[name].iter().find(|e| e.id == id).cloned().unwrap();
+        health::HealthChecker::check_at_birth(&mut e, &veldt);
+        if let Some(vs) = veldt.functions.get_mut(name) {
+            for v in vs.iter_mut() { if v.id == id { *v = e.clone(); break; } }
+        }
+        let health = match &e.health {
+            veldt::Health::Healthy => "healthy".to_string(),
+            veldt::Health::Sick(m) => format!("sick: {}", m),
+            veldt::Health::Dying => "dying".into(),
+        };
+        println!("  {}#{} — {} | fitness: {:.2} | niches: {:?}",
+            name, id, health, e.fitness, e.niche_scores);
+    }
+    veldt.save().unwrap_or_else(|e| eprintln!("Save error: {}", e));
+}
+
+fn adopt_variant(target: &str) {
+    if let Some(pos) = target.find('#') {
+        let name = &target[..pos];
+        let id: u32 = target[pos+1..].parse().unwrap_or(0);
+        let mut veldt = veldt::Veldt::new();
+        if let Err(e) = veldt.load() { eprintln!("Error: {}", e); process::exit(1); }
+        if let Some(variants) = veldt.functions.get_mut(name) {
+            let mut found = false;
+            for v in variants.iter_mut() {
+                if v.id == id { v.fitness = 1_000_000.0; found = true; }
+                else { v.fitness = v.fitness.min(1_000.0); }
+            }
+            if found {
+                veldt.save().unwrap_or_else(|e| eprintln!("Save error: {}", e));
+                println!("Adopted {}#{} — dispatch now prefers it", name, id);
+            } else { println!("{}#{} not found", name, id); }
+        } else { println!("No lineage '{}'", name); }
+    } else { eprintln!("Usage: veldt adopt <name#N>"); }
+}
+
+fn export_garden(path: &str) {
+    let mut veldt = veldt::Veldt::new();
+    if let Err(e) = veldt.load() { eprintln!("Error: {}", e); process::exit(1); }
+    match std::fs::copy(veldt.garden_path.join("veldt.json"), path) {
+        Ok(_) => println!("Garden exported to {}", path),
+        Err(e) => eprintln!("Export failed: {}", e),
+    }
+}
+
+fn import_garden(path: &str) {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+    let dest = std::path::PathBuf::from(home).join(".veldt").join("garden").join("veldt.json");
+    if let Some(parent) = dest.parent() { let _ = std::fs::create_dir_all(parent); }
+    match std::fs::copy(path, &dest) {
+        Ok(_) => println!("Garden imported from {}", path),
+        Err(e) => eprintln!("Import failed: {}", e),
+    }
+}
+
+fn run_program(path: &str, trace: bool, evolve_after: bool) {
     // Read source file
     let source = match std::fs::read_to_string(path) {
         Ok(s) => s,
@@ -198,6 +320,7 @@ fn run_program(path: &str) {
 
     // Create interpreter and load veldt state into it
     let mut interp = interpreter::Interpreter::new();
+    interp.trace = trace;
     veldt.load_into_interpreter(&mut interp);
 
     // Run the program
@@ -304,6 +427,14 @@ fn run_program(path: &str) {
         eprintln!("[OBITUARY] {}#{} — died at age {} ({})", obit.name, obit.id, obit.age, health_str);
         eprintln!("  Last used: {}", last_used_str);
         eprintln!("  Cause of death: {}", obit.cause_of_death);
+    }
+
+    // Auto-evolve: piggyback one cycle on program runs
+    if evolve_after {
+        let mut evolver = evolve::Evolver::new();
+        for event in evolver.evolve(&mut veldt, 1) {
+            eprintln!("{}", event.format());
+        }
     }
 
     // Save veldt to disk

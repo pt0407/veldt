@@ -10,6 +10,7 @@ pub enum Token {
     Ident(String),
     // Keywords
     Let, Fn, If, Else, While, For, Return, Print, Grow, Struct, Test, Try, Catch, Import, In, Match, Arrow,
+    Question, NullCoal, SafeAccess, Pipe,
     True, False, Null, And, Or, Not,
     // Type names
     TypeInt, TypeStr, TypeBool, TypeList, TypeFloat, TypeFn,
@@ -416,6 +417,29 @@ impl Lexer {
                         self.token_lines.push(tok_line); tokens.push(Token::Ge);
                     } else {
                         self.token_lines.push(tok_line); tokens.push(Token::Gt);
+                    }
+                    self.last_was_ident_no_space = false;
+                }
+                Some('?') => {
+                    self.advance();
+                    if self.peek() == Some('?') {
+                        self.advance();
+                        self.token_lines.push(tok_line); tokens.push(Token::NullCoal);
+                    } else if self.peek() == Some('.') {
+                        self.advance();
+                        self.token_lines.push(tok_line); tokens.push(Token::SafeAccess);
+                    } else {
+                        self.token_lines.push(tok_line); tokens.push(Token::Question);
+                    }
+                    self.last_was_ident_no_space = false;
+                }
+                Some('|') => {
+                    self.advance();
+                    if self.peek() == Some('>') {
+                        self.advance();
+                        self.token_lines.push(tok_line); tokens.push(Token::Pipe);
+                    } else {
+                        return Err("Unexpected '|'".into());
                     }
                     self.last_was_ident_no_space = false;
                 }

@@ -194,7 +194,7 @@ impl Veldt {
         // Load variables
         for (name, entry) in &self.variables {
             if let Ok(val) = deserialize_value(&entry.value) {
-                interp.vars.insert(name.clone(), val);
+                interp.vars.borrow_mut().insert(name.clone(), val);
             }
         }
         // Load structs

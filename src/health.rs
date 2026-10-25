@@ -135,7 +135,7 @@ impl HealthChecker {
         }
         for (name, entry) in variables {
             if let Ok(val) = serde_json::from_str::<Value>(&entry.value) {
-                interp.vars.insert(name.clone(), val);
+                interp.vars.borrow_mut().insert(name.clone(), val);
             }
         }
         for (name, entry) in structs {

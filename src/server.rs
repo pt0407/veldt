@@ -288,6 +288,7 @@ fn garden_json(veldt: &Veldt) -> serde_json::Value {
                             serde_json::json!({"niche": k, "score": (v * 100.0) as i64})
                         }).collect::<Vec<_>>(),
                         "source": e.source,
+                        "body_source": crate::fmt::format_program(&e.body).trim_end().to_string(),
                     })
                 }).collect::<Vec<_>>(),
             })

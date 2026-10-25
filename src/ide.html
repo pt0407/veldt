@@ -195,6 +195,21 @@
   .niche-bar .niche-fill { height: 100%; background: var(--moss); }
   .niche-bar .niche-pct { color: var(--text); width: 34px; text-align: right; }
 
+  /* Source diff view */
+  .diff-view {
+    margin: 14px 0;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+    font-size: 10.5px;
+    line-height: 1.5;
+  }
+  .diff-view .diff-line { padding: 1px 8px; white-space: pre; overflow-x: auto; }
+  .diff-view .diff-line.add { background: rgba(111,174,127,0.12); color: var(--moss-bright); }
+  .diff-view .diff-line.del { background: rgba(184,84,80,0.10); color: var(--rust); }
+  .diff-view .diff-line.same { color: var(--text-dim); }
+  .diff-title { font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:1px; margin:14px 0 6px }
+
   .probe-info {
     padding: 6px 12px;
     font-size: 10px;
@@ -545,6 +560,60 @@ require(['vs/editor/editor.main'], function() {
     tabSize: 4,
   });
 
+  // Autocomplete: keywords, builtins, and garden function names
+  monaco.languages.registerCompletionItemProvider('javascript', {
+    provideCompletionItems: function(model, position) {
+      const word = model.getWordUntilPosition(position);
+      const range = {
+        startLineNumber: position.lineNumber,
+        endLineNumber: position.lineNumber,
+        startColumn: word.startColumn,
+        endColumn: word.endColumn,
+      };
+      const kw = ['fn','let','if','else','while','for','in','return','grow','struct',
+        'test','try','catch','import','match','null','true','false','and','or','not'];
+      const builtins = ['print','len','push','keys','dict','set','int','float','str','bool',
+        'sqrt','floor','ceil','abs','max','min','range','type','has','get','remove',
+        'map','filter','reduce','sum','sorted','reverse','unique','join',
+        'fetch','json_parse','json_stringify','read_file','write_file','append_file',
+        'exec','env','sleep','time_ms','date','render','call_best',
+        'spawn','join','pmap','re_match','re_find','re_replace','re_split',
+        'db_open','db_exec','db_query','db_close','serve'];
+      const items = [];
+      kw.forEach(k => items.push({
+        label: k, kind: monaco.languages.CompletionItemKind.Keyword,
+        insertText: k, range }));
+      builtins.forEach(b => items.push({
+        label: b, kind: monaco.languages.CompletionItemKind.Function,
+        insertText: b + '()', range }));
+      // garden functions from live data
+      (gardenData?.functions || []).forEach(f => {
+        items.push({
+          label: f.name, kind: monaco.languages.CompletionItemKind.Method,
+          detail: `${f.variants.length} variants in garden`,
+          insertText: f.name, range });
+      });
+      return { suggestions: items };
+    }
+  });
+
+  // Hover: garden function health/fitness
+  monaco.languages.registerHoverProvider('javascript', {
+    provideHover: function(model, position) {
+      const word = model.getWordAtPosition(position);
+      if (!word || !gardenData) return null;
+      const fam = (gardenData.functions || []).find(f => f.name === word.word);
+      if (!fam) return null;
+      const healthy = fam.variants.filter(v => v.health === 'healthy').length;
+      const best = fam.variants.reduce((a,b) => a.fitness > b.fitness ? a : b);
+      const probes = (gardenData.probes || []).find(p => p.name === word.word);
+      return { contents: [
+        { value: `**${word.word}** — garden lineage` },
+        { value: `${fam.variants.length} variants (${healthy} healthy) · fittest #${best.id} @ ${best.fitness}%${probes ? ` · ${probes.count} probes` : ''}` },
+      ]};
+    }
+  });
+
   // Register Veldt language keywords
   monaco.languages.setMonarchTokensProvider('javascript', {
     tokenizer: {
@@ -840,6 +909,25 @@ function selectVariant(name, id) {
     <div class="inspector-stat"><span class="key">lineage</span><span class="val">${lineage.variants.length} variants</span></div>
     ${variant.origin ? `<div class="inspector-stat"><span class="key">origin</span><span class="val" style="font-size:10px">${variant.origin}</span></div>` : ''}
     ${variant.parents && variant.parents.length ? `<div class="inspector-stat"><span class="key">parents</span><span class="val">${variant.parents.map(p => '#' + p).join(', ')}</span></div>` : ''}
+    <div class="diff-title">Body</div>
+    <div class="diff-view">${(variant.body_source || '').split('\n').map(l => `<div class="diff-line same">  ${l.replace(/</g,'&lt;')}</div>`).join('')}</div>
+    ${variant.parents && variant.parents.length ? (() => {
+        const parent = lineage.variants.find(v => v.id === variant.parents[0]);
+        if (!parent || !parent.body_source) return '';
+        const pLines = parent.body_source.split('\n');
+        const cLines = (variant.body_source || '').split('\n');
+        let rows = '';
+        const max = Math.max(pLines.length, cLines.length);
+        for (let i = 0; i < max; i++) {
+            const p = pLines[i], c = cLines[i];
+            if (p === c && p !== undefined) rows += `<div class="diff-line same">  ${p.replace(/</g,'&lt;')}</div>`;
+            else {
+                if (p !== undefined) rows += `<div class="diff-line del">- ${p.replace(/</g,'&lt;')}</div>`;
+                if (c !== undefined) rows += `<div class="diff-line add">+ ${c.replace(/</g,'&lt;')}</div>`;
+            }
+        }
+        return `<div class="diff-title">Diff vs #${parent.id} (parent)</div><div class="diff-view">${rows}</div>`;
+    })() : ''}
     ${(variant.niche_scores || []).length ? `
       <div style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:1px;margin:14px 0 6px">Niche scores</div>
       ${variant.niche_scores.map(ns => `
