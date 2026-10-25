@@ -292,6 +292,12 @@ fn garden_json(veldt: &Veldt) -> serde_json::Value {
                         }).collect::<Vec<_>>(),
                         "source": e.source,
                         "body_source": crate::fmt::format_program(&e.body).trim_end().to_string(),
+                        "efficiency": (e.efficiency * 100.0) as i64,
+                        "trust": match e.trust {
+                            crate::veldt::Trust::Canonical => "canonical",
+                            crate::veldt::Trust::Established => "established",
+                            crate::veldt::Trust::Seedling => "seedling",
+                        },
                     })
                 }).collect::<Vec<_>>(),
             })

@@ -14,6 +14,12 @@ pub enum Health {
     Dying,
 }
 
+/// Graduated trust: how safe a variant is to depend on.
+/// Seedling (newborn) -> Established (survived >=3 cycles) -> Canonical (adopted by user).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum Trust { Seedling, Established, Canonical }
+impl Default for Trust { fn default() -> Self { Trust::Seedling } }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FunctionEntry {
     pub id: u32,
@@ -39,6 +45,12 @@ pub struct FunctionEntry {
     // per-niche probe scores: niche -> fraction of probes passed
     #[serde(default)]
     pub niche_scores: HashMap<String, f64>,
+    // efficiency: incumbent-steps / this-steps on big inputs; >1 means faster
+    #[serde(default)]
+    pub efficiency: f64,
+    // graduated trust: seedling -> established -> canonical
+    #[serde(default)]
+    pub trust: Trust,
 }
 
 /// A probe: an ecosystem-generated test. args produced by typed generation;
@@ -50,6 +62,9 @@ pub struct Probe {
     pub expected: String,     // serialized Value
     pub niche: String,        // input signature, e.g. "int:neg|list:len4+"
     pub born: u64,
+    // input scale: 0 = normal, 1 = big (amplifies step-count differences)
+    #[serde(default)]
+    pub scale: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -270,6 +285,8 @@ impl Veldt {
             parents,
             origin: origin.to_string(),
             niche_scores: HashMap::new(),
+            efficiency: 0.0,
+            trust: Trust::Seedling,
         };
 
         self.functions.entry(name.to_string())
@@ -416,6 +433,16 @@ impl Veldt {
             }
         }
 
+        // Trust promotion: healthy variants that survive >=3 cycles earn
+        // Established status; Canonical comes only from `adopt`.
+        for variants in self.functions.values_mut() {
+            for e in variants.iter_mut() {
+                if e.trust == Trust::Seedling && matches!(e.health, Health::Healthy) && e.age >= 3 {
+                    e.trust = Trust::Established;
+                }
+            }
+        }
+
         // Second pass: age and check death (mutable borrow)
         let mut new_obituaries = Vec::new();
         let mut to_remove: Vec<(String, u32)> = Vec::new();
@@ -493,15 +520,48 @@ impl Veldt {
             }
         }
 
-        // remove dead entries
-        for (name, id) in to_remove {
+        // Hard pruning: cap healthy variants per family at 8. Weakest
+        // non-champions die with a competitive cause of death.
+        for (name, variants) in self.functions.iter_mut() {
+            let healthy: Vec<u32> = variants.iter()
+                .filter(|e| matches!(e.health, Health::Healthy)).map(|e| e.id).collect();
+            if healthy.len() > 8 {
+                let mut ranked: Vec<(u32, f64, bool)> = variants.iter()
+                    .filter(|e| matches!(e.health, Health::Healthy))
+                    .map(|e| (e.id, e.fitness, niche_champions.contains_key(&(name.clone(), e.id))))
+                    .collect();
+                ranked.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+                let excess = healthy.len() - 8;
+                let mut culled = 0;
+                for (id, fit, champ) in &ranked {
+                    if culled >= excess { break; }
+                    if *champ { continue; }
+                    let obit = Obituary {
+                        name: name.clone(), id: *id,
+                        born: variants.iter().find(|e| e.id == *id).map(|e| e.born).unwrap_or(0),
+                        age: variants.iter().find(|e| e.id == *id).map(|e| e.age).unwrap_or(0),
+                        health: Health::Healthy,
+                        healing_attempts: vec![],
+                        last_used: 0,
+                        cause_of_death: format!("outcompeted — family at capacity (fitness {:.2})", fit),
+                        timestamp: now_ts(),
+                    };
+                    new_obituaries.push(obit);
+                    to_remove.push((name.clone(), *id));
+                    culled += 1;
+                }
+            }
+        }
+
+        // remove dead entries (hard-culled too)
+        for (name, id) in &to_remove {
             let mut should_remove = false;
-            if let Some(variants) = self.functions.get_mut(&name) {
-                variants.retain(|e| e.id != id);
+            if let Some(variants) = self.functions.get_mut(name) {
+                variants.retain(|e| e.id != *id);
                 should_remove = variants.is_empty();
             }
             if should_remove {
-                self.functions.remove(&name);
+                self.functions.remove(name);
             }
         }
 
@@ -607,8 +667,16 @@ impl Veldt {
                     let fittest = self.get_fittest_variant(name);
                     let is_fittest = fittest.map(|f| f.id == entry.id).unwrap_or(false);
                     let marker = if is_fittest { " *" } else { "" };
-                    println!("  {}#{}{} — {} | age: {} | usage: {} | fitness: {:.2} | born: {}",
-                        name, entry.id, marker, health_str, entry.age, entry.usage_count, entry.fitness, entry.origin);
+                    let trust_str = match entry.trust {
+                        Trust::Canonical => " [canonical]",
+                        Trust::Established => " [estab]",
+                        Trust::Seedling => "",
+                    };
+                    let eff_str = if entry.efficiency > 0.0 {
+                        format!(" | eff: {:.2}x", entry.efficiency)
+                    } else { String::new() };
+                    println!("  {}#{}{}{} — {} | age: {} | usage: {} | fitness: {:.2}{} | born: {}",
+                        name, entry.id, marker, trust_str, health_str, entry.age, entry.usage_count, entry.fitness, eff_str, entry.origin);
                 }
             }
             None => println!("Lineage '{}' not found in veldt", name),
@@ -717,6 +785,7 @@ mod tests {
             lifespan: 100.0, usage_count: 10, last_used: 5,
             fitness: 0.0, trial_score: 0.5, healing_attempts: vec![],
             parents: vec![], origin: "seed".into(), niche_scores: HashMap::new(),
+            efficiency: 0.0, trust: Trust::Seedling,
         };
         let fitness = veldt.calculate_fitness(&entry);
         assert!(fitness > 0.5); // trial_score + usage
