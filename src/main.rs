@@ -65,10 +65,21 @@ fn main() {
         }
         "fmt" => {
             if args.len() < 3 {
-                eprintln!("Usage: veldt fmt <file.veldt> [--write]");
+                eprintln!("Usage: veldt fmt <file.veldt> [--write|--check]");
                 process::exit(1);
             }
-            fmt_file(&args[2], args.iter().any(|a| a == "--write" || a == "-w"));
+            if args.iter().any(|a| a == "--check") {
+                fmt_check(&args[2]);
+            } else {
+                fmt_file(&args[2], args.iter().any(|a| a == "--write" || a == "-w"));
+            }
+        }
+        "watch" => {
+            if args.len() < 3 {
+                eprintln!("Usage: veldt watch <file.veldt>");
+                process::exit(1);
+            }
+            watch_file(&args[2]);
         }
         "repl" => {
             start_repl();
@@ -568,6 +579,42 @@ fn push_garden(url: &str) {
         Ok(r) => println!("Pushed garden -> {} ({})", url,
             r.text().unwrap_or_default()),
         Err(e) => { eprintln!("Push failed: {}", e); process::exit(1); }
+    }
+}
+
+fn fmt_check(path: &str) {
+    let src = std::fs::read_to_string(path).unwrap_or_else(|e| {
+        eprintln!("Cannot read {}: {}", path, e); process::exit(1);
+    });
+    let mut lx = lexer::Lexer::new(&src);
+    let tokens = lx.tokenize().unwrap_or_else(|e| {
+        eprintln!("lex error: {}", e); process::exit(1);
+    });
+    let mut p = parser::Parser::new_with_lines(tokens, lx.token_lines.clone());
+    let stmts = p.parse_program().unwrap_or_else(|e| {
+        eprintln!("parse error: {}", e); process::exit(1);
+    });
+    let formatted = fmt::format_program(&stmts);
+    if formatted.trim_end() == src.trim_end() {
+        println!("{} is formatted", path);
+    } else {
+        eprintln!("{} is NOT formatted (run: veldt fmt {} --write)", path, path);
+        process::exit(1);
+    }
+}
+
+fn watch_file(path: &str) {
+    let mut last = std::fs::metadata(path).and_then(|m| m.modified()).ok();
+    println!("watching {} (ctrl-c to stop)", path);
+    run_program(path, false, false);
+    loop {
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        let now = std::fs::metadata(path).and_then(|m| m.modified()).ok();
+        if now != last {
+            last = now;
+            println!("\n--- {} changed, rerunning ---", path);
+            run_program(path, false, false);
+        }
     }
 }
 
