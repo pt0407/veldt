@@ -444,12 +444,15 @@ impl Evolver {
     }
 
     fn pick_mutation(&mut self) -> Mutation {
-        match self.rand_range(5) {
+        match self.rand_range(8) {
             0 => Mutation::Constant,
             1 => Mutation::Operator,
             2 => Mutation::StatementSwap,
             3 => Mutation::DeadCodeRemoval,
-            _ => Mutation::Simplify,
+            4 => Mutation::Simplify,
+            5 => Mutation::ConstFold,
+            6 => Mutation::DeadBranch,
+            _ => Mutation::HoistInvariant,
         }
     }
 
@@ -460,6 +463,9 @@ impl Evolver {
             Mutation::StatementSwap => format!("statement swap on {}#{}", name, id),
             Mutation::DeadCodeRemoval => format!("dead code removal on {}#{}", name, id),
             Mutation::Simplify => format!("simplification on {}#{}", name, id),
+            Mutation::ConstFold => format!("constant folding on {}#{}", name, id),
+            Mutation::DeadBranch => format!("dead branch elimination on {}#{}", name, id),
+            Mutation::HoistInvariant => format!("loop-invariant hoist on {}#{}", name, id),
         }
     }
 
@@ -498,9 +504,244 @@ impl Evolver {
                     if self.simplify_stmt(stmt) { break; }
                 }
             }
+            Mutation::ConstFold => {
+                // Fold literal arithmetic: 2*3 -> 6. Real work reduction —
+                // shrinks per-call step count, not just size.
+                for stmt in new_body.iter_mut() {
+                    if Self::fold_stmt_exprs(stmt) { break; }
+                }
+            }
+            Mutation::DeadBranch => {
+                // if <const bool>: splice the taken arm in place of the if.
+                // while <const false>: the loop never runs — remove it.
+                let mut out: Vec<Stmt> = Vec::new();
+                for stmt in new_body.into_iter() {
+                    let dead = match &stmt {
+                        Stmt::If(c, _, _) => Self::const_eval(c)
+                            .and_then(|e| if let Expr::Bool(b) = e { Some(b) } else { None }),
+                        Stmt::While(c, _) => Self::const_eval(c)
+                            .and_then(|e| if let Expr::Bool(b) = e { Some(!b) } else { None }),
+                        _ => None,
+                    };
+                    match (stmt, dead) {
+                        (Stmt::If(_, then, _), Some(true)) => out.extend(then),
+                        (Stmt::If(_, _, els), Some(false)) =>
+                            out.extend(els.unwrap_or_default()),
+                        (Stmt::While(_, _), Some(true)) => {} // dead loop dropped
+                        (s, _) => out.push(s),
+                    }
+                }
+                new_body = out;
+            }
+            Mutation::HoistInvariant => {
+                // Lift `let x = <loop-invariant expr>` out of a while loop —
+                // work done once instead of per-iteration. The classic
+                // mechanical route to fewer steps at scale.
+                for i in 0..new_body.len() {
+                    let hoisted = if let Stmt::While(_, body) = &new_body[i] {
+                        // vars mutated anywhere in the loop body
+                        let mut assigned = std::collections::HashSet::new();
+                        Self::collect_assigned(body, &mut assigned);
+                        // first let whose rhs reads no loop-mutated var
+                        body.iter().position(|st| {
+                            if let Stmt::Let(name, e) = st {
+                                !assigned.contains(name)
+                                    && !Self::expr_uses_any(e, &assigned)
+                            } else { false }
+                        }).map(|pos| pos)
+                    } else { None };
+                    if let Some(pos) = hoisted {
+                        if let Stmt::While(_, body) = &mut new_body[i] {
+                            let stmt = body.remove(pos);
+                            new_body.insert(i, stmt);
+                        }
+                        break;
+                    }
+                }
+            }
         }
 
         new_body
+    }
+
+    /// Evaluate a constant expression to a literal Expr (Int/Float/Bool/Str).
+    /// Returns None if the expr isn't fully constant.
+    fn const_eval(e: &Expr) -> Option<Expr> {
+        match e {
+            Expr::Int(_) | Expr::Float(_) | Expr::Bool(_)
+            | Expr::Str(_) | Expr::Null => Some(e.clone()),
+            Expr::UnaryOp(crate::ast::UnaryOp::Not, inner) => {
+                match Self::const_eval(inner)? {
+                    Expr::Bool(b) => Some(Expr::Bool(!b)),
+                    _ => None,
+                }
+            }
+            Expr::UnaryOp(crate::ast::UnaryOp::Neg, inner) => {
+                match Self::const_eval(inner)? {
+                    Expr::Int(n) => Some(Expr::Int(-n)),
+                    Expr::Float(f) => Some(Expr::Float(-f)),
+                    _ => None,
+                }
+            }
+            Expr::BinOp(l, op, r) => {
+                let lv = Self::const_eval(l)?;
+                let rv = Self::const_eval(r)?;
+                use Expr::{Int as I, Float as F, Bool as B, Str as S};
+                match (op, &lv, &rv) {
+                    (BinOp::Add, I(a), I(b)) => Some(I(a + b)),
+                    (BinOp::Sub, I(a), I(b)) => Some(I(a - b)),
+                    (BinOp::Mul, I(a), I(b)) => Some(I(a * b)),
+                    (BinOp::Div, I(a), I(b)) if *b != 0 => Some(I(a / b)),
+                    (BinOp::Mod, I(a), I(b)) if *b != 0 => Some(I(a % b)),
+                    (BinOp::Add, F(a), F(b)) => Some(F(a + b)),
+                    (BinOp::Sub, F(a), F(b)) => Some(F(a - b)),
+                    (BinOp::Mul, F(a), F(b)) => Some(F(a * b)),
+                    (BinOp::Div, F(a), F(b)) if *b != 0.0 => Some(F(a / b)),
+                    (BinOp::Add, S(a), S(b)) => Some(S(format!("{}{}", a, b))),
+                    (BinOp::Lt, I(a), I(b)) => Some(B(a < b)),
+                    (BinOp::Gt, I(a), I(b)) => Some(B(a > b)),
+                    (BinOp::Le, I(a), I(b)) => Some(B(a <= b)),
+                    (BinOp::Ge, I(a), I(b)) => Some(B(a >= b)),
+                    (BinOp::Eq, I(a), I(b)) => Some(B(a == b)),
+                    (BinOp::Neq, I(a), I(b)) => Some(B(a != b)),
+                    (BinOp::And, B(a), B(b)) => Some(B(*a && *b)),
+                    (BinOp::Or, B(a), B(b)) => Some(B(*a || *b)),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Replace the first fully-constant BinOp in a statement with its value.
+    fn fold_stmt_exprs(stmt: &mut Stmt) -> bool {
+        match stmt {
+            Stmt::Let(_, e) | Stmt::Assign(_, e) | Stmt::Print(e)
+            | Stmt::ExprStmt(e) | Stmt::LetDestructure(_, e)
+            | Stmt::Return(Some(e)) => Self::fold_in_expr(e),
+            Stmt::FieldAssign(o, _, e) =>
+                Self::fold_in_expr(o) || Self::fold_in_expr(e),
+            Stmt::IndexAssign(o, i, v) =>
+                Self::fold_in_expr(o) || Self::fold_in_expr(i) || Self::fold_in_expr(v),
+            Stmt::If(c, then, els) =>
+                Self::fold_in_expr(c)
+                    || then.iter_mut().any(Self::fold_stmt_exprs)
+                    || els.as_mut().map(|b| b.iter_mut().any(Self::fold_stmt_exprs)).unwrap_or(false),
+            Stmt::While(c, body) | Stmt::For(_, c, body) =>
+                Self::fold_in_expr(c) || body.iter_mut().any(Self::fold_stmt_exprs),
+            Stmt::Try(b, _, h) =>
+                b.iter_mut().any(Self::fold_stmt_exprs)
+                    || h.iter_mut().any(Self::fold_stmt_exprs),
+            _ => false,
+        }
+    }
+
+    /// Fold one constant BinOp inside an expression (depth-first).
+    fn fold_in_expr(e: &mut Expr) -> bool {
+        // children first so 2*3+1 folds to 6+1 -> 7 over two visits
+        match e {
+            Expr::BinOp(l, _, r) => {
+                if Self::fold_in_expr(l) || Self::fold_in_expr(r) { return true; }
+            }
+            Expr::UnaryOp(_, i) => { if Self::fold_in_expr(i) { return true; } }
+            Expr::Call(_, _, args) | Expr::List(args) =>
+                { if args.iter_mut().any(Self::fold_in_expr) { return true; } }
+            Expr::MethodCall(o, _, args) =>
+                { if Self::fold_in_expr(o) || args.iter_mut().any(Self::fold_in_expr) { return true; } }
+            Expr::Index(o, i) =>
+                { if Self::fold_in_expr(o) || Self::fold_in_expr(i) { return true; } }
+            Expr::SafeGet(o, _, args) => {
+                if Self::fold_in_expr(o) { return true; }
+                if let Some(a) = args {
+                    if a.iter_mut().any(Self::fold_in_expr) { return true; }
+                }
+            }
+            Expr::Slice(o, lo, hi) => {
+                if Self::fold_in_expr(o) { return true; }
+                if let Some(x) = lo { if Self::fold_in_expr(x) { return true; } }
+                if let Some(x) = hi { if Self::fold_in_expr(x) { return true; } }
+            }
+            Expr::Interp(parts) => {
+                for p in parts {
+                    if Self::fold_in_expr(p) { return true; }
+                }
+            }
+            Expr::Lambda(_, body) =>
+                { if body.iter_mut().any(Self::fold_stmt_exprs) { return true; } }
+            Expr::ListComp(x, _, iter, cond) => {
+                if Self::fold_in_expr(x) || Self::fold_in_expr(iter) { return true; }
+                if let Some(c) = cond { if Self::fold_in_expr(c) { return true; } }
+            }
+            Expr::StructLit(_, fields) => {
+                for (_, x) in fields {
+                    if Self::fold_in_expr(x) { return true; }
+                }
+            }
+            _ => {}
+        }
+        // now try folding self
+        if let Some(folded) = Self::const_eval(e) {
+            if std::mem::discriminant(&folded) != std::mem::discriminant(e)
+                || !Self::expr_is_literal(&folded) {
+                *e = folded;
+                return true;
+            }
+            if Self::expr_is_literal(e) { return false; }
+            *e = folded;
+            return true;
+        }
+        false
+    }
+
+    fn expr_is_literal(e: &Expr) -> bool {
+        matches!(e, Expr::Int(_) | Expr::Float(_) | Expr::Bool(_)
+                 | Expr::Str(_) | Expr::Null)
+    }
+
+    /// Collect names assigned anywhere in a statement list.
+    fn collect_assigned(body: &[Stmt], out: &mut std::collections::HashSet<String>) {
+        for s in body {
+            match s {
+                Stmt::Let(n, _) | Stmt::Assign(n, _) => { out.insert(n.clone()); }
+                Stmt::LetDestructure(names, _) => {
+                    for n in names { out.insert(n.clone()); }
+                }
+                Stmt::If(_, then, els) => {
+                    Self::collect_assigned(then, out);
+                    if let Some(b) = els { Self::collect_assigned(b, out); }
+                }
+                Stmt::While(_, b) | Stmt::For(_, _, b) => Self::collect_assigned(b, out),
+                Stmt::Try(b, _, h) => {
+                    Self::collect_assigned(b, out);
+                    Self::collect_assigned(h, out);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// True if the expression references any variable in `names`.
+    fn expr_uses_any(e: &Expr, names: &std::collections::HashSet<String>) -> bool {
+        match e {
+            Expr::Var(n) => names.contains(n),
+            Expr::BinOp(l, _, r) => Self::expr_uses_any(l, names) || Self::expr_uses_any(r, names),
+            Expr::UnaryOp(_, i) => Self::expr_uses_any(i, names),
+            Expr::Call(n, _, args) => names.contains(n)
+                || args.iter().any(|a| Self::expr_uses_any(a, names)),
+            Expr::List(items) => items.iter().any(|a| Self::expr_uses_any(a, names)),
+            Expr::MethodCall(o, _, args) => Self::expr_uses_any(o, names)
+                || args.iter().any(|a| Self::expr_uses_any(a, names)),
+            Expr::Index(o, i) => Self::expr_uses_any(o, names) || Self::expr_uses_any(i, names),
+            Expr::FieldAccess(o, _) => Self::expr_uses_any(o, names),
+            Expr::SafeGet(o, _, args) => Self::expr_uses_any(o, names)
+                || args.as_ref().map(|a| a.iter().any(|x| Self::expr_uses_any(x, names))).unwrap_or(false),
+            Expr::Slice(o, lo, hi) => Self::expr_uses_any(o, names)
+                || lo.as_ref().map(|x| Self::expr_uses_any(x, names)).unwrap_or(false)
+                || hi.as_ref().map(|x| Self::expr_uses_any(x, names)).unwrap_or(false),
+            Expr::Interp(parts) =>
+                parts.iter().any(|x| Self::expr_uses_any(x, names)),
+            _ => false,
+        }
     }
 
     /// Try to simplify every expr in a statement (depth-first, first match wins).
@@ -781,6 +1022,9 @@ enum Mutation {
     StatementSwap,
     DeadCodeRemoval,
     Simplify,
+    ConstFold,
+    DeadBranch,
+    HoistInvariant,
 }
 
 fn type_str(t: &Type) -> String {
@@ -802,6 +1046,9 @@ fn mutation_name(m: Mutation) -> &'static str {
         Mutation::Operator => "operator mutation",
         Mutation::StatementSwap => "statement swap",
         Mutation::DeadCodeRemoval => "dead code removal",
+        Mutation::ConstFold => "constant folding",
+        Mutation::DeadBranch => "dead branch elimination",
+        Mutation::HoistInvariant => "loop-invariant hoist",
         Mutation::Simplify => "simplification",
     }
 }
