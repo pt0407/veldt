@@ -28,7 +28,7 @@ fn test_full_program_execution() {
     let mut interp = Interpreter::new();
     interp.run(&stmts).unwrap();
 
-    assert_eq!(interp.vars.get("result"), Some(&veldt::interpreter::Value::Int(7)));
+    assert_eq!(interp.vars.borrow().get("result"), Some(&veldt::interpreter::Value::Int(7)));
 }
 
 #[test]

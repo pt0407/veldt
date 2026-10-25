@@ -3,6 +3,8 @@
 use crate::ast::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::rc::Rc;
+use std::cell::RefCell;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -15,7 +17,7 @@ pub enum Value {
     Dict(HashMap<String, Value>),
     Set(Vec<Value>),
     Struct(String, HashMap<String, Value>),
-    Closure(Vec<Param>, Vec<Stmt>, HashMap<String, Value>),
+    Closure(Vec<Param>, Vec<Stmt>, #[serde(skip)] Rc<RefCell<HashMap<String, Value>>>),
     Null,
 }
 
@@ -60,7 +62,7 @@ pub struct FunctionDef {
 }
 
 pub struct Interpreter {
-    pub vars: HashMap<String, Value>,
+    pub vars: Rc<RefCell<HashMap<String, Value>>>,
     pub functions: HashMap<String, Vec<FunctionVariant>>,
     pub structs: HashMap<String, Vec<(String, Type)>>,
     // track which veldt functions were called during this run
@@ -74,6 +76,7 @@ pub struct Interpreter {
     rng_state: u64,
     // Current source line for error reporting
     pub current_line: usize,
+    pub trace: bool,
     // SQLite connections (id -> connection)
     db_connections: HashMap<i64, rusqlite::Connection>,
     next_db_id: i64,
@@ -93,7 +96,7 @@ pub enum FlowControl {
 impl Interpreter {
     pub fn new() -> Self {
         Interpreter {
-            vars: HashMap::new(),
+            vars: Rc::new(RefCell::new(HashMap::new())),
             functions: HashMap::new(),
             structs: HashMap::new(),
             usage_log: Vec::new(),
@@ -105,6 +108,7 @@ impl Interpreter {
                 .map(|d| d.as_nanos() as u64)
                 .unwrap_or(0x1234567890ABCDEF),
             current_line: 0,
+            trace: false,
             db_connections: HashMap::new(),
             next_db_id: 1,
         }
@@ -152,13 +156,13 @@ impl Interpreter {
         match stmt {
             Stmt::Let(name, expr) => {
                 let val = self.eval_expr(expr)?;
-                self.vars.insert(name.clone(), val);
+                self.vars.borrow_mut().insert(name.clone(), val);
                 Ok(FlowControl::Normal)
             }
             Stmt::Assign(name, expr) => {
                 let val = self.eval_expr(expr)?;
-                if self.vars.contains_key(name) {
-                    self.vars.insert(name.clone(), val);
+                if self.vars.borrow().contains_key(name) {
+                    self.vars.borrow_mut().insert(name.clone(), val);
                     Ok(FlowControl::Normal)
                 } else {
                     Err(format!("Cannot assign to undefined variable: {}", name))
@@ -177,7 +181,7 @@ impl Interpreter {
                         // This is tricky — we need to find where the struct lives
                         // For now, we only support field assignment on variables
                         if let Expr::Var(var_name) = obj_expr {
-                            self.vars.insert(var_name.clone(), Value::Struct(name, fields));
+                            self.vars.borrow_mut().insert(var_name.clone(), Value::Struct(name, fields));
                         } else {
                             return Err("Can only assign fields on a variable".into());
                         }
@@ -199,7 +203,7 @@ impl Interpreter {
                                 }
                                 items[i as usize] = new_val;
                                 if let Expr::Var(var_name) = obj_expr {
-                                    self.vars.insert(var_name.clone(), Value::List(items));
+                                    self.vars.borrow_mut().insert(var_name.clone(), Value::List(items));
                                 } else {
                                     return Err("Can only assign index on a variable".into());
                                 }
@@ -258,7 +262,7 @@ impl Interpreter {
                 match iter_val {
                     Value::List(items) => {
                         for item in items {
-                            self.vars.insert(var.clone(), item);
+                            self.vars.borrow_mut().insert(var.clone(), item);
                             match self.exec_block(body)? {
                                 FlowControl::Return(v) => return Ok(FlowControl::Return(v)),
                                 FlowControl::Normal => {}
@@ -308,7 +312,7 @@ impl Interpreter {
                 match self.exec_block(body) {
                     Ok(flow) => Ok(flow),
                     Err(e) => {
-                        self.vars.insert(err_var.clone(), Value::Str(e));
+                        self.vars.borrow_mut().insert(err_var.clone(), Value::Str(e));
                         self.exec_block(handler)
                     }
                 }
@@ -329,7 +333,7 @@ impl Interpreter {
                     Value::List(items) => {
                         for (i, n) in names.iter().enumerate() {
                             let v = items.get(i).cloned().unwrap_or(Value::Null);
-                            self.vars.insert(n.clone(), v);
+                            self.vars.borrow_mut().insert(n.clone(), v);
                         }
                         Ok(FlowControl::Normal)
                     }
@@ -407,8 +411,7 @@ impl Interpreter {
                 Ok(Value::List(vals))
             }
             Expr::Var(name) => {
-                self.vars.get(name)
-                    .cloned()
+                self.vars.borrow().get(name).cloned()
                     .ok_or_else(|| format!("Undefined variable: {}", name))
             }
             Expr::BinOp(left, op, right) => {
@@ -459,7 +462,8 @@ impl Interpreter {
                 }
                 // First check if it's a variable holding a closure
                 if variant.is_none() {
-                    if let Some(Value::Closure(params, body, captured)) = self.vars.get(name) {
+                    let closure_binding = self.vars.borrow().get(name).cloned();
+                if let Some(Value::Closure(params, body, captured)) = closure_binding {
                         return self.call_closure(params.clone(), body.clone(), captured.clone(), arg_vals);
                     }
                 }
@@ -494,7 +498,7 @@ impl Interpreter {
             }
             Expr::Lambda(params, body) => {
                 // Capture current variables as closure environment
-                Ok(Value::Closure(params.clone(), body.clone(), self.vars.clone()))
+                Ok(Value::Closure(params.clone(), body.clone(), Rc::clone(&self.vars)))
             }
             Expr::ListComp(expr, var, iter, cond) => {
                 let iter_val = self.eval_expr(iter)?;
@@ -506,7 +510,7 @@ impl Interpreter {
                 let mut result = Vec::new();
                 let old_vars = self.vars.clone();
                 for item in items {
-                    self.vars.insert(var.clone(), item);
+                    self.vars.borrow_mut().insert(var.clone(), item);
                     let include = match cond {
                         Some(c) => {
                             let cv = self.eval_expr(c)?;
@@ -707,7 +711,7 @@ impl Interpreter {
 
         // Create new scope
         let old_vars = self.vars.clone();
-        self.vars.clear();
+        self.vars = Rc::new(RefCell::new(HashMap::new()));
 
         // Bind params
         if args.len() != params.len() {
@@ -715,7 +719,7 @@ impl Interpreter {
             return Err(format!("Function {} expects {} args but got {}", name, params.len(), args.len()));
         }
         for (param, val) in params.iter().zip(args.into_iter()) {
-            self.vars.insert(param.name.clone(), val);
+            self.vars.borrow_mut().insert(param.name.clone(), val);
         }
 
         // Execute body
@@ -729,16 +733,21 @@ impl Interpreter {
         Ok(result)
     }
 
-    fn call_closure(&mut self, params: Vec<Param>, body: Vec<Stmt>, captured: HashMap<String, Value>, args: Vec<Value>) -> Result<Value, String> {
+    fn call_closure(&mut self, params: Vec<Param>, body: Vec<Stmt>, captured: Rc<RefCell<HashMap<String, Value>>>, args: Vec<Value>) -> Result<Value, String> {
         if args.len() != params.len() {
             return Err(format!("Closure expects {} args but got {}", params.len(), args.len()));
         }
 
         // Save current vars, set up closure scope with captured vars + params
         let old_vars = self.vars.clone();
+        // save param bindings that exist in the captured env so we can restore them
+        let mut param_restore: Vec<(String, Option<Value>)> = Vec::new();
+        for param in &params {
+            param_restore.push((param.name.clone(), captured.borrow().get(&param.name).cloned()));
+        }
         self.vars = captured;
         for (param, val) in params.iter().zip(args.into_iter()) {
-            self.vars.insert(param.name.clone(), val);
+            self.vars.borrow_mut().insert(param.name.clone(), val);
         }
 
         // Execute body
@@ -747,7 +756,14 @@ impl Interpreter {
             FlowControl::Normal => Value::Null,
         };
 
-        // Restore scope
+        // Restore param bindings in the shared env (prevent param leakage),
+        // then restore caller scope
+        for (pname, old_val) in param_restore {
+            match old_val {
+                Some(v) => { self.vars.borrow_mut().insert(pname, v); }
+                None => { self.vars.borrow_mut().remove(&pname); }
+            }
+        }
         self.vars = old_vars;
         Ok(result)
     }
@@ -761,7 +777,7 @@ impl Interpreter {
         }
     }
 
-    fn serve_requests(&mut self, port: i64, params: Vec<Param>, body: Vec<Stmt>, captured: HashMap<String, Value>) -> Result<(), String> {
+    fn serve_requests(&mut self, port: i64, params: Vec<Param>, body: Vec<Stmt>, captured: Rc<RefCell<HashMap<String, Value>>>) -> Result<(), String> {
         use std::net::TcpListener;
         use std::io::{BufRead, BufReader, Read, Write};
 
@@ -1851,13 +1867,13 @@ mod tests {
     #[test]
     fn test_arithmetic() {
         let interp = run_src("let x = 1 + 2 * 3");
-        assert_eq!(interp.vars.get("x"), Some(&Value::Int(7)));
+        assert_eq!(interp.vars.borrow().get("x"), Some(&Value::Int(7)));
     }
 
     #[test]
     fn test_function_call() {
         let interp = run_src("fn add(a: int, b: int) { return a + b }\nlet x = add(3, 4)");
-        assert_eq!(interp.vars.get("x"), Some(&Value::Int(7)));
+        assert_eq!(interp.vars.borrow().get("x"), Some(&Value::Int(7)));
     }
 
     #[test]
@@ -1869,25 +1885,26 @@ mod tests {
     #[test]
     fn test_while_loop() {
         let interp = run_src("let i = 0\nwhile i < 5 { i = i + 1 }");
-        assert_eq!(interp.vars.get("i"), Some(&Value::Int(5)));
+        assert_eq!(interp.vars.borrow().get("i"), Some(&Value::Int(5)));
     }
 
     #[test]
     fn test_for_loop() {
         let interp = run_src("let sum = 0\nfor i in range(5) { sum = sum + i }");
-        assert_eq!(interp.vars.get("sum"), Some(&Value::Int(10)));
+        assert_eq!(interp.vars.borrow().get("sum"), Some(&Value::Int(10)));
     }
 
     #[test]
     fn test_string_concat() {
         let interp = run_src("let x = \"hello\" + \" \" + \"world\"");
-        assert_eq!(interp.vars.get("x"), Some(&Value::Str("hello world".into())));
+        assert_eq!(interp.vars.borrow().get("x"), Some(&Value::Str("hello world".into())));
     }
 
     #[test]
     fn test_struct() {
         let interp = run_src("struct Point { x: int, y: int }\nlet p = Point { x: 3, y: 4 }");
-        match interp.vars.get("p") {
+        let _p_val = interp.vars.borrow().get("p").cloned();
+        match _p_val {
             Some(Value::Struct(name, fields)) => {
                 assert_eq!(name, "Point");
                 assert_eq!(fields.get("x"), Some(&Value::Int(3)));
@@ -1900,19 +1917,20 @@ mod tests {
     #[test]
     fn test_field_access() {
         let interp = run_src("struct Point { x: int, y: int }\nlet p = Point { x: 3, y: 4 }\nlet z = p.x");
-        assert_eq!(interp.vars.get("z"), Some(&Value::Int(3)));
+        assert_eq!(interp.vars.borrow().get("z"), Some(&Value::Int(3)));
     }
 
     #[test]
     fn test_method_call() {
         let interp = run_src("let s = \"hello\"\nlet u = s.upper()");
-        assert_eq!(interp.vars.get("u"), Some(&Value::Str("HELLO".into())));
+        assert_eq!(interp.vars.borrow().get("u"), Some(&Value::Str("HELLO".into())));
     }
 
     #[test]
     fn test_list_methods() {
         let interp = run_src("let l = [1, 2, 3]\nlet l2 = l.push(4)");
-        match interp.vars.get("l2") {
+        let _l2_val = interp.vars.borrow().get("l2").cloned();
+        match _l2_val {
             Some(Value::List(items)) => {
                 assert_eq!(items.len(), 4);
                 assert_eq!(items[3], Value::Int(4));
@@ -1924,9 +1942,9 @@ mod tests {
     #[test]
     fn test_boolean_ops() {
         let interp = run_src("let x = true and false\nlet y = true or false\nlet z = not x");
-        assert_eq!(interp.vars.get("x"), Some(&Value::Bool(false)));
-        assert_eq!(interp.vars.get("y"), Some(&Value::Bool(true)));
-        assert_eq!(interp.vars.get("z"), Some(&Value::Bool(true)));
+        assert_eq!(interp.vars.borrow().get("x"), Some(&Value::Bool(false)));
+        assert_eq!(interp.vars.borrow().get("y"), Some(&Value::Bool(true)));
+        assert_eq!(interp.vars.borrow().get("z"), Some(&Value::Bool(true)));
     }
 
     #[test]
