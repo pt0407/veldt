@@ -86,6 +86,9 @@ pub struct Interpreter {
     // call traces: fn name -> (serialized args, serialized result)
     pub traces: HashMap<String, Vec<(Vec<String>, String)>>,
     pub trace_calls: bool,
+    pub args: Vec<String>,
+    pub call_stack: Vec<(String, u32)>,
+    pub exit_code: Option<i64>,
 }
 
 pub struct FunctionVariant {
@@ -121,6 +124,11 @@ impl Interpreter {
             next_task_id: 0,
             traces: HashMap::new(),
             trace_calls: false,
+            args: std::env::var("VELDT_ARGS")
+                .map(|s| if s.is_empty() { Vec::new() } else { s.split('\x1f').map(String::from).collect() })
+                .unwrap_or_default(),
+            call_stack: Vec::new(),
+            exit_code: None,
         }
     }
 
@@ -543,22 +551,56 @@ impl Interpreter {
                 self.vars = old_vars;
                 Ok(Value::List(result))
             }
+            Expr::Slice(obj, lo, hi) => {
+                let obj_val = self.eval_expr(obj)?;
+                let lo_v = match lo { Some(e) => Some(self.eval_expr(e)?), None => None };
+                let hi_v = match hi { Some(e) => Some(self.eval_expr(e)?), None => None };
+                // resolve an optional bound: negative counts back from len
+                fn bound(v: &Option<Value>, len: i64, default: i64) -> Result<i64, String> {
+                    match v {
+                        None | Some(Value::Null) => Ok(default),
+                        Some(Value::Int(i)) => Ok(if *i < 0 { len + i } else { *i }),
+                        _ => Err("slice bounds must be integers".into()),
+                    }
+                }
+                match &obj_val {
+                    Value::List(items) => {
+                        let n = items.len() as i64;
+                        let a = bound(&lo_v, n, 0)?.clamp(0, n) as usize;
+                        let b = bound(&hi_v, n, n)?.clamp(0, n) as usize;
+                        if a > b { Ok(Value::List(vec![])) }
+                        else { Ok(Value::List(items[a..b].to_vec())) }
+                    }
+                    Value::Str(s) => {
+                        let chars: Vec<char> = s.chars().collect();
+                        let n = chars.len() as i64;
+                        let a = bound(&lo_v, n, 0)?.clamp(0, n) as usize;
+                        let b = bound(&hi_v, n, n)?.clamp(0, n) as usize;
+                        if a > b { Ok(Value::Str(String::new())) }
+                        else { Ok(Value::Str(chars[a..b].iter().collect())) }
+                    }
+                    _ => Err("Cannot slice this value".into()),
+                }
+            }
             Expr::Index(obj, index) => {
                 let obj_val = self.eval_expr(obj)?;
                 let idx_val = self.eval_expr(index)?;
                 match (&obj_val, &idx_val) {
                     (Value::List(items), Value::Int(i)) => {
-                        if *i < 0 || *i as usize >= items.len() {
+                        let j = if *i < 0 { items.len() as i64 + i } else { *i };
+                        if j < 0 || j as usize >= items.len() {
                             Err(format!("Index {} out of bounds (len {})", i, items.len()))
                         } else {
-                            Ok(items[*i as usize].clone())
+                            Ok(items[j as usize].clone())
                         }
                     }
                     (Value::Str(s), Value::Int(i)) => {
-                        if *i < 0 || *i as usize >= s.len() {
-                            Err(format!("Index {} out of bounds (len {})", i, s.len()))
+                        let chars: Vec<char> = s.chars().collect();
+                        let j = if *i < 0 { chars.len() as i64 + i } else { *i };
+                        if j < 0 || j as usize >= chars.len() {
+                            Err(format!("Index {} out of bounds (len {})", i, chars.len()))
                         } else {
-                            Ok(Value::Str(s.chars().nth(*i as usize).unwrap().to_string()))
+                            Ok(Value::Str(chars[j as usize].to_string()))
                         }
                     }
                     _ => Err("Cannot index this value".into()),
@@ -937,6 +979,25 @@ impl Interpreter {
                         Ok(Some(Value::List(items)))
                     }
                     _ => Err("range() expects an integer".into()),
+                }
+            }
+            "args" => Ok(Some(Value::List(
+                self.args.iter().map(|s| Value::Str(s.clone())).collect()))),
+            "exit" => {
+                let code = match args.get(0) { Some(Value::Int(n)) => *n, _ => 0 };
+                self.exit_code = Some(code);
+                Err(format!("__veldt_exit__{}", code))
+            }
+            "eprint" => {
+                let s = args.iter().map(|v| format!("{}", v)).collect::<Vec<_>>().join(" ");
+                eprintln!("{}", s);
+                Ok(Some(Value::Null))
+            }
+            "input" | "read_stdin" => {
+                let mut line = String::new();
+                match std::io::stdin().read_line(&mut line) {
+                    Ok(_) => Ok(Some(Value::Str(line.trim_end_matches(&['\r', '\n'][..]).to_string()))),
+                    Err(_) => Ok(Some(Value::Str(String::new()))),
                 }
             }
             "len" => {

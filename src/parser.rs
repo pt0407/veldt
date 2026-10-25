@@ -361,9 +361,27 @@ impl Parser {
                 }
                 Token::LBracket => {
                     self.advance();
-                    let index = self.parse_expr()?;
-                    self.expect(&Token::RBracket, "]")?;
-                    expr = Expr::Index(Box::new(expr), Box::new(index));
+                    if self.check(&Token::Colon) {
+                        // s[:hi]
+                        self.advance();
+                        let hi = if self.check(&Token::RBracket) { None }
+                                 else { Some(Box::new(self.parse_expr()?)) };
+                        self.expect(&Token::RBracket, "]")?;
+                        expr = Expr::Slice(Box::new(expr), None, hi);
+                    } else {
+                        let index = self.parse_expr()?;
+                        if self.check(&Token::Colon) {
+                            // s[lo:hi]
+                            self.advance();
+                            let hi = if self.check(&Token::RBracket) { None }
+                                     else { Some(Box::new(self.parse_expr()?)) };
+                            self.expect(&Token::RBracket, "]")?;
+                            expr = Expr::Slice(Box::new(expr), Some(Box::new(index)), hi);
+                        } else {
+                            self.expect(&Token::RBracket, "]")?;
+                            expr = Expr::Index(Box::new(expr), Box::new(index));
+                        }
+                    }
                 }
                 _ => break,
             }

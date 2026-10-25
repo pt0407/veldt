@@ -79,9 +79,15 @@ pub fn execute_source(source: &str, veldt: &mut Veldt) -> ExecResult {
     veldt.load_into_interpreter(&mut interp);
 
     interp.print_buffer = Some(String::new());
-    let success = match interp.run_with_lines(&stmts, &parser_lines) {
+    let run_res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+        || interp.run_with_lines(&stmts, &parser_lines)))
+        .unwrap_or_else(|_| Err("interpreter panicked".into()));
+    let success = match run_res {
         Ok(()) => true,
         Err(e) => {
+            if e.starts_with("__veldt_exit__") {
+                return ExecResult { output, events, success: true };
+            }
             if let Some(buf) = interp.print_buffer.take() {
                 output.push_str(&buf);
             }

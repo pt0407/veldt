@@ -274,6 +274,9 @@ pub fn fmt_expr(e: &Expr) -> String {
             format!("{} {{ {} }}", name, fs.join(", "))
         }
         Expr::Index(obj, i) => format!("{}[{}]", fmt_postfix(obj), fmt_expr(i)),
+        Expr::Slice(obj, lo, hi) => format!("{}[{}:{}]", fmt_postfix(obj),
+            lo.as_ref().map(|e| fmt_expr(e)).unwrap_or_default(),
+            hi.as_ref().map(|e| fmt_expr(e)).unwrap_or_default()),
         Expr::Lambda(params, body) => {
             if body.len() == 1 {
                 let mut single = String::new();

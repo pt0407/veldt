@@ -55,6 +55,7 @@ pub enum Expr {
     StructLit(String, Vec<(String, Expr)>),
     // list indexing: expr[index]
     Index(Box<Expr>, Box<Expr>),
+    Slice(Box<Expr>, Option<Box<Expr>>, Option<Box<Expr>>), // obj[lo:hi]
     // anonymous function / lambda
     Lambda(Vec<Param>, Vec<Stmt>),
     // list comprehension: [expr for var in iter (if cond)?]
