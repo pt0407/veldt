@@ -525,6 +525,27 @@ fn import_garden(path: &str) {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
     let dest = std::path::PathBuf::from(home).join(".veldt").join("garden").join("veldt.json");
     if let Some(parent) = dest.parent() { let _ = std::fs::create_dir_all(parent); }
+    // URL import — pull a garden JSON over HTTP
+    if path.starts_with("http://") || path.starts_with("https://") {
+        let client = match reqwest::blocking::Client::builder()
+            .user_agent("Veldt/0.3").timeout(std::time::Duration::from_secs(30)).build() {
+            Ok(c) => c,
+            Err(e) => { eprintln!("HTTP client error: {}", e); process::exit(1); }
+        };
+        match client.get(path).send().and_then(|r| r.error_for_status()) {
+            Ok(resp) => match resp.text() {
+                Ok(body) => {
+                    std::fs::write(&dest, &body).unwrap_or_else(|e| {
+                        eprintln!("Import write failed: {}", e); process::exit(1);
+                    });
+                    println!("Garden imported from {}", path);
+                }
+                Err(e) => { eprintln!("Fetch body failed: {}", e); process::exit(1); }
+            },
+            Err(e) => { eprintln!("Fetch failed: {}", e); process::exit(1); }
+        }
+        return;
+    }
     match std::fs::copy(path, &dest) {
         Ok(_) => println!("Garden imported from {}", path),
         Err(e) => eprintln!("Import failed: {}", e),
@@ -573,6 +594,13 @@ fn run_program(path: &str, trace: bool, evolve_after: bool) {
     let mut interp = interpreter::Interpreter::new();
     interp.trace = trace;
     interp.trace_calls = true;
+    // --steps N: override the interpreter step limit
+    let cli_args: Vec<String> = env::args().collect();
+    if let Some(pos) = cli_args.iter().position(|a| a == "--steps") {
+        if let Some(n) = cli_args.get(pos + 1).and_then(|s| s.parse::<u64>().ok()) {
+            interp.step_limit = n;
+        }
+    }
     // script argv: everything after '--' in the veldt args
     let all_args: Vec<String> = env::args().collect();
     if let Some(pos) = all_args.iter().position(|a| a == "--") {

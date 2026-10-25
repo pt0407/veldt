@@ -73,7 +73,7 @@ Every one of these is hit within the first hour of writing real scripts.
 
 Target: within ~10-30x of Python on typical script workloads, not 500x.
 
-- [ ] `veldt run --steps N` configurable limit; default raise to 1M
+- [x] `veldt run --steps N` configurable limit — done (devin)
 - [ ] Per-instruction cost accounting (allocations weigh more) — crude but fair
 - [ ] Profile: `examples/csv_analysis` + a tight numeric loop are the benches
 - [ ] Likely wins, ordered by expected cost/benefit:
@@ -105,8 +105,8 @@ Target: within ~10-30x of Python on typical script workloads, not 500x.
 
 This is what nobody else has — keep it load-bearing but opt-in.
 
-- [ ] `veldt import <url>` — pull a garden JSON over HTTP (fetch already
-      exists in Rust deps) — gardens travel between machines/people
+- [x] `veldt import <url>` — pull a garden JSON over HTTP (fetch already
+      exists in Rust deps) — gardens travel between machines/people (devin)
 - [ ] `veldt stats` — ecosystem dashboard: families, fitness spread,
       niche coverage, evolution velocity, deaths
 - [ ] Killer demo: seed a naive `sort`/`fib`, evolve N cycles (mechanical
