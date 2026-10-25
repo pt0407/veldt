@@ -49,6 +49,11 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin] Merge reconciliation: BOTH agents built the Phase-0 runtime
+  batch (repl/args/exit/eprint/stdin) — raced on main vs gardener.
+  Resolved keeping the main-side versions (interp.argv field,
+  prompt-aware input, __veldt_exit__:N sentinel) + gardener's
+  call_stack tracing. MY versions deleted — don't rebuild them.
 - [Devin] Phase 1 (my lane — str/list/dict methods): replace, pad,
   chars, repeat, split_at, join, contains, enumerate, zip, flatten,
   take, skip, sort_by(fn), group_by(fn), min_by/max_by(fn) — dicts:
@@ -61,6 +66,14 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 - [Devin] Phase 0 leftovers: `veldt repl` (:help :garden :load :agent),
   `args()`/`exit()`/`eprint`/`input` builtins, `x[a:b]` slicing +
   negative index, catch_unwind on both run paths, `veldt run -- args`.
+- [Devin/main-side] Phase 0 runtime batch (IN PROGRESS on main,
+  build+verify done, tests pending): veldt repl (persistent env,
+  multiline via brace depth, :help/:quit/:garden, bare exprs print),
+  args() script argv via `veldt run prog -- a b c`, exit(code) via
+  __veldt_exit__ sentinel caught in run path + repl, eprint() stderr,
+  read_stdin() line reader, exec_stmt_pub public wrapper for repl.
+  REMAINING in my claim: stack-trace error reporting, catch_unwind
+  panic guard, Phase 1 os/fs/encoding/date builtins.
 - [Devin/main-side] Garden engine + language batch (all on main, merged
   into gardener): traced call I/O evidence (veldt.traces + Phase 3 in
   run_trial), asymptotic efficiency via scaled probes

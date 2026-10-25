@@ -86,9 +86,8 @@ pub struct Interpreter {
     // call traces: fn name -> (serialized args, serialized result)
     pub traces: HashMap<String, Vec<(Vec<String>, String)>>,
     pub trace_calls: bool,
-    pub args: Vec<String>,
+    pub argv: Vec<String>,
     pub call_stack: Vec<(String, usize)>,
-    pub exit_code: Option<i64>,
 }
 
 pub struct FunctionVariant {
@@ -124,11 +123,8 @@ impl Interpreter {
             next_task_id: 0,
             traces: HashMap::new(),
             trace_calls: false,
-            args: std::env::var("VELDT_ARGS")
-                .map(|s| if s.is_empty() { Vec::new() } else { s.split('\x1f').map(String::from).collect() })
-                .unwrap_or_default(),
+            argv: Vec::new(),
             call_stack: Vec::new(),
-            exit_code: None,
         }
     }
 
@@ -167,6 +163,10 @@ impl Interpreter {
             }
         }
         Ok(())
+    }
+
+    pub fn exec_stmt_pub(&mut self, stmt: &Stmt) -> Result<FlowControl, String> {
+        self.exec_stmt(stmt)
     }
 
     fn exec_stmt(&mut self, stmt: &Stmt) -> Result<FlowControl, String> {
@@ -1007,25 +1007,6 @@ impl Interpreter {
                     _ => Err("range() expects an integer".into()),
                 }
             }
-            "args" => Ok(Some(Value::List(
-                self.args.iter().map(|s| Value::Str(s.clone())).collect()))),
-            "exit" => {
-                let code = match args.get(0) { Some(Value::Int(n)) => *n, _ => 0 };
-                self.exit_code = Some(code);
-                Err(format!("__veldt_exit__{}", code))
-            }
-            "eprint" => {
-                let s = args.iter().map(|v| format!("{}", v)).collect::<Vec<_>>().join(" ");
-                eprintln!("{}", s);
-                Ok(Some(Value::Null))
-            }
-            "input" | "read_stdin" => {
-                let mut line = String::new();
-                match std::io::stdin().read_line(&mut line) {
-                    Ok(_) => Ok(Some(Value::Str(line.trim_end_matches(&['\r', '\n'][..]).to_string()))),
-                    Err(_) => Ok(Some(Value::Str(String::new()))),
-                }
-            }
             "len" => {
                 if args.len() != 1 {
                     return Err("len() expects 1 argument".into());
@@ -1347,6 +1328,37 @@ impl Interpreter {
                         return self.call_function(&fname, Some(best_id), fargs).map(Some);
                     }
                     _ => Err("call_best() expects a function name string".into()),
+                }
+            }
+            "args" => {
+                // args() -> script argv (veldt run prog.veldt -- a b c)
+                Ok(Some(Value::List(self.argv.iter()
+                    .map(|a| Value::Str(a.clone())).collect())))
+            }
+            "exit" => {
+                // exit(code) — clean process exit via sentinel error
+                let code = match args.get(0) {
+                    Some(Value::Int(n)) => *n,
+                    None => 0,
+                    _ => return Err("exit() expects an int".into()),
+                };
+                Err(format!("__veldt_exit__:{}", code))
+            }
+            "eprint" => {
+                // eprint(x) — print to stderr, returns null
+                let v = args.get(0).cloned().unwrap_or(Value::Null);
+                eprintln!("{}", v);
+                Ok(Some(Value::Null))
+            }
+            "read_stdin" => {
+                // read_stdin() -> read one line from stdin (no newline)
+                use std::io::BufRead;
+                let stdin = std::io::stdin();
+                let mut line = String::new();
+                match stdin.lock().read_line(&mut line) {
+                    Ok(0) => Ok(Some(Value::Null)),       // EOF
+                    Ok(_) => Ok(Some(Value::Str(line.trim_end_matches('\n').to_string()))),
+                    Err(e) => Err(format!("stdin read failed: {}", e)),
                 }
             }
             "serve" => {

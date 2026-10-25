@@ -41,12 +41,6 @@ fn main() {
                 eprintln!("Usage: veldt run <file.veldt>");
                 process::exit(1);
             }
-            // args after "--" become the script's args() list
-            let argv: Vec<String> = args.iter()
-                .skip_while(|a| a.as_str() != "--").skip(1).cloned().collect();
-            if !argv.is_empty() {
-                std::env::set_var("VELDT_ARGS", argv.join("\x1f"));
-            }
             if args[2] == "-e" {
                 // veldt run -e "code" — inline eval via temp file
                 let code = args[3..].iter().take_while(|a| a.as_str() != "--").cloned().collect::<Vec<_>>().join(" ");
@@ -64,6 +58,9 @@ fn main() {
                 process::exit(1);
             }
             fmt_file(&args[2], args.iter().any(|a| a == "--write" || a == "-w"));
+        }
+        "repl" => {
+            start_repl();
         }
         "test" => {
             if args.len() < 3 {
@@ -199,9 +196,6 @@ fn main() {
             }
             veldt.save().unwrap_or_else(|e| eprintln!("Save error: {}", e));
         }
-        "repl" => {
-            repl();
-        }
         "bench" => {
             let mut veldt = veldt::Veldt::new();
             if let Err(e) = veldt.load() {
@@ -260,108 +254,6 @@ fn main() {
     }
 }
 
-fn repl() {
-    use std::io::Write;
-    let mut veldt = veldt::Veldt::new();
-    if let Err(e) = veldt.load() {
-        eprintln!("Error loading veldt: {}", e);
-        process::exit(1);
-    }
-    let mut interp = interpreter::Interpreter::new();
-    veldt.load_into_interpreter(&mut interp);
-    println!("Veldt REPL — :help for commands, :quit to exit");
-    let mut buf = String::new();
-    loop {
-        print!("{}", if buf.is_empty() { "veldt> " } else { "...  " });
-        let _ = std::io::stdout().flush();
-        let mut line = String::new();
-        match std::io::stdin().read_line(&mut line) {
-            Ok(0) => { println!(); break; }
-            Ok(_) => {}
-            Err(_) => break,
-        }
-        buf.push_str(&line);
-        // multiline: continue while braces/parens/brackets are unbalanced
-        let open = buf.chars().filter(|c| matches!(c, '{' | '(' | '[')).count();
-        let close = buf.chars().filter(|c| matches!(c, '}' | ')' | ']')).count();
-        if open > close { continue; }
-        let src = buf.trim().to_string();
-        buf.clear();
-        if src.is_empty() { continue; }
-        match src.as_str() {
-            ":quit" | ":q" | ":exit" => break,
-            ":help" | ":h" => {
-                println!("  :garden          — garden census");
-                println!("  :load <file>     — run a .veldt file in this session");
-                println!("  :agent \"task\"    — ask the Gardener");
-                println!("  :quit            — exit");
-                continue;
-            }
-            ":garden" | ":g" => {
-                let vars: usize = veldt.functions.values().map(|v| v.len()).sum();
-                println!("{} lineages, {} variants", veldt.functions.len(), vars);
-                continue;
-            }
-            _ => {}
-        }
-        if let Some(p) = src.strip_prefix(":load") {
-            match std::fs::read_to_string(p.trim()) {
-                Ok(code) => run_repl_source(&mut interp, &code),
-                Err(e) => println!("  {}", e),
-            }
-            continue;
-        }
-        if let Some(t) = src.strip_prefix(":agent") {
-            let resp = agent::respond(t.trim(), "", &mut veldt);
-            for s in &resp.steps { println!("  {}", s.text); }
-            if let Some(o) = &resp.output { print!("{}", o); }
-            println!("{}", resp.reply);
-            veldt.save().unwrap_or_else(|e| eprintln!("Save error: {}", e));
-            continue;
-        }
-        run_repl_source(&mut interp, &src);
-    }
-}
-
-fn run_repl_source(interp: &mut interpreter::Interpreter, src: &str) {
-    let mut lx = lexer::Lexer::new(src);
-    match lx.tokenize() {
-        Ok(tokens) => {
-            let lines = lx.token_lines.clone();
-            let mut p = parser::Parser::new_with_lines(tokens, lines);
-            match p.parse_program() {
-                Ok(stmts) => {
-                    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| interp.run(&stmts)));
-                    match res {
-                        Ok(Ok(())) => {}
-                        Ok(Err(e)) => {
-                            if e.starts_with("__veldt_exit__") {
-                                println!("(exit)");
-                            } else if e == "__veldt_break__" || e == "__veldt_continue__" {
-                                println!("break/continue outside a loop");
-                            } else {
-                                let line = interp.current_line;
-                                if line > 0 {
-                                    println!("Runtime error (line {}): {}", line, e);
-                                } else {
-                                    println!("Runtime error: {}", e);
-                                }
-                                for (n, l) in interp.call_stack.iter().rev() {
-                                    println!("  called from line {} in {}", l, n);
-                                }
-                                interp.call_stack.clear();
-                            }
-                        }
-                        Err(_) => println!("Interpreter panicked"),
-                    }
-                }
-                Err(e) => println!("Parse error: {}", e),
-            }
-        }
-        Err(e) => println!("Lex error: {}", e),
-    }
-}
-
 fn print_usage() {
     println!("Veldt v0.1.0 — a language where code is alive");
     println!();
@@ -379,6 +271,7 @@ fn print_usage() {
     println!("  veldt repl                   Interactive REPL (:help for commands)");
     println!("  veldt run -e \"code\"          Inline eval; \"-- a b\" sets args()");
     println!("  veldt studio [port]          Start Veldt Studio IDE (default port 7777)
+  veldt repl                   Interactive shell (persistent env)
   veldt fmt <file>             Print canonical formatted source (--write to overwrite)
   veldt test <name>            Re-trial all variants of a function family
   veldt adopt <name#N>         Canonicalize a variant (dispatch picks it)
@@ -387,6 +280,78 @@ fn print_usage() {
   veldt run --trace <file>     Trace every executed statement
   veldt run --evolve <file>    Run 1 evolve cycle after the program");
     println!("  veldt visual                 Open visual ecosystem viewer in browser");
+}
+
+fn start_repl() {
+    use std::io::{BufRead, Write};
+    let mut veldt = veldt::Veldt::new();
+    let _ = veldt.load();
+    let mut interp = interpreter::Interpreter::new();
+    veldt.load_into_interpreter(&mut interp);
+
+    println!("veldt {} — repl. :help for commands, ctrl-d to quit", env!("CARGO_PKG_VERSION"));
+    let stdin = std::io::stdin();
+    let mut buf = String::new();
+    let mut depth: i64 = 0;
+    loop {
+        print!("{}", if buf.is_empty() { "veldt> " } else { "  ... " });
+        std::io::stdout().flush().ok();
+        let mut line = String::new();
+        match stdin.lock().read_line(&mut line) {
+            Ok(0) | Err(_) => { println!(); break; }
+            Ok(_) => {}
+        }
+        let trimmed = line.trim();
+        if buf.is_empty() {
+            if trimmed.is_empty() { continue; }
+            if trimmed.starts_with(':') {
+                match trimmed {
+                    ":quit" | ":q" => break,
+                    ":garden" => { let _ = veldt.load(); veldt.print_lineage(
+                        veldt.functions.keys().next().map(|s| s.as_str()).unwrap_or("(none)")); }
+                    ":help" | _ => {
+                        println!(":help  this help"); println!(":quit  exit");
+                        println!(":garden  show first lineage"); println!("exprs print their value");
+                    }
+                }
+                continue;
+            }
+        }
+        buf.push_str(&line);
+        depth += line.matches('{').count() as i64 - line.matches('}').count() as i64;
+        if depth > 0 { continue; }
+        depth = 0;
+        let src = buf.clone();
+        buf.clear();
+
+        let mut lx = lexer::Lexer::new(&src);
+        let tokens = match lx.tokenize() { Ok(t) => t, Err(e) => { eprintln!("lex: {}", e); continue; } };
+        let mut p = parser::Parser::new_with_lines(tokens, lx.token_lines.clone());
+        let stmts = match p.parse_program() { Ok(s) => s, Err(e) => { eprintln!("parse: {}", e); continue; } };
+        // print value of trailing bare expressions
+        let n = stmts.len();
+        for (i, stmt) in stmts.iter().enumerate() {
+            match interp.exec_stmt_pub(stmt) {
+                Ok(_) => {
+                    if i + 1 == n {
+                        if let ast::Stmt::ExprStmt(e) = stmt {
+                            if let Ok(v) = interp.eval_expr_in_scope(e) {
+                                println!("{}", v);
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    if e.starts_with("__veldt_exit__:") {
+                        println!("bye");
+                        return;
+                    }
+                    eprintln!("{}", e);
+                    break;
+                }
+            }
+        }
+    }
 }
 
 fn fmt_file(path: &str, write: bool) {
@@ -512,6 +477,11 @@ fn run_program(path: &str, trace: bool, evolve_after: bool) {
     let mut interp = interpreter::Interpreter::new();
     interp.trace = trace;
     interp.trace_calls = true;
+    // script argv: everything after '--' in the veldt args
+    let all_args: Vec<String> = env::args().collect();
+    if let Some(pos) = all_args.iter().position(|a| a == "--") {
+        interp.argv = all_args[pos+1..].to_vec();
+    }
     veldt.load_into_interpreter(&mut interp);
 
     // Run the program
@@ -519,7 +489,8 @@ fn run_program(path: &str, trace: bool, evolve_after: bool) {
         || interp.run_with_lines(&stmts, &parser_lines)))
         .unwrap_or_else(|_| Err("interpreter panicked".into()));
     if let Err(e) = run_res {
-        if let Some(code) = e.strip_prefix("__veldt_exit__").and_then(|s| s.parse::<i32>().ok()) {
+        if let Some(code) = e.strip_prefix("__veldt_exit__")
+            .and_then(|s| s.trim_start_matches(':').parse::<i32>().ok()) {
             process::exit(code);
         }
         let line = interp.current_line;
