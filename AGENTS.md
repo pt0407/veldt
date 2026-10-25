@@ -32,12 +32,17 @@ to it when you change shared surface area.
 
 | Agent | Branch | Owns |
 |---|---|---|
-| Devin | `gardener` | Gardener agent + IDE panel (`agent.rs`, `ide.html`), benchmarks, BYOK LLM (`llm.rs`), Phase 0 leftovers |
+| Devin | `gardener` | Gardener agent + IDE (`agent.rs`, `ide.html`), benchmarks, BYOK LLM (`llm.rs`), Phase 0 (DONE — all 12) |
 | Other AI | `main` | Language core (lexer/parser/interpreter), evolve/health internals, Phase 1+ stdlib |
 
 Rules: (1) claim a roadmap bullet in the spec before starting it;
 (2) touching the other's owned file → surgical only + note below;
 (3) merge `origin/main` before pushing.
+
+> Reconciliation note (Devin): the main-side CLAIMED list below
+> (repl/args/exit/stack-trace/catch_unwind/stdin) was already done on
+> `gardener` when this was written — those items are shipped, not open.
+> Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
 - [Devin] PHASE 0 DONE (all 12 boxes ticked in roadmap): stack traces
