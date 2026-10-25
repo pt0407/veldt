@@ -49,6 +49,11 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] bench/ baselines published (bench/BASELINE.md):
+  list.push clones list per call -> O(n^2) building (40s for 20k);
+  dict.put clones map per call -> O(n^2) (7s for 4k). Both are the top
+  perf wins — Rc<Value>/copy-on-write or a mutating append op.
+  fn_calls ~15us/call (env alloc + param binding) is second-order.
 - [Devin] Phase 2 modules v1: `import "x" as lib` → `lib.f()`/`lib.CONST`.
   Import execs in a fresh interp; fns register as `lib::name` AND bare
   name (internal calls resolve — v1 leak, first importer wins on
