@@ -1,0 +1,12 @@
+# stdlib/str — string utilities for veldt
+fn upper(s: str) { return s.to_upper() }
+fn lower(s: str) { return s.to_lower() }
+fn rev(s: str) { return s.chars().reverse().join("") }
+fn words(s: str) { return s.split(" ") }
+fn title(s: str) {
+    let out = []
+    for w in s.split(" ") {
+        out = out.push(w[0].to_upper() + w[1:])
+    }
+    return out.join(" ")
+}

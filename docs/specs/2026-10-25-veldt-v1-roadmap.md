@@ -65,8 +65,10 @@ Every one of these is hit within the first hour of writing real scripts.
 - [x] `import "lib.veldt"` (no alias) keeps current merge-into-globals
       behavior for backwards compat
 - [x] Circular import guard — in-progress path stack, error cleanly
-- [ ] Ship a `stdlib/` dir with the binary (include_str! or install layout):
-      `stdlib/str.veldt`, `stdlib/math.veldt`, `stdlib/http.veldt` wrappers
+- [x] Ship a `stdlib/` dir with the binary — `include_str!` fallback in the
+      import path (devin): `stdlib/str.veldt`, `stdlib/math.veldt`;
+      `import "str" as s` / `import "math" as m` resolve embedded.
+      `stdlib/http.veldt` still open.
 
 ## Phase 3 — Performance (~2 weeks, profile-driven)
 

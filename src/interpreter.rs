@@ -348,14 +348,25 @@ impl Interpreter {
                 }
             }
             Stmt::Import(path, alias) => {
-                // Search: as-given first, then VELDTPATH dirs (POSIX : / Win ;)
-                let content = std::fs::read_to_string(&path).or_else(|_| {
-                    std::env::var("VELDTPATH").unwrap_or_default()
-                        .split(if cfg!(windows) { ';' } else { ':' })
-                        .filter(|d| !d.is_empty())
-                        .find_map(|d| std::fs::read_to_string(format!("{}/{}", d, path)).ok())
-                        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "not found"))
-                }).map_err(|e| format!("Cannot import '{}': {}", path, e))?;
+                // Search order: path as-given → VELDTPATH dirs → shipped stdlib
+                let stdlib: &[(&str, &str)] = &[
+                    ("str", include_str!("../stdlib/str.veldt")),
+                    ("str.veldt", include_str!("../stdlib/str.veldt")),
+                    ("math", include_str!("../stdlib/math.veldt")),
+                    ("math.veldt", include_str!("../stdlib/math.veldt")),
+                ];
+                let content = std::fs::read_to_string(&path)
+                    .or_else(|_| {
+                        std::env::var("VELDTPATH").unwrap_or_default()
+                            .split(if cfg!(windows) { ';' } else { ':' })
+                            .filter(|d| !d.is_empty())
+                            .find_map(|d| std::fs::read_to_string(format!("{}/{}", d, path)).ok())
+                            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "nf"))
+                    })
+                    .or_else(|_| stdlib.iter().find(|(n, _)| *n == path)
+                        .map(|(_, src)| src.to_string())
+                        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "nf")))
+                    .map_err(|e| format!("Cannot import '{}': {}", path, e))?;
                 if self.importing.iter().any(|p| p == path) {
                     return Err(format!("Circular import: {}", path));
                 }
