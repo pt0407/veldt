@@ -15,7 +15,7 @@ pub enum Value {
     Str(Arc<str>), // interned — O(1) clone (Phase 3)
     Bool(bool),
     List(im::Vector<Value>), // persistent — O(1) clone (Phase 3)
-    Dict(HashMap<String, Value>),
+    Dict(im::HashMap<String, Value>), // persistent — O(1) clone (Phase 6)
     Set(Vec<Value>),
     Struct(String, HashMap<String, Value>),
     Closure(Vec<Param>, Vec<Stmt>, #[serde(skip)] Rc<RefCell<HashMap<String, Value>>>),
@@ -248,7 +248,7 @@ impl Interpreter {
                         }
                         Ok(FlowControl::Normal)
                     }
-                    _ => Err("Cannot index-assign on non-list".into()),
+                    _ => Err("Cannot index-assign on non-list/dict".into()),
                 }
             }
             Stmt::FnDef(name, params, body) => {
@@ -418,7 +418,7 @@ impl Interpreter {
                         }
                         let mut marker = HashMap::new();
                         marker.insert("__mod".to_string(), Value::Str(alias.clone().into()));
-                        self.vars.borrow_mut().insert(alias.clone(), Value::Dict(marker));
+                        self.vars.borrow_mut().insert(alias.clone(), Value::Dict(marker.into_iter().collect()));
                         Ok(FlowControl::Normal)
                     }
                 }
@@ -1231,8 +1231,8 @@ impl Interpreter {
             for (k, v) in headers_map {
                 headers_val.insert(k, Value::Str(v.into()));
             }
-            req_map.insert("headers".to_string(), Value::Dict(headers_val));
-            let req_val = Value::Dict(req_map);
+            req_map.insert("headers".to_string(), Value::Dict(headers_val.into_iter().collect()));
+            let req_val = Value::Dict(req_map.into_iter().collect());
 
             // Call Veldt handler
             let result = match self.call_closure(params.clone(), body.clone(), captured.clone(), vec![req_val]) {
@@ -1241,7 +1241,7 @@ impl Interpreter {
                     let mut resp = std::collections::HashMap::new();
                     resp.insert("status".to_string(), Value::Int(500));
                     resp.insert("body".to_string(), Value::Str(format!("Handler error: {}", e).into()));
-                    Value::Dict(resp)
+                    Value::Dict(resp.into_iter().collect())
                 }
             };
 
@@ -1415,7 +1415,7 @@ impl Interpreter {
                                 let mut result = std::collections::HashMap::new();
                                 result.insert("status".to_string(), Value::Int(status));
                                 result.insert("body".to_string(), Value::Str(body.into()));
-                                Ok(Some(Value::Dict(result)))
+                                Ok(Some(Value::Dict(result.into_iter().collect())))
                             }
                             Err(e) => Err(format!("Fetch error: {}", e)),
                         }
@@ -1449,7 +1449,7 @@ impl Interpreter {
                                 let mut result = std::collections::HashMap::new();
                                 result.insert("status".to_string(), Value::Int(status));
                                 result.insert("body".to_string(), Value::Str(body.into()));
-                                Ok(Some(Value::Dict(result)))
+                                Ok(Some(Value::Dict(result.into_iter().collect())))
                             }
                             Err(e) => Err(format!("Post error: {}", e)),
                         }
@@ -1500,7 +1500,7 @@ impl Interpreter {
                                 result.insert("stdout".to_string(), Value::Str(String::from_utf8_lossy(&o.stdout).to_string().into()));
                                 result.insert("stderr".to_string(), Value::Str(String::from_utf8_lossy(&o.stderr).to_string().into()));
                                 result.insert("exit_code".to_string(), Value::Int(o.status.code().unwrap_or(-1) as i64));
-                                Ok(Some(Value::Dict(result)))
+                                Ok(Some(Value::Dict(result.into_iter().collect())))
                             }
                             Err(e) => Err(format!("exec() failed: {}", e)),
                         }
@@ -1621,7 +1621,7 @@ impl Interpreter {
                         return Ok(Some(Value::Null));
                     }
                 }
-                Ok(Some(Value::Dict(out)))
+                Ok(Some(Value::Dict(out.into_iter().collect())))
             }
             "format" => {
                 // format("%0 is %1", a, b) — %N indexed args, %% literal.
@@ -1986,7 +1986,7 @@ impl Interpreter {
                                                         };
                                                         record.insert(col.clone(), v);
                                                     }
-                                                    results.push(Value::Dict(record));
+                                                    results.push(Value::Dict(record.into_iter().collect()));
                                                 }
                                                 Ok(Some(Value::List(results.into_iter().collect())))
                                             }
@@ -2035,7 +2035,7 @@ impl Interpreter {
                     Err(e) => Err(format!("Input error: {}", e)),
                 }
             }
-            "dict" => Ok(Some(Value::Dict(HashMap::new()))),
+            "dict" => Ok(Some(Value::Dict(im::HashMap::new()))),
             "float" => {
                 if args.len() != 1 { return Err("float() expects 1 argument".into()); }
                 match &args[0] {
@@ -2162,7 +2162,7 @@ impl Interpreter {
                 for (k, v) in obj {
                     map.insert(k, Self::json_to_value(v));
                 }
-                Value::Dict(map)
+                Value::Dict(map.into_iter().collect())
             }
         }
     }
@@ -2399,7 +2399,7 @@ impl Interpreter {
                             _ => { groups.insert(k, Value::List(im::vector![v.clone()])); }
                         }
                     }
-                    Ok(Value::Dict(groups))
+                    Ok(Value::Dict(groups.into_iter().collect()))
                 }
                 _ => Err("group_by(fn) expects a closure".into()),
             },
@@ -2613,6 +2613,7 @@ impl Interpreter {
                 let keys: Vec<Value> = entries.keys().map(|k| Value::Str(k.clone().into())).collect();
                 Ok(Value::List(keys.into_iter().collect()))
             }
+            (Value::Str(s), "len") => Ok(Value::Int(s.chars().count() as i64)),
             (Value::Dict(entries), "len") => Ok(Value::Int(entries.len() as i64)),
             (Value::Dict(entries), "remove") => {
                 if args.len() != 1 { return Err("remove() expects 1 argument".into()); }

@@ -1,4 +1,4 @@
-# Veldt perf (after Phase 6 borrow-reads + mutating ops)
+# Veldt perf (Phase 6 complete — persistent structures + borrow-reads)
 
 Measured with `./bench/run.sh` on a debug build.
 
@@ -14,20 +14,18 @@ Measured with `./bench/run.sh` on a debug build.
 
 ## What Phase 6 changed
 
+- `Value::List -> im::Vector` + `Value::Dict -> im::HashMap` (gardener):
+  O(1) clone via structural sharing — kills both quadratics.
+- `Value::Str -> Arc<str>` interned strings + alloc-weighed step
+  accounting (gardener).
 - `xs.append(v)`, `d.insert(k,v)`, `s.insert(v)`, `xs.pop_in()` — true
-  O(1) in-place ops on Var receivers (no container clone)
+  O(1) in-place ops on Var receivers (main side).
 - Borrow-read fast paths: `d.get/has/keys/values/len`, `xs.get/len`,
-  `s.len`, `xs[i]`, `d["k"]`, `s[i]` read through `vars.borrow()`
-  instead of cloning the whole container per call
-- NEW: `d["k"]` dict index read + `d["k"] = v` index-assign (were
-  missing entirely — only `.get()/.put()` existed)
+  `s.len`, `xs[i]`, `d["k"]`, `s[i]` — read through `vars.borrow()`
+  instead of cloning the container (main side).
+- `d["k"]` dict index read + `d["k"] = v` index-assign (both lanes).
 
-## Quadratics: RESOLVED (both lanes landed)
+## Next wall
 
-- `Value::List -> im::Vector` persistent vector (gardener): push/put
-  O(log n) with structure sharing — immutable semantics kept, 108x win
-- `Value::Str -> Arc<str>` interned strings (gardener)
-- alloc-weighed step accounting (gardener)
-- `xs.append/d.insert/s.insert/xs.pop_in` true O(1) in-place ops +
-  borrow-read fast paths for get/has/len/index (main side)
-- Remaining single-clone per pipeline call (filter/map reduce) is fine
+fn_calls (~15µs/call): env HashMap alloc + param binding per call.
+Options: small-map frames, interned param names, frame pool.
