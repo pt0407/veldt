@@ -315,6 +315,9 @@ fn garden_json(veldt: &Veldt) -> serde_json::Value {
                 "last_used": o.last_used,
             })
         }).collect::<Vec<_>>(),
+        "traces": veldt.traces.iter().map(|(name, ts)| {
+            serde_json::json!({"name": name, "count": ts.len()})
+        }).collect::<Vec<_>>(),
         "probes": veldt.probes.iter().map(|(name, probes)| {
             serde_json::json!({
                 "name": name,

@@ -352,6 +352,7 @@ fn run_program(path: &str, trace: bool, evolve_after: bool) {
     // Create interpreter and load veldt state into it
     let mut interp = interpreter::Interpreter::new();
     interp.trace = trace;
+    interp.trace_calls = true;
     veldt.load_into_interpreter(&mut interp);
 
     // Run the program
@@ -467,6 +468,9 @@ fn run_program(path: &str, trace: bool, evolve_after: bool) {
             eprintln!("{}", event.format());
         }
     }
+
+    // Merge observed call traces into the garden (ground truth for trials)
+    veldt.merge_traces(&interp.traces);
 
     // Save veldt to disk
     if let Err(e) = veldt.save() {

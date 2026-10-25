@@ -75,6 +75,7 @@ pub fn execute_source(source: &str, veldt: &mut Veldt) -> ExecResult {
     let parser_lines = parser.statement_lines();
 
     let mut interp = Interpreter::new();
+    interp.trace_calls = true;
     veldt.load_into_interpreter(&mut interp);
 
     interp.print_buffer = Some(String::new());
@@ -158,6 +159,9 @@ pub fn execute_source(source: &str, veldt: &mut Veldt) -> ExecResult {
     for obit in &obituaries {
         events.push(format!("[OBITUARY] {}#{} — {} (age {})", obit.name, obit.id, obit.cause_of_death, obit.age));
     }
+
+    // Real call I/O becomes probe evidence (IRIS-style learning)
+    veldt.merge_traces(&interp.traces);
 
     ExecResult { output, events, success }
 }

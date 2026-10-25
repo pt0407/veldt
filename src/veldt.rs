@@ -53,6 +53,14 @@ pub struct Probe {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Trace {
+    pub args: Vec<String>,    // serialized Values
+    pub result: String,       // serialized Value — what the user actually got
+    pub variant: u32,         // which variant produced this trace
+    pub at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VariableEntry {
     pub name: String,
     pub value: String,        // serialized value
@@ -87,6 +95,8 @@ pub struct Veldt {
     pub obituaries: Vec<Obituary>,
     // ecosystem-generated tests, per function family
     pub probes: HashMap<String, Vec<Probe>>,
+    // real call traces: observed input/output evidence per family
+    pub traces: HashMap<String, Vec<Trace>>,
     pub run_count: u64,
     pub garden_path: PathBuf,
 }
@@ -105,6 +115,7 @@ impl Veldt {
             structs: HashMap::new(),
             obituaries: Vec::new(),
             probes: HashMap::new(),
+            traces: HashMap::new(),
             run_count: 0,
             garden_path,
         }
@@ -117,6 +128,7 @@ impl Veldt {
             structs: HashMap::new(),
             obituaries: Vec::new(),
             probes: HashMap::new(),
+            traces: HashMap::new(),
             run_count: 0,
             garden_path: path,
         }
@@ -138,6 +150,7 @@ impl Veldt {
         self.structs = saved.structs;
         self.obituaries = saved.obituaries;
         self.probes = saved.probes;
+        self.traces = saved.traces;
         self.run_count = saved.run_count;
         Ok(())
     }
@@ -151,6 +164,7 @@ impl Veldt {
             structs: self.structs.clone(),
             obituaries: self.obituaries.clone(),
             probes: self.probes.clone(),
+            traces: self.traces.clone(),
             run_count: self.run_count,
         };
         let data = serde_json::to_string_pretty(&saved)
@@ -165,12 +179,35 @@ impl Veldt {
         self.functions.clear();
         self.variables.clear();
         self.structs.clear();
+        self.traces.clear();
         self.obituaries.clear();
         self.probes.clear();
         self.run_count = 0;
     }
 
     // === Loading veldt into interpreter ===
+
+    /// Merge interpreter call traces into the persistent store.
+    /// Only keeps traces for families that exist in the garden; caps at
+    /// 200 traces per family (most recent).
+    pub fn merge_traces(&mut self, traces: &HashMap<String, Vec<(Vec<String>, String)>>) {
+        for (name, ts) in traces {
+            if ts.is_empty() { continue; }
+            let entry = self.traces.entry(name.clone()).or_insert_with(Vec::new);
+            for (args, result) in ts {
+                entry.push(Trace {
+                    args: args.clone(),
+                    result: result.clone(),
+                    variant: 0,
+                    at: now_ts(),
+                });
+            }
+            if entry.len() > 200 {
+                let excess = entry.len() - 200;
+                entry.drain(0..excess);
+            }
+        }
+    }
 
     pub fn load_into_interpreter(&self, interp: &mut Interpreter) {
         // Load functions as variants
@@ -612,7 +649,9 @@ struct SavedVeldt {
     #[serde(default)]
     probes: HashMap<String, Vec<Probe>>,
     run_count: u64,
-}
+
+    #[serde(default)]
+    pub traces: HashMap<String, Vec<Trace>>,}
 
 // === Value serialization ===
 
