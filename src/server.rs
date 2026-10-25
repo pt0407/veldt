@@ -334,6 +334,12 @@ fn garden_json(veldt: &Veldt) -> serde_json::Value {
                         "trial_score": (e.trial_score * 100.0) as i64,
                         "last_used": e.last_used,
                         "healing_attempts": e.healing_attempts.len(),
+                        "origin": e.origin,
+                        "parents": e.parents,
+                        "niche_scores": e.niche_scores.iter().map(|(k, v)| {
+                            serde_json::json!({"niche": k, "score": (v * 100.0) as i64})
+                        }).collect::<Vec<_>>(),
+                        "source": e.source,
                     })
                 }).collect::<Vec<_>>(),
             })
@@ -358,6 +364,14 @@ fn garden_json(veldt: &Veldt) -> serde_json::Value {
                 "health": health_str,
                 "cause": o.cause_of_death,
                 "last_used": o.last_used,
+            })
+        }).collect::<Vec<_>>(),
+        "probes": veldt.probes.iter().map(|(name, probes)| {
+            serde_json::json!({
+                "name": name,
+                "count": probes.len(),
+                "niches": probes.iter().map(|p| p.niche.clone())
+                    .collect::<std::collections::HashSet<_>>().into_iter().collect::<Vec<_>>(),
             })
         }).collect::<Vec<_>>(),
         "run_count": veldt.run_count,

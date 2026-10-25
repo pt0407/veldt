@@ -151,11 +151,56 @@
     font-size: 11px;
     color: var(--text-dim);
     cursor: pointer;
+    border-left: 1px solid var(--border);
+    margin-left: 18px;
   }
   .variant-item:hover { color: var(--text); }
   .variant-item .star { color: var(--amber); }
   .variant-item.healthy { color: var(--moss-bright); }
   .variant-item.sick { color: var(--rust); }
+  .variant-item .vid { color: var(--text-dim); }
+  .variant-item .origin-tag { color: var(--ash); font-size: 9px; font-style: italic; }
+
+  /* Lineage tree */
+  .tree-node { position: relative; }
+  .tree-children {
+    margin-left: 10px;
+    border-left: 1px dashed var(--border-bright);
+    padding-left: 4px;
+  }
+  .tree-node > .variant-item { margin-left: 0; }
+
+  /* Niche badges */
+  .niche-badge {
+    display: inline-block;
+    background: rgba(201, 169, 110, 0.12);
+    color: var(--amber);
+    border: 1px solid rgba(201, 169, 110, 0.3);
+    border-radius: 3px;
+    font-size: 8px;
+    padding: 0 4px;
+    margin-left: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .niche-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 0;
+    font-size: 10px;
+  }
+  .niche-bar .niche-name { color: var(--text-dim); width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .niche-bar .niche-track { flex: 1; height: 4px; background: var(--bg-card); border-radius: 2px; overflow: hidden; }
+  .niche-bar .niche-fill { height: 100%; background: var(--moss); }
+  .niche-bar .niche-pct { color: var(--text); width: 34px; text-align: right; }
+
+  .probe-info {
+    padding: 6px 12px;
+    font-size: 10px;
+    color: var(--ash);
+    font-style: italic;
+  }
 
   /* Center: Editor + Output */
   .center-panel {
@@ -551,7 +596,7 @@ function renderGarden() {
   let html = '';
   let totalHealthy = 0, totalSick = 0;
 
-  // Functions
+  // Functions — rendered as lineage trees using parent edges
   if (gardenData.functions) {
     gardenData.functions.forEach(lineage => {
       let healthy = 0, sick = 0;
@@ -563,20 +608,55 @@ function renderGarden() {
       totalSick += sick;
 
       const fittest = lineage.variants.reduce((a, b) => a.fitness > b.fitness ? a : b);
+      // niche champions: strictly-best niche score in >=1 niche
+      const nicheBest = {};
+      lineage.variants.forEach(v => {
+        (v.niche_scores || []).forEach(ns => {
+          if (!(ns.niche in nicheBest) || ns.score > nicheBest[ns.niche].score)
+            nicheBest[ns.niche] = { id: v.id, score: ns.score };
+        });
+      });
+      const champs = new Set(Object.values(nicheBest).map(x => x.id));
+
+      // probe pool info for this family
+      const probeInfo = (gardenData.probes || []).find(p => p.name === lineage.name);
+      const probeStr = probeInfo ? ` · ${probeInfo.count} probes` : '';
+
       html += `<div class="garden-item healthy" data-lineage="${lineage.name}">
         <span class="icon">fn</span>
         <span class="name">${lineage.name}</span>
-        <span class="meta">${lineage.variants.length}v</span>
+        <span class="meta">${lineage.variants.length}v${probeStr}</span>
       </div>`;
 
-      // Show variants
+      // Build tree: roots = no parents in-family; children attach to first parent
+      const byId = {};
+      lineage.variants.forEach(v => byId[v.id] = v);
+      const children = {};
+      const roots = [];
       lineage.variants.forEach(v => {
-        const isFittest = v.id === fittest.id;
-        html += `<div class="variant-item ${v.health}" data-name="${lineage.name}" data-id="${v.id}">
-          ${isFittest ? '<span class="star">◆</span> ' : ''}#${v.id} ${v.health}
-          <span style="float:right;color:var(--text-dim)">${v.fitness}%</span>
-        </div>`;
+        const parent = (v.parents || []).find(p => byId[p]);
+        if (parent === undefined) { roots.push(v); }
+        else { (children[parent] = children[parent] || []).push(v); }
       });
+
+      const renderNode = (v) => {
+        const isFittest = v.id === fittest.id;
+        const isChamp = champs.has(v.id);
+        const kids = children[v.id] || [];
+        html += `<div class="tree-node"><div class="variant-item ${v.health}" data-name="${lineage.name}" data-id="${v.id}">
+          ${isFittest ? '<span class="star">◆</span> ' : ''}<span class="vid">#${v.id}</span> ${v.health}
+          ${isChamp ? '<span class="niche-badge">niche</span>' : ''}
+          <span style="float:right;color:var(--text-dim)">${v.fitness}%</span>
+          ${v.origin && v.origin !== 'seed' ? `<div class="origin-tag">${v.origin}</div>` : ''}
+        </div>`;
+        if (kids.length) {
+          html += '<div class="tree-children">';
+          kids.forEach(renderNode);
+          html += '</div>';
+        }
+        html += '</div>';
+      };
+      roots.forEach(renderNode);
     });
   }
 
@@ -635,6 +715,16 @@ function selectVariant(name, id) {
     <div class="inspector-stat"><span class="key">last used</span><span class="val">${lastUsed}</span></div>
     ${variant.healing_attempts > 0 ? `<div class="inspector-stat"><span class="key">heals</span><span class="val">${variant.healing_attempts}</span></div>` : ''}
     <div class="inspector-stat"><span class="key">lineage</span><span class="val">${lineage.variants.length} variants</span></div>
+    ${variant.origin ? `<div class="inspector-stat"><span class="key">origin</span><span class="val" style="font-size:10px">${variant.origin}</span></div>` : ''}
+    ${variant.parents && variant.parents.length ? `<div class="inspector-stat"><span class="key">parents</span><span class="val">${variant.parents.map(p => '#' + p).join(', ')}</span></div>` : ''}
+    ${(variant.niche_scores || []).length ? `
+      <div style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:1px;margin:14px 0 6px">Niche scores</div>
+      ${variant.niche_scores.map(ns => `
+        <div class="niche-bar">
+          <span class="niche-name">${ns.niche}</span>
+          <span class="niche-track"><span class="niche-fill" style="width:${ns.score}%"></span></span>
+          <span class="niche-pct">${ns.score}%</span>
+        </div>`).join('')}` : ''}
     <div class="inspector-actions">
       <button class="btn danger" onclick="pruneVariant('${name}', ${id})">Prune</button>
     </div>
