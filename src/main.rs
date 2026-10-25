@@ -2,6 +2,7 @@
 
 mod ast;
 mod evolve;
+mod fmt;
 mod health;
 mod interpreter;
 mod lexer;
@@ -39,6 +40,13 @@ fn main() {
                 process::exit(1);
             }
             run_program(&args[2], args.iter().any(|a| a == "--trace"), args.iter().any(|a| a == "--evolve"));
+        }
+        "fmt" => {
+            if args.len() < 3 {
+                eprintln!("Usage: veldt fmt <file.veldt> [--write]");
+                process::exit(1);
+            }
+            fmt_file(&args[2], args.iter().any(|a| a == "--write" || a == "-w"));
         }
         "test" => {
             if args.len() < 3 {
@@ -179,6 +187,7 @@ fn print_usage() {
     println!("  veldt clear                  Clear the entire veldt");
     println!("  veldt evolve [N]             Run N evolution cycles (garden self-grows)");
     println!("  veldt studio [port]          Start Veldt Studio IDE (default port 7777)
+  veldt fmt <file>             Print canonical formatted source (--write to overwrite)
   veldt test <name>            Re-trial all variants of a function family
   veldt adopt <name#N>         Canonicalize a variant (dispatch picks it)
   veldt export [file]          Export the garden to a JSON file
@@ -186,6 +195,26 @@ fn print_usage() {
   veldt run --trace <file>     Trace every executed statement
   veldt run --evolve <file>    Run 1 evolve cycle after the program");
     println!("  veldt visual                 Open visual ecosystem viewer in browser");
+}
+
+fn fmt_file(path: &str, write: bool) {
+    let src = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) => { eprintln!("Error reading {}: {}", path, e); process::exit(1); }
+    };
+    let mut lx = lexer::Lexer::new(&src);
+    let tokens = match lx.tokenize() { Ok(t) => t, Err(e) => { eprintln!("{}", e); process::exit(1); } };
+    let mut p = parser::Parser::new_with_lines(tokens, lx.token_lines.clone());
+    let stmts = match p.parse_program() { Ok(s) => s, Err(e) => { eprintln!("{}", e); process::exit(1); } };
+    let out = fmt::format_program(&stmts);
+    if write {
+        match std::fs::write(path, &out) {
+            Ok(_) => println!("Formatted {}", path),
+            Err(e) => eprintln!("Write failed: {}", e),
+        }
+    } else {
+        print!("{}", out);
+    }
 }
 
 fn test_family(name: &str) {

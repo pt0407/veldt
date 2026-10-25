@@ -195,6 +195,21 @@
   .niche-bar .niche-fill { height: 100%; background: var(--moss); }
   .niche-bar .niche-pct { color: var(--text); width: 34px; text-align: right; }
 
+  /* Source diff view */
+  .diff-view {
+    margin: 14px 0;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+    font-size: 10.5px;
+    line-height: 1.5;
+  }
+  .diff-view .diff-line { padding: 1px 8px; white-space: pre; overflow-x: auto; }
+  .diff-view .diff-line.add { background: rgba(111,174,127,0.12); color: var(--moss-bright); }
+  .diff-view .diff-line.del { background: rgba(184,84,80,0.10); color: var(--rust); }
+  .diff-view .diff-line.same { color: var(--text-dim); }
+  .diff-title { font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:1px; margin:14px 0 6px }
+
   .probe-info {
     padding: 6px 12px;
     font-size: 10px;
@@ -717,6 +732,25 @@ function selectVariant(name, id) {
     <div class="inspector-stat"><span class="key">lineage</span><span class="val">${lineage.variants.length} variants</span></div>
     ${variant.origin ? `<div class="inspector-stat"><span class="key">origin</span><span class="val" style="font-size:10px">${variant.origin}</span></div>` : ''}
     ${variant.parents && variant.parents.length ? `<div class="inspector-stat"><span class="key">parents</span><span class="val">${variant.parents.map(p => '#' + p).join(', ')}</span></div>` : ''}
+    <div class="diff-title">Body</div>
+    <div class="diff-view">${(variant.body_source || '').split('\n').map(l => `<div class="diff-line same">  ${l.replace(/</g,'&lt;')}</div>`).join('')}</div>
+    ${variant.parents && variant.parents.length ? (() => {
+        const parent = lineage.variants.find(v => v.id === variant.parents[0]);
+        if (!parent || !parent.body_source) return '';
+        const pLines = parent.body_source.split('\n');
+        const cLines = (variant.body_source || '').split('\n');
+        let rows = '';
+        const max = Math.max(pLines.length, cLines.length);
+        for (let i = 0; i < max; i++) {
+            const p = pLines[i], c = cLines[i];
+            if (p === c && p !== undefined) rows += `<div class="diff-line same">  ${p.replace(/</g,'&lt;')}</div>`;
+            else {
+                if (p !== undefined) rows += `<div class="diff-line del">- ${p.replace(/</g,'&lt;')}</div>`;
+                if (c !== undefined) rows += `<div class="diff-line add">+ ${c.replace(/</g,'&lt;')}</div>`;
+            }
+        }
+        return `<div class="diff-title">Diff vs #${parent.id} (parent)</div><div class="diff-view">${rows}</div>`;
+    })() : ''}
     ${(variant.niche_scores || []).length ? `
       <div style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:1px;margin:14px 0 6px">Niche scores</div>
       ${variant.niche_scores.map(ns => `

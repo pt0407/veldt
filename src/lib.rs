@@ -2,6 +2,7 @@
 // Library module re-exports for integration tests
 
 pub mod ast;
+pub mod fmt;
 pub mod health;
 pub mod interpreter;
 pub mod lexer;
