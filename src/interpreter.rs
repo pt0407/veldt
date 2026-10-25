@@ -343,6 +343,37 @@ impl Interpreter {
                     }
                 }
             }
+            Stmt::ImportAs(path, alias) => {
+                // run the module in an isolated interpreter, then expose
+                // its functions+vars as a dict: lib.f() calls the closure.
+                let src = std::fs::read_to_string(path)
+                    .map_err(|e| format!("Cannot import {}: {}", path, e))?;
+                let mut lx = crate::lexer::Lexer::new(&src);
+                let tokens = lx.tokenize()?;
+                let mut p = crate::parser::Parser::new_with_lines(tokens, lx.token_lines.clone());
+                let stmts = p.parse_program()?;
+                let mut child = Interpreter::new();
+                child.vars = Rc::new(RefCell::new(HashMap::new()));
+                child.run(&stmts)?;
+                let mut map = HashMap::new();
+                // functions -> closures bound to the module env
+                for (fname, variants) in &child.functions {
+                    if let Some(best) = variants.iter()
+                        .max_by(|a, b| a.fitness.partial_cmp(&b.fitness).unwrap_or(std::cmp::Ordering::Equal)) {
+                        if !self.functions.contains_key(fname) {
+                            map.insert(fname.clone(), Value::Closure(
+                                best.def.params.clone(), best.def.body.clone(),
+                                Rc::clone(&child.vars)));
+                        }
+                    }
+                }
+                // module-level vars
+                for (k, v) in child.vars.borrow().iter() {
+                    map.insert(k.clone(), v.clone());
+                }
+                self.vars.borrow_mut().insert(alias.clone(), Value::Dict(map));
+                Ok(FlowControl::Normal)
+            }
             Stmt::Import(path) => {
                 let content = std::fs::read_to_string(&path)
                     .map_err(|e| format!("Cannot import '{}': {}", path, e))?;
@@ -1977,6 +2008,14 @@ impl Interpreter {
     }
 
     fn eval_method_call(&mut self, obj: Value, method: &str, args: Vec<Value>) -> Result<Value, String> {
+        // Namespaced module dispatch: lib.f(...) — a dict value that holds
+        // a closure gets called as the method
+        if let Value::Dict(d) = &obj {
+            if let Some(Value::Closure(_, _, _)) = d.get(method) {
+                let f = d.get(method).cloned().unwrap();
+                return self.call_closure_value(&f, args);
+            }
+        }
         match (&obj, method) {
             // String methods
             (Value::Str(s), "upper") => Ok(Value::Str(s.to_uppercase())),

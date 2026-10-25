@@ -720,6 +720,15 @@ impl Parser {
             Token::Str(s) => s,
             t => return Err(format!("Expected string path after import but got {:?}", t)),
         };
+        // optional alias: import "path" as lib
+        if matches!(self.peek(), Token::Ident(n) if n == "as") {
+            self.advance();
+            let alias = match self.advance() {
+                Token::Ident(n) => n,
+                t => return Err(format!("Expected alias name but got {:?}", t)),
+            };
+            return Ok(Stmt::ImportAs(path, alias));
+        }
         Ok(Stmt::Import(path))
     }
 
