@@ -323,6 +323,19 @@ impl Interpreter {
                 let program = parser.parse_program()?;
                 self.exec_block(&program)
             }
+            Stmt::LetDestructure(names, expr) => {
+                let val = self.eval_expr(expr)?;
+                match val {
+                    Value::List(items) => {
+                        for (i, n) in names.iter().enumerate() {
+                            let v = items.get(i).cloned().unwrap_or(Value::Null);
+                            self.vars.insert(n.clone(), v);
+                        }
+                        Ok(FlowControl::Normal)
+                    }
+                    _ => Err("Cannot destructure non-list value".into()),
+                }
+            }
             Stmt::Match(scrutinee, arms, else_arm) => {
                 let val = self.eval_expr(scrutinee)?;
                 for (pat, body) in arms {
@@ -399,9 +412,32 @@ impl Interpreter {
                     .ok_or_else(|| format!("Undefined variable: {}", name))
             }
             Expr::BinOp(left, op, right) => {
+                // Lazy: a ?? b — don't evaluate b if a is non-null
+                if *op == BinOp::NullCoal {
+                    let l = self.eval_expr(left)?;
+                    return if matches!(l, Value::Null) { self.eval_expr(right) } else { Ok(l) };
+                }
                 let l = self.eval_expr(left)?;
                 let r = self.eval_expr(right)?;
                 self.eval_binop(&l, op, &r)
+            }
+            Expr::SafeGet(obj, name, args) => {
+                let o = self.eval_expr(obj)?;
+                match o {
+                    Value::Null => Ok(Value::Null),
+                    _ => match args {
+                        Some(a) => {
+                            let mut av = Vec::new();
+                            for e in a { av.push(self.eval_expr(e)?); }
+                            self.eval_method_call(o, name, av)
+                        }
+                        None => match o {
+                            Value::Struct(_, fields) => Ok(fields.get(name).cloned().unwrap_or(Value::Null)),
+                            Value::Dict(d) => Ok(d.get(name).cloned().unwrap_or(Value::Null)),
+                            _ => Err(format!("Cannot access '{}' on this value", name)),
+                        }
+                    }
+                }
             }
             Expr::UnaryOp(op, expr) => {
                 let v = self.eval_expr(expr)?;
@@ -606,6 +642,10 @@ impl Interpreter {
                 _ => Err("Cannot compare these types with >=".into()),
                 _ => Err("Cannot compare non-integers with >=".into()),
             },
+            BinOp::NullCoal => {
+                // already handled lazily in eval_expr; fallback for direct calls
+                if matches!(l, Value::Null) { Ok(r.clone()) } else { Ok(l.clone()) }
+            }
             BinOp::And => match (l, r) {
                 (Value::Bool(a), Value::Bool(b)) => Ok(Value::Bool(*a && *b)),
                 _ => Err("Cannot 'and' non-booleans".into()),
@@ -1094,6 +1134,65 @@ impl Interpreter {
                     }
                     _ => Err("serve() expects (port_int, closure)".into()),
                 }
+            }
+            "re_match" | "re_find" | "re_replace" | "re_split" => {
+                if args.len() < 2 { return Err("regex builtin expects (string, pattern)".into()); }
+                let (s, pat) = match (&args[0], &args[1]) {
+                    (Value::Str(s), Value::Str(p)) => (s.clone(), p.clone()),
+                    _ => return Err("regex expects (string, pattern)".into()),
+                };
+                let re = regex::Regex::new(&pat)
+                    .map_err(|e| format!("Bad regex: {}", e))?;
+                match name {
+                    "re_match" => Ok(Some(Value::Bool(re.is_match(&s)))),
+                    "re_find" => Ok(Some(match re.find(&s) {
+                        Some(m) => Value::Str(m.as_str().to_string()),
+                        None => Value::Null,
+                    })),
+                    "re_replace" => {
+                        match args.get(2) {
+                            Some(Value::Str(rep)) => Ok(Some(Value::Str(re.replace_all(&s, rep.as_str()).to_string()))),
+                            _ => Err("re_replace expects (string, pattern, replacement)".into()),
+                        }
+                    }
+                    "re_split" => {
+                        let parts: Vec<Value> = re.split(&s).map(|p| Value::Str(p.to_string())).collect();
+                        Ok(Some(Value::List(parts)))
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            "date" => {
+                // date() -> "YYYY-MM-DD HH:MM:SS" or date(fmt) with %Y %m %d %H %M %S tokens
+                let ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as i64;
+                let secs = ms / 1000;
+                let days = secs.div_euclid(86400);
+                let tod = secs.rem_euclid(86400);
+                let (h, mi, sc) = (tod / 3600, (tod % 3600) / 60, tod % 60);
+                // civil-from-days (Howard Hinnant)
+                let z = days + 719468;
+                let era = z.div_euclid(146097);
+                let doe = z.rem_euclid(146097);
+                let yoe = (doe - doe/1460 + doe/36524 - doe/146096) / 365;
+                let y = yoe + era * 400;
+                let doy = doe - (365*yoe + yoe/4 - yoe/100);
+                let mp = (5*doy + 2)/153;
+                let d = doy - (153*mp + 2)/5 + 1;
+                let m = if mp < 10 { mp + 3 } else { mp - 9 };
+                let y = if m <= 2 { y + 1 } else { y };
+                let base = format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}", y, m, d, h, mi, sc);
+                let out = match args.get(0) {
+                    Some(Value::Str(f)) => f
+                        .replace("%Y", &format!("{:04}", y))
+                        .replace("%m", &format!("{:02}", m))
+                        .replace("%d", &format!("{:02}", d))
+                        .replace("%H", &format!("{:02}", h))
+                        .replace("%M", &format!("{:02}", mi))
+                        .replace("%S", &format!("{:02}", sc)),
+                    _ => base,
+                };
+                Ok(Some(Value::Str(out)))
             }
             "render" => {
                 if args.len() != 2 { return Err("render() expects (template, data)".into()); }

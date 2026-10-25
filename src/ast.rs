@@ -25,6 +25,7 @@ pub enum BinOp {
     Add, Sub, Mul, Div, Mod,
     Eq, Neq, Lt, Gt, Le, Ge,
     And, Or,
+    NullCoal,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -58,6 +59,8 @@ pub enum Expr {
     Lambda(Vec<Param>, Vec<Stmt>),
     // list comprehension: [expr for var in iter (if cond)?]
     ListComp(Box<Expr>, String, Box<Expr>, Option<Box<Expr>>),
+    // safe access: obj?.name or obj?.method(args) — null propagates
+    SafeGet(Box<Expr>, String, Option<Vec<Expr>>),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -88,6 +91,8 @@ pub enum Stmt {
     Try(Vec<Stmt>, String, Vec<Stmt>), // try { body } catch var { handler }
     Import(String), // import "path"
     Match(Expr, Vec<(Expr, Vec<Stmt>)>, Option<Vec<Stmt>>), // match expr { pat => body, ... else => body }
+    // destructuring: let [a, b] = expr  (from a list)
+    LetDestructure(Vec<String>, Expr),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
