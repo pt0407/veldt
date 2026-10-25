@@ -4,6 +4,7 @@ use crate::ast::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::cell::RefCell;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -11,7 +12,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub enum Value {
     Int(i64),
     Float(f64),
-    Str(String),
+    Str(Arc<str>), // interned — O(1) clone (Phase 3)
     Bool(bool),
     List(im::Vector<Value>), // persistent — O(1) clone (Phase 3)
     Dict(HashMap<String, Value>),
@@ -342,7 +343,7 @@ impl Interpreter {
                 match self.exec_block(body) {
                     Ok(flow) => Ok(flow),
                     Err(e) => {
-                        self.vars.borrow_mut().insert(err_var.clone(), Value::Str(e));
+                        self.vars.borrow_mut().insert(err_var.clone(), Value::Str(e.into()));
                         self.exec_block(handler)
                     }
                 }
@@ -403,7 +404,7 @@ impl Interpreter {
                                 .insert(format!("{}::{}", alias, n), v.clone());
                         }
                         let mut marker = HashMap::new();
-                        marker.insert("__mod".to_string(), Value::Str(alias.clone()));
+                        marker.insert("__mod".to_string(), Value::Str(alias.clone().into()));
                         self.vars.borrow_mut().insert(alias.clone(), Value::Dict(marker));
                         Ok(FlowControl::Normal)
                     }
@@ -467,7 +468,7 @@ impl Interpreter {
         match expr {
             Expr::Int(n) => Ok(Value::Int(*n)),
             Expr::Float(n) => Ok(Value::Float(*n)),
-            Expr::Str(s) => Ok(Value::Str(s.clone())),
+            Expr::Str(s) => Ok(Value::Str(s.clone().into())),
             Expr::Interp(parts) => {
                 let mut result = String::new();
                 for part in parts {
@@ -481,7 +482,7 @@ impl Interpreter {
                         _ => result.push_str(&format!("{}", val)),
                     }
                 }
-                Ok(Value::Str(result))
+                Ok(Value::Str(result.into()))
             }
             Expr::Bool(b) => Ok(Value::Bool(*b)),
             Expr::Null => Ok(Value::Null),
@@ -597,7 +598,7 @@ impl Interpreter {
                 let iter_val = self.eval_expr(iter)?;
                 let items = match iter_val {
                     Value::List(items) => items,
-                    Value::Str(s) => s.chars().map(|c| Value::Str(c.to_string())).collect(),
+                    Value::Str(s) => s.chars().map(|c| Value::Str(c.to_string().into())).collect(),
                     _ => return Err("Comprehension requires a list or string to iterate".into()),
                 };
                 let mut result = Vec::new();
@@ -643,8 +644,8 @@ impl Interpreter {
                         let n = chars.len() as i64;
                         let a = bound(&lo_v, n, 0)?.clamp(0, n) as usize;
                         let b = bound(&hi_v, n, n)?.clamp(0, n) as usize;
-                        if a > b { Ok(Value::Str(String::new())) }
-                        else { Ok(Value::Str(chars[a..b].iter().collect())) }
+                        if a > b { Ok(Value::Str(String::new().into())) }
+                        else { Ok(Value::Str(chars[a..b].iter().collect::<String>().into())) }
                     }
                     _ => Err("Cannot slice this value".into()),
                 }
@@ -667,7 +668,7 @@ impl Interpreter {
                         if j < 0 || j as usize >= chars.len() {
                             Err(format!("Index {} out of bounds (len {})", i, chars.len()))
                         } else {
-                            Ok(Value::Str(chars[j as usize].to_string()))
+                            Ok(Value::Str(chars[j as usize].to_string().into()))
                         }
                     }
                     _ => Err("Cannot index this value".into()),
@@ -683,32 +684,32 @@ impl Interpreter {
                 (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a + b)),
                 (Value::Int(a), Value::Float(b)) => Ok(Value::Float(*a as f64 + b)),
                 (Value::Float(a), Value::Int(b)) => Ok(Value::Float(a + *b as f64)),
-                (Value::Str(a), Value::Str(b)) => Ok(Value::Str(format!("{}{}", a, b))),
-                (Value::Str(a), Value::Int(b)) => Ok(Value::Str(format!("{}{}", a, b))),
+                (Value::Str(a), Value::Str(b)) => Ok(Value::Str(format!("{}{}", a, b).into())),
+                (Value::Str(a), Value::Int(b)) => Ok(Value::Str(format!("{}{}", a, b).into())),
                 (Value::Str(a), Value::Float(b)) => {
                     let s = if b.fract() == 0.0 { format!("{:.1}", b) } else { format!("{}", b) };
-                    Ok(Value::Str(format!("{}{}", a, s)))
+                    Ok(Value::Str(format!("{}{}", a, s).into()))
                 }
-                (Value::Int(a), Value::Str(b)) => Ok(Value::Str(format!("{}{}", a, b))),
+                (Value::Int(a), Value::Str(b)) => Ok(Value::Str(format!("{}{}", a, b).into())),
                 (Value::Float(a), Value::Str(b)) => {
                     let s = if a.fract() == 0.0 { format!("{:.1}", a) } else { format!("{}", a) };
-                    Ok(Value::Str(format!("{}{}", s, b)))
+                    Ok(Value::Str(format!("{}{}", s, b).into()))
                 }
-                (Value::Str(a), Value::Bool(b)) => Ok(Value::Str(format!("{}{}", a, b))),
-                (Value::Bool(a), Value::Str(b)) => Ok(Value::Str(format!("{}{}", a, b))),
+                (Value::Str(a), Value::Bool(b)) => Ok(Value::Str(format!("{}{}", a, b).into())),
+                (Value::Bool(a), Value::Str(b)) => Ok(Value::Str(format!("{}{}", a, b).into())),
                 (Value::Str(a), Value::List(b)) => {
                     let strs: Vec<String> = b.iter().map(|v| format!("{}", v)).collect();
-                    Ok(Value::Str(format!("{}[{}]", a, strs.join(", "))))
+                    Ok(Value::Str(format!("{}[{}]", a, strs.join(", ")).into()))
                 }
                 (Value::Str(a), Value::Dict(b)) => {
                     let strs: Vec<String> = b.iter().map(|(k, v)| format!("{}: {}", k, v)).collect();
-                    Ok(Value::Str(format!("{}{{{}}}", a, strs.join(", "))))
+                    Ok(Value::Str(format!("{}{{{}}}", a, strs.join(", ")).into()))
                 }
                 (Value::Str(a), Value::Set(b)) => {
                     let strs: Vec<String> = b.iter().map(|v| format!("{}", v)).collect();
-                    Ok(Value::Str(format!("{}set[{}]", a, strs.join(", "))))
+                    Ok(Value::Str(format!("{}set[{}]", a, strs.join(", ")).into()))
                 }
-                (Value::Str(a), Value::Null) => Ok(Value::Str(format!("{}null", a))),
+                (Value::Str(a), Value::Null) => Ok(Value::Str(format!("{}null", a).into())),
                 _ => Err("Cannot add these types".into()),
             },
             BinOp::Sub => match (l, r) {
@@ -745,8 +746,8 @@ impl Interpreter {
             BinOp::In => match (l, r) {
                 (v, Value::List(items)) => Ok(Value::Bool(
                     items.iter().any(|i| self.values_eq(&v, i)))),
-                (Value::Str(a), Value::Str(b)) => Ok(Value::Bool(b.contains(a.as_str()))),
-                (Value::Str(k), Value::Dict(d)) => Ok(Value::Bool(d.contains_key(k.as_str()))),
+                (Value::Str(a), Value::Str(b)) => Ok(Value::Bool(b.contains(&**a))),
+                (Value::Str(k), Value::Dict(d)) => Ok(Value::Bool(d.contains_key(&**k))),
                 _ => Err("right side of 'in' must be a list, dict, or string".into()),
             },
             BinOp::Eq => Ok(Value::Bool(self.values_eq(l, r))),
@@ -1064,12 +1065,12 @@ impl Interpreter {
 
             // Build request dict
             let mut req_map = std::collections::HashMap::new();
-            req_map.insert("method".to_string(), Value::Str(method));
-            req_map.insert("path".to_string(), Value::Str(path));
-            req_map.insert("body".to_string(), Value::Str(body_str));
+            req_map.insert("method".to_string(), Value::Str(method.into()));
+            req_map.insert("path".to_string(), Value::Str(path.into()));
+            req_map.insert("body".to_string(), Value::Str(body_str.into()));
             let mut headers_val = std::collections::HashMap::new();
             for (k, v) in headers_map {
-                headers_val.insert(k, Value::Str(v));
+                headers_val.insert(k, Value::Str(v.into()));
             }
             req_map.insert("headers".to_string(), Value::Dict(headers_val));
             let req_val = Value::Dict(req_map);
@@ -1080,7 +1081,7 @@ impl Interpreter {
                 Err(e) => {
                     let mut resp = std::collections::HashMap::new();
                     resp.insert("status".to_string(), Value::Int(500));
-                    resp.insert("body".to_string(), Value::Str(format!("Handler error: {}", e)));
+                    resp.insert("body".to_string(), Value::Str(format!("Handler error: {}", e).into()));
                     Value::Dict(resp)
                 }
             };
@@ -1089,10 +1090,10 @@ impl Interpreter {
             let (status, resp_body) = match &result {
                 Value::Dict(d) => {
                     let status = match d.get("status") { Some(Value::Int(n)) => *n, _ => 200 };
-                    let body = match d.get("body") { Some(Value::Str(s)) => s.clone(), Some(v) => format!("{}", v), None => "".into() };
+                    let body = match d.get("body") { Some(Value::Str(s)) => s.to_string(), Some(v) => format!("{}", v), None => "".into() };
                     (status, body)
                 }
-                Value::Str(s) => (200, s.clone()),
+                Value::Str(s) => (200, s.to_string()),
                 _ => (200, format!("{}", result)),
             };
 
@@ -1170,7 +1171,7 @@ impl Interpreter {
             }
             "str" => {
                 if args.len() != 1 { return Err("str() expects 1 argument".into()); }
-                Ok(Some(Value::Str(format!("{}", args[0]))))
+                Ok(Some(Value::Str(format!("{}", args[0]).into())))
             }
             "int" => {
                 if args.len() != 1 { return Err("int() expects 1 argument".into()); }
@@ -1208,8 +1209,8 @@ impl Interpreter {
                 if args.len() != 1 { return Err("read_file() expects 1 argument".into()); }
                 match &args[0] {
                     Value::Str(path) => {
-                        match std::fs::read_to_string(path) {
-                            Ok(content) => Ok(Some(Value::Str(content))),
+                        match std::fs::read_to_string(&**path) {
+                            Ok(content) => Ok(Some(Value::Str(content.into()))),
                             Err(e) => Err(format!("Cannot read file '{}': {}", path, e)),
                         }
                     }
@@ -1220,7 +1221,7 @@ impl Interpreter {
                 if args.len() != 2 { return Err("write_file() expects 2 arguments".into()); }
                 match (&args[0], &args[1]) {
                     (Value::Str(path), Value::Str(content)) => {
-                        match std::fs::write(path, content) {
+                        match std::fs::write(&**path, &**content) {
                             Ok(_) => Ok(Some(Value::Bool(true))),
                             Err(e) => Err(format!("Cannot write file '{}': {}", path, e)),
                         }
@@ -1237,13 +1238,13 @@ impl Interpreter {
                             .timeout(std::time::Duration::from_secs(30))
                             .build()
                             .map_err(|e| format!("HTTP client error: {}", e))?;
-                        let mut req = client.get(url);
+                        let mut req = client.get(&**url);
                         // Optional headers as dict: fetch(url, headers_dict)
                         if args.len() >= 2 {
                             if let Value::Dict(h) = &args[1] {
                                 for (k, v) in h {
                                     if let Value::Str(sv) = v {
-                                        req = req.header(k, sv);
+                                        req = req.header(k, &**sv);
                                     }
                                 }
                             }
@@ -1254,7 +1255,7 @@ impl Interpreter {
                                 let body = resp.text().unwrap_or_default();
                                 let mut result = std::collections::HashMap::new();
                                 result.insert("status".to_string(), Value::Int(status));
-                                result.insert("body".to_string(), Value::Str(body));
+                                result.insert("body".to_string(), Value::Str(body.into()));
                                 Ok(Some(Value::Dict(result)))
                             }
                             Err(e) => Err(format!("Fetch error: {}", e)),
@@ -1272,12 +1273,12 @@ impl Interpreter {
                             .timeout(std::time::Duration::from_secs(30))
                             .build()
                             .map_err(|e| format!("HTTP client error: {}", e))?;
-                        let mut req = client.post(url).header("Content-Type", "application/json").body(body_str.clone());
+                        let mut req = client.post(&**url).header("Content-Type", "application/json").body(body_str.to_string());
                         if args.len() >= 3 {
                             if let Value::Dict(h) = &args[2] {
                                 for (k, v) in h {
                                     if let Value::Str(sv) = v {
-                                        req = req.header(k, sv);
+                                        req = req.header(k, &**sv);
                                     }
                                 }
                             }
@@ -1288,7 +1289,7 @@ impl Interpreter {
                                 let body = resp.text().unwrap_or_default();
                                 let mut result = std::collections::HashMap::new();
                                 result.insert("status".to_string(), Value::Int(status));
-                                result.insert("body".to_string(), Value::Str(body));
+                                result.insert("body".to_string(), Value::Str(body.into()));
                                 Ok(Some(Value::Dict(result)))
                             }
                             Err(e) => Err(format!("Post error: {}", e)),
@@ -1318,8 +1319,8 @@ impl Interpreter {
                 if args.len() != 1 { return Err("env() expects 1 argument".into()); }
                 match &args[0] {
                     Value::Str(name) => {
-                        match std::env::var(name) {
-                            Ok(v) => Ok(Some(Value::Str(v))),
+                        match std::env::var(&**name) {
+                            Ok(v) => Ok(Some(Value::Str(v.into()))),
                             Err(_) => Ok(Some(Value::Null)),
                         }
                     }
@@ -1332,13 +1333,13 @@ impl Interpreter {
                     Value::Str(cmd) => {
                         let output = std::process::Command::new("sh")
                             .arg("-c")
-                            .arg(cmd)
+                            .arg(&**cmd)
                             .output();
                         match output {
                             Ok(o) => {
                                 let mut result = std::collections::HashMap::new();
-                                result.insert("stdout".to_string(), Value::Str(String::from_utf8_lossy(&o.stdout).to_string()));
-                                result.insert("stderr".to_string(), Value::Str(String::from_utf8_lossy(&o.stderr).to_string()));
+                                result.insert("stdout".to_string(), Value::Str(String::from_utf8_lossy(&o.stdout).to_string().into()));
+                                result.insert("stderr".to_string(), Value::Str(String::from_utf8_lossy(&o.stderr).to_string().into()));
                                 result.insert("exit_code".to_string(), Value::Int(o.status.code().unwrap_or(-1) as i64));
                                 Ok(Some(Value::Dict(result)))
                             }
@@ -1434,7 +1435,7 @@ impl Interpreter {
                     Value::Str(fname) => {
                         let fname = fname.clone();
                         let fargs = args[1..].to_vec();
-                        let best_id = self.functions.get(&fname)
+                        let best_id = self.functions.get(&*fname)
                             .and_then(|vs| vs.iter()
                                 .max_by(|a, b| a.fitness.partial_cmp(&b.fitness).unwrap_or(std::cmp::Ordering::Equal))
                                 .map(|v| v.id))
@@ -1456,7 +1457,7 @@ impl Interpreter {
                 let mut out = std::collections::HashMap::new();
                 for (pseg, qseg) in ps.iter().zip(qs.iter()) {
                     if let Some(name) = pseg.strip_prefix(':') {
-                        out.insert(name.to_string(), Value::Str(qseg.to_string()));
+                        out.insert(name.to_string(), Value::Str(qseg.to_string().into()));
                     } else if pseg != qseg {
                         return Ok(Some(Value::Null));
                     }
@@ -1484,12 +1485,12 @@ impl Interpreter {
                         out.push_str(&format!("{}", args.get(idx + 1).cloned().unwrap_or(Value::Null)));
                     } else { out.push(c); }
                 }
-                Ok(Some(Value::Str(out)))
+                Ok(Some(Value::Str(out.into())))
             }
             "args" => {
                 // args() -> script argv (veldt run prog.veldt -- a b c)
                 Ok(Some(Value::List(self.argv.iter()
-                    .map(|a| Value::Str(a.clone())).collect())))
+                    .map(|a| Value::Str(a.clone().into())).collect())))
             }
             "exit" => {
                 // exit(code) — clean process exit via sentinel error
@@ -1513,7 +1514,7 @@ impl Interpreter {
                 let mut line = String::new();
                 match stdin.lock().read_line(&mut line) {
                     Ok(0) => Ok(Some(Value::Null)),       // EOF
-                    Ok(_) => Ok(Some(Value::Str(line.trim_end_matches('\n').to_string()))),
+                    Ok(_) => Ok(Some(Value::Str(line.trim_end_matches('\n').to_string().into()))),
                     Err(e) => Err(format!("stdin read failed: {}", e)),
                 }
             }
@@ -1521,43 +1522,43 @@ impl Interpreter {
             "exists" | "file_size" | "ls" | "mkdir" | "rm" | "cp" | "mv" | "cwd" => {
                 let path = match args.get(0) {
                     Some(Value::Str(p)) => p.clone(),
-                    None if name == "cwd" => String::new(),
+                    None if name == "cwd" => String::new().into(),
                     _ => return Err(format!("{}() expects a path string", name)),
                 };
                 match name {
-                    "exists" => Ok(Some(Value::Bool(std::path::Path::new(&path).exists()))),
+                    "exists" => Ok(Some(Value::Bool(std::path::Path::new(&*path).exists()))),
                     "file_size" => Ok(Some(Value::Int(
-                        std::fs::metadata(&path).map(|m| m.len() as i64).unwrap_or(0)))),
+                        std::fs::metadata(&*path).map(|m| m.len() as i64).unwrap_or(0)))),
                     "ls" => {
                         let dir = if path.is_empty() { "." } else { &path };
                         let mut names: Vec<Value> = Vec::new();
                         match std::fs::read_dir(dir) {
                             Ok(rd) => {
                                 for e in rd.flatten() {
-                                    names.push(Value::Str(e.file_name().to_string_lossy().to_string()));
+                                    names.push(Value::Str(e.file_name().to_string_lossy().to_string().into()));
                                 }
                                 Ok(Some(Value::List(names.into_iter().collect())))
                             }
                             Err(e) => Err(format!("ls failed: {}", e)),
                         }
                     }
-                    "mkdir" => Ok(Some(Value::Bool(std::fs::create_dir_all(&path).is_ok()))),
+                    "mkdir" => Ok(Some(Value::Bool(std::fs::create_dir_all(&*path).is_ok()))),
                     "rm" => {
-                        let p = std::path::Path::new(&path);
+                        let p = std::path::Path::new(&*path);
                         let r = if p.is_dir() { std::fs::remove_dir_all(p) }
                                 else { std::fs::remove_file(p) };
                         Ok(Some(Value::Bool(r.is_ok())))
                     }
                     "cp" => {
                         let dst = match args.get(1) { Some(Value::Str(d)) => d.clone(), _ => return Err("cp(src, dst)".into()) };
-                        Ok(Some(Value::Bool(std::fs::copy(&path, &dst).is_ok())))
+                        Ok(Some(Value::Bool(std::fs::copy(&*path, &*dst).is_ok())))
                     }
                     "mv" => {
                         let dst = match args.get(1) { Some(Value::Str(d)) => d.clone(), _ => return Err("mv(src, dst)".into()) };
-                        Ok(Some(Value::Bool(std::fs::rename(&path, &dst).is_ok())))
+                        Ok(Some(Value::Bool(std::fs::rename(&*path, &*dst).is_ok())))
                     }
                     "cwd" => Ok(Some(Value::Str(
-                        std::env::current_dir().map(|p| p.to_string_lossy().to_string())
+                        std::env::current_dir().map(|p| p.to_string_lossy().to_string().into())
                             .unwrap_or_default()))),
                     _ => unreachable!(),
                 }
@@ -1565,7 +1566,7 @@ impl Interpreter {
             "read_lines" | "write_lines" => match name {
                 "read_lines" => {
                     let path = match args.get(0) { Some(Value::Str(p)) => p.clone(), _ => return Err("read_lines(path)".into()) };
-                    match std::fs::read_to_string(&path) {
+                    match std::fs::read_to_string(&*path) {
                         Ok(c) => Ok(Some(Value::List(c.lines().map(|l| Value::Str(l.into())).collect()))),
                         Err(e) => Err(format!("read_lines failed: {}", e)),
                     }
@@ -1576,7 +1577,7 @@ impl Interpreter {
                         _ => return Err("write_lines(path, list)".into()),
                     };
                     let content = items.iter().map(|v| format!("{}", v)).collect::<Vec<_>>().join("\n");
-                    Ok(Some(Value::Bool(std::fs::write(&path, content + "\n").is_ok())))
+                    Ok(Some(Value::Bool(std::fs::write(&*path, content + "\n").is_ok())))
                 }
                 _ => unreachable!(),
             }
@@ -1598,7 +1599,7 @@ impl Interpreter {
                                 out.push(if i <= cnt { B64[((n >> (18 - i * 6)) & 63) as usize] as char } else { '=' });
                             }
                         }
-                        Ok(Some(Value::Str(out)))
+                        Ok(Some(Value::Str(out.into())))
                     }
                     "b64_decode" => {
                         let mut table = [0u8; 256];
@@ -1615,7 +1616,7 @@ impl Interpreter {
                                 }
                             }
                         }
-                        Ok(Some(Value::Str(String::from_utf8_lossy(&out).to_string())))
+                        Ok(Some(Value::Str(String::from_utf8_lossy(&out).to_string().into())))
                     }
                     "url_encode" => {
                         let mut out = String::new();
@@ -1626,7 +1627,7 @@ impl Interpreter {
                                 _ => out.push_str(&format!("%{:02X}", b)),
                             }
                         }
-                        Ok(Some(Value::Str(out)))
+                        Ok(Some(Value::Str(out.into())))
                     }
                     "url_decode" => {
                         let bytes = input.as_bytes();
@@ -1639,14 +1640,14 @@ impl Interpreter {
                             } else if bytes[i] == b'+' { out.push(b' '); i += 1; }
                             else { out.push(bytes[i]); i += 1; }
                         }
-                        Ok(Some(Value::Str(String::from_utf8_lossy(&out).to_string())))
+                        Ok(Some(Value::Str(String::from_utf8_lossy(&out).to_string().into())))
                     }
                     _ => unreachable!(),
                 }
             }
             "sha256" => {
                 let input = match args.get(0) { Some(Value::Str(s)) => s.clone(), _ => return Err("sha256(str)".into()) };
-                Ok(Some(Value::Str(Self::sha256_hex(input.as_bytes()))))
+                Ok(Some(Value::Str(Self::sha256_hex(input.as_bytes()).into())))
             }
             "parse_date" => {
                 // parse_date("YYYY-MM-DD[ HH:MM:SS]") -> epoch seconds (UTC)
@@ -1691,17 +1692,17 @@ impl Interpreter {
                 match name {
                     "re_match" => Ok(Some(Value::Bool(re.is_match(&s)))),
                     "re_find" => Ok(Some(match re.find(&s) {
-                        Some(m) => Value::Str(m.as_str().to_string()),
+                        Some(m) => Value::Str(m.as_str().to_string().into()),
                         None => Value::Null,
                     })),
                     "re_replace" => {
                         match args.get(2) {
-                            Some(Value::Str(rep)) => Ok(Some(Value::Str(re.replace_all(&s, rep.as_str()).to_string()))),
+                            Some(Value::Str(rep)) => Ok(Some(Value::Str(re.replace_all(&s, &**rep).to_string().into()))),
                             _ => Err("re_replace expects (string, pattern, replacement)".into()),
                         }
                     }
                     "re_split" => {
-                        let parts: Vec<Value> = re.split(&s).map(|p| Value::Str(p.to_string())).collect();
+                        let parts: Vec<Value> = re.split(&s).map(|p| Value::Str(p.to_string().into())).collect();
                         Ok(Some(Value::List(parts.into_iter().collect())))
                     }
                     "re_captures" => {
@@ -1709,7 +1710,7 @@ impl Interpreter {
                         Ok(Some(match re.captures(&s) {
                             Some(caps) => Value::List(
                                 caps.iter()
-                                    .map(|m| m.map(|g| Value::Str(g.as_str().to_string()))
+                                    .map(|m| m.map(|g| Value::Str(g.as_str().to_string().into()))
                                               .unwrap_or(Value::Null))
                                     .collect()),
                             None => Value::Null,
@@ -1748,7 +1749,7 @@ impl Interpreter {
                         .replace("%S", &format!("{:02}", sc)),
                     _ => base,
                 };
-                Ok(Some(Value::Str(out)))
+                Ok(Some(Value::Str(out.into())))
             }
             "render" => {
                 if args.len() != 2 { return Err("render() expects (template, data)".into()); }
@@ -1757,7 +1758,7 @@ impl Interpreter {
                         let mut result = tpl.clone();
                         for (k, v) in data {
                             let key = format!("{{{}}}", k);
-                            result = result.replace(&key, &format!("{}", v));
+                            result = result.replace(&*key, &format!("{}", v)).into();
                         }
                         Ok(Some(Value::Str(result)))
                     }
@@ -1768,7 +1769,7 @@ impl Interpreter {
                 if args.len() != 1 { return Err("db_open() expects a path".into()); }
                 match &args[0] {
                     Value::Str(path) => {
-                        match rusqlite::Connection::open(path) {
+                        match rusqlite::Connection::open(&**path) {
                             Ok(conn) => {
                                 // Store connection in a global — use a simple ID-based registry
                                 let id = self.next_db_id;
@@ -1820,7 +1821,7 @@ impl Interpreter {
                                                             Ok(rusqlite::types::Value::Null) => Value::Null,
                                                             Ok(rusqlite::types::Value::Integer(n)) => Value::Int(n),
                                                             Ok(rusqlite::types::Value::Real(f)) => Value::Float(f),
-                                                            Ok(rusqlite::types::Value::Text(s)) => Value::Str(s),
+                                                            Ok(rusqlite::types::Value::Text(s)) => Value::Str(s.into()),
                                                             Ok(rusqlite::types::Value::Blob(_)) => Value::Null,
                                                             _ => Value::Null,
                                                         };
@@ -1871,7 +1872,7 @@ impl Interpreter {
                     return Ok(Some(Value::Str("".into())));
                 }
                 match std::io::stdin().read_line(&mut line) {
-                    Ok(_) => Ok(Some(Value::Str(line.trim_end().to_string()))),
+                    Ok(_) => Ok(Some(Value::Str(line.trim_end().to_string().into()))),
                     Err(e) => Err(format!("Input error: {}", e)),
                 }
             }
@@ -1959,7 +1960,7 @@ impl Interpreter {
                 if args.len() != 1 { return Err("json_stringify() expects 1 argument".into()); }
                 let json = Self::value_to_json(&args[0]);
                 Ok(Some(Value::Str(serde_json::to_string_pretty(&json)
-                    .map_err(|e| format!("JSON stringify error: {}", e))?)))
+                    .map_err(|e| format!("JSON stringify error: {}", e))?.into())))
             }
             _ => Ok(None),
         }
@@ -1993,7 +1994,7 @@ impl Interpreter {
                     Value::Float(n.as_f64().unwrap_or(0.0))
                 }
             }
-            serde_json::Value::String(s) => Value::Str(s),
+            serde_json::Value::String(s) => Value::Str(s.into()),
             serde_json::Value::Array(arr) => {
                 Value::List(arr.into_iter().map(Self::json_to_value).collect())
             }
@@ -2017,7 +2018,7 @@ impl Interpreter {
                     .map(serde_json::Value::Number)
                     .unwrap_or(serde_json::Value::Null)
             }
-            Value::Str(s) => serde_json::Value::String(s.clone()),
+            Value::Str(s) => serde_json::Value::String(s.to_string()),
             Value::List(items) => {
                 serde_json::Value::Array(items.iter().map(Self::value_to_json).collect())
             }
@@ -2055,14 +2056,14 @@ impl Interpreter {
         }
         match (obj, method) {
             // String methods
-            (Value::Str(s), "upper") => Ok(Value::Str(s.to_uppercase())),
-            (Value::Str(s), "lower") => Ok(Value::Str(s.to_lowercase())),
-            (Value::Str(s), "trim") => Ok(Value::Str(s.trim().to_string())),
+            (Value::Str(s), "upper") => Ok(Value::Str(s.to_uppercase().into())),
+            (Value::Str(s), "lower") => Ok(Value::Str(s.to_lowercase().into())),
+            (Value::Str(s), "trim") => Ok(Value::Str(s.trim().to_string().into())),
             (Value::Str(s), "split") => {
                 if args.len() != 1 { return Err("split() expects 1 argument".into()); }
                 match &args[0] {
                     Value::Str(sep) => {
-                        let parts: Vec<Value> = s.split(sep).map(|p| Value::Str(p.to_string())).collect();
+                        let parts: Vec<Value> = s.split(&**sep).map(|p| Value::Str(p.to_string().into())).collect();
                         Ok(Value::List(parts.into_iter().collect()))
                     }
                     _ => Err("split() expects a string separator".into()),
@@ -2071,39 +2072,39 @@ impl Interpreter {
             (Value::Str(s), "contains") => {
                 if args.len() != 1 { return Err("contains() expects 1 argument".into()); }
                 match &args[0] {
-                    Value::Str(sub) => Ok(Value::Bool(s.contains(sub))),
+                    Value::Str(sub) => Ok(Value::Bool(s.contains(&**sub))),
                     _ => Err("contains() expects a string".into()),
                 }
             }
             (Value::Str(s), "replace") => {
                 if args.len() != 2 { return Err("replace() expects 2 arguments".into()); }
                 match (&args[0], &args[1]) {
-                    (Value::Str(old), Value::Str(new)) => Ok(Value::Str(s.replace(old, new))),
+                    (Value::Str(old), Value::Str(new)) => Ok(Value::Str(s.replace(&**old, &**new).into())),
                     _ => Err("replace() expects two strings".into()),
                 }
             }
             (Value::Str(s), "chars") => {
-                let chars: Vec<Value> = s.chars().map(|c| Value::Str(c.to_string())).collect();
+                let chars: Vec<Value> = s.chars().map(|c| Value::Str(c.to_string().into())).collect();
                 Ok(Value::List(chars.into_iter().collect()))
             }
             (Value::Str(s), "starts_with") => {
                 if args.len() != 1 { return Err("starts_with() expects 1 argument".into()); }
                 match &args[0] {
-                    Value::Str(prefix) => Ok(Value::Bool(s.starts_with(prefix))),
+                    Value::Str(prefix) => Ok(Value::Bool(s.starts_with(&**prefix))),
                     _ => Err("starts_with() expects a string".into()),
                 }
             }
             (Value::Str(s), "ends_with") => {
                 if args.len() != 1 { return Err("ends_with() expects 1 argument".into()); }
                 match &args[0] {
-                    Value::Str(suffix) => Ok(Value::Bool(s.ends_with(suffix))),
+                    Value::Str(suffix) => Ok(Value::Bool(s.ends_with(&**suffix))),
                     _ => Err("ends_with() expects a string".into()),
                 }
             }
             (Value::Str(s), "find") => {
                 if args.len() != 1 { return Err("find() expects 1 argument".into()); }
                 match &args[0] {
-                    Value::Str(sub) => Ok(Value::Int(s.find(sub).map(|i| i as i64).unwrap_or(-1))),
+                    Value::Str(sub) => Ok(Value::Int(s.find(&**sub).map(|i| i as i64).unwrap_or(-1))),
                     _ => Err("find() expects a string".into()),
                 }
             }
@@ -2115,7 +2116,7 @@ impl Interpreter {
                         let en = (*end).max(0) as usize;
                         let en = en.min(s.len());
                         if st >= en { return Ok(Value::Str("".into())); }
-                        Ok(Value::Str(s[st..en].to_string()))
+                        Ok(Value::Str(s[st..en].to_string().into()))
                     }
                     _ => Err("substr() expects two integers".into()),
                 }
@@ -2123,7 +2124,7 @@ impl Interpreter {
             (Value::Str(s), "repeat") => {
                 if args.len() != 1 { return Err("repeat() expects 1 argument".into()); }
                 match &args[0] {
-                    Value::Int(n) => Ok(Value::Str(s.repeat((*n).max(0) as usize))),
+                    Value::Int(n) => Ok(Value::Str(s.repeat((*n).max(0) as usize).into())),
                     _ => Err("repeat() expects an integer".into()),
                 }
             }
@@ -2140,11 +2141,11 @@ impl Interpreter {
                     _ => Err("index_of() expects a string".into()),
                 }
             }
-            (Value::Str(s), "trim") => Ok(Value::Str(s.trim().to_string())),
+            (Value::Str(s), "trim") => Ok(Value::Str(s.trim().to_string().into())),
             // === Phase 1 stdlib: strings ===
             (Value::Str(s), "replace") => match (args.get(0), args.get(1)) {
                 (Some(Value::Str(f)), Some(Value::Str(t))) =>
-                    Ok(Value::Str(s.replace(f.as_str(), t))),
+                    Ok(Value::Str(s.replace(&**f, t).into())),
                 _ => Err("replace(old, new) — both strings".into()),
             },
             (Value::Str(s), "pad") => match args.get(0) {
@@ -2155,21 +2156,21 @@ impl Interpreter {
                         _ => ' ',
                     };
                     Ok(Value::Str(if s.len() >= n { s.clone() }
-                        else { format!("{}{}", s, ch.to_string().repeat(n - s.len())) }))
+                        else { format!("{}{}", s, ch.to_string().repeat(n - s.len())).into() }))
                 }
                 _ => Err("pad(len[, char]) expects int".into()),
             },
             (Value::Str(s), "chars") => Ok(Value::List(
-                s.chars().map(|c| Value::Str(c.to_string())).collect())),
+                s.chars().map(|c| Value::Str(c.to_string().into())).collect())),
             (Value::Str(s), "repeat") => match args.get(0) {
-                Some(Value::Int(n)) => Ok(Value::Str(s.repeat((*n).max(0) as usize))),
+                Some(Value::Int(n)) => Ok(Value::Str(s.repeat((*n).max(0) as usize).into())),
                 _ => Err("repeat(n) expects int".into()),
             },
             (Value::Str(s), "split_at") => match args.get(0) {
                 Some(Value::Int(i)) => {
                     let i = (*i).clamp(0, s.len() as i64) as usize;
                     Ok(Value::List(im::vector![
-                        Value::Str(s[..i].to_string()), Value::Str(s[i..].to_string())]))
+                        Value::Str(s[..i].to_string().into()), Value::Str(s[i..].to_string().into())]))
                 }
                 _ => Err("split_at(i) expects int".into()),
             },
@@ -2179,7 +2180,7 @@ impl Interpreter {
                     Some(Value::Str(s)) => s.clone(),
                     _ => ", ".into(),
                 };
-                Ok(Value::Str(items.iter().map(|v| format!("{}", v)).collect::<Vec<_>>().join(&sep)))
+                Ok(Value::Str(items.iter().map(|v| format!("{}", v)).collect::<Vec<_>>().join(&sep).into()))
             }
             (Value::List(items), "contains") => match args.get(0) {
                 Some(v) => Ok(Value::Bool(items.iter().any(|i| self.values_eq(i, v)))),
@@ -2264,10 +2265,10 @@ impl Interpreter {
                 Ok(Value::List(d.values().cloned().collect())),
             (Value::Dict(d), "items") =>
                 Ok(Value::List(d.iter()
-                    .map(|(k, v)| Value::List(im::vector![Value::Str(k.clone()), v.clone()]))
+                    .map(|(k, v)| Value::List(im::vector![Value::Str(k.clone().into()), v.clone()]))
                     .collect())),
             (Value::Dict(d), "keys") =>
-                Ok(Value::List(d.keys().map(|k| Value::Str(k.clone())).collect())),
+                Ok(Value::List(d.keys().map(|k| Value::Str(k.clone().into())).collect())),
             (Value::Dict(d), "merge") => match args.get(0) {
                 Some(Value::Dict(other)) => {
                     let mut m = d.clone();
@@ -2279,28 +2280,28 @@ impl Interpreter {
             (Value::Dict(d), "delete") => match args.get(0) {
                 Some(Value::Str(k)) => {
                     let mut m = d.clone();
-                    m.remove(k.as_str());
+                    m.remove(&**k);
                     Ok(Value::Dict(m))
                 }
                 _ => Err("delete(key) expects a string".into()),
             },
             (Value::Dict(d), "get_or") => match (args.get(0), args.get(1)) {
                 (Some(Value::Str(k)), Some(def)) =>
-                    Ok(d.get(k.as_str()).cloned().unwrap_or_else(|| def.clone())),
+                    Ok(d.get(&**k).cloned().unwrap_or_else(|| def.clone())),
                 _ => Err("get_or(key, default) — key must be a string".into()),
             },
-            (Value::Str(s), "ltrim") => Ok(Value::Str(s.trim_start().to_string())),
-            (Value::Str(s), "rtrim") => Ok(Value::Str(s.trim_end().to_string())),
-            (Value::Str(s), "to_lower") => Ok(Value::Str(s.to_lowercase())),
-            (Value::Str(s), "to_upper") => Ok(Value::Str(s.to_uppercase())),
+            (Value::Str(s), "ltrim") => Ok(Value::Str(s.trim_start().to_string().into())),
+            (Value::Str(s), "rtrim") => Ok(Value::Str(s.trim_end().to_string().into())),
+            (Value::Str(s), "to_lower") => Ok(Value::Str(s.to_lowercase().into())),
+            (Value::Str(s), "to_upper") => Ok(Value::Str(s.to_uppercase().into())),
             (Value::Str(s), "split_lines") => {
-                let parts: Vec<Value> = s.lines().map(|l| Value::Str(l.to_string())).collect();
+                let parts: Vec<Value> = s.lines().map(|l| Value::Str(l.to_string().into())).collect();
                 Ok(Value::List(parts.into_iter().collect()))
             }
             (Value::Str(s), "count") => {
                 if args.len() != 1 { return Err("count() expects 1 argument".into()); }
                 match &args[0] {
-                    Value::Str(sub) => Ok(Value::Int(s.matches(sub).count() as i64)),
+                    Value::Str(sub) => Ok(Value::Int(s.matches(&**sub).count() as i64)),
                     _ => Err("count() expects a string".into()),
                 }
             }
@@ -2326,13 +2327,13 @@ impl Interpreter {
                 if args.len() != 1 { return Err("join() expects 1 argument".into()); }
                 match &args[0] {
                     Value::Str(sep) => {
-                        let parts: Vec<String> = items.iter().map(|v| match v {
+                        let parts: Vec<Arc<str>> = items.iter().map(|v| match v {
                             Value::Str(s) => s.clone(),
-                            Value::Int(n) => n.to_string(),
-                            Value::Bool(b) => b.to_string(),
-                            _ => format!("{:?}", v),
+                            Value::Int(n) => n.to_string().into(),
+                            Value::Bool(b) => b.to_string().into(),
+                            _ => format!("{:?}", v).into(),
                         }).collect();
-                        Ok(Value::Str(parts.join(sep)))
+                        Ok(Value::Str(parts.join(&**sep).into()))
                     }
                     _ => Err("join() expects a string separator".into()),
                 }
@@ -2425,7 +2426,7 @@ impl Interpreter {
                 match &args[0] {
                     Value::Str(key) => {
                         let mut new_entries = entries.clone();
-                        new_entries.insert(key.clone(), args[1].clone());
+                        new_entries.insert(key.to_string(), args[1].clone());
                         Ok(Value::Dict(new_entries))
                     }
                     _ => Err("put() expects a string key".into()),
@@ -2435,7 +2436,7 @@ impl Interpreter {
                 if args.len() != 1 { return Err("get() expects 1 argument".into()); }
                 match &args[0] {
                     Value::Str(key) => {
-                        Ok(entries.get(key).cloned().unwrap_or(Value::Null))
+                        Ok(entries.get(&**key).cloned().unwrap_or(Value::Null))
                     }
                     _ => Err("get() expects a string key".into()),
                 }
@@ -2443,12 +2444,12 @@ impl Interpreter {
             (Value::Dict(entries), "has") => {
                 if args.len() != 1 { return Err("has() expects 1 argument".into()); }
                 match &args[0] {
-                    Value::Str(key) => Ok(Value::Bool(entries.contains_key(key))),
+                    Value::Str(key) => Ok(Value::Bool(entries.contains_key(&**key))),
                     _ => Err("has() expects a string key".into()),
                 }
             }
             (Value::Dict(entries), "keys") => {
-                let keys: Vec<Value> = entries.keys().map(|k| Value::Str(k.clone())).collect();
+                let keys: Vec<Value> = entries.keys().map(|k| Value::Str(k.clone().into())).collect();
                 Ok(Value::List(keys.into_iter().collect()))
             }
             (Value::Dict(entries), "len") => Ok(Value::Int(entries.len() as i64)),
@@ -2457,7 +2458,7 @@ impl Interpreter {
                 match &args[0] {
                     Value::Str(key) => {
                         let mut new_entries = entries.clone();
-                        new_entries.remove(key);
+                        new_entries.remove(&**key);
                         Ok(Value::Dict(new_entries))
                     }
                     _ => Err("remove() expects a string key".into()),
