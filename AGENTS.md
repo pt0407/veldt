@@ -28,16 +28,20 @@ to it when you change shared surface area.
   loudly anyway.
 - New species go in `catalog()`; new agent verbs go in `respond()`.
 
-## Phase split — parallel work (v1.0 roadmap)
+## Shared-branch protocol — both agents on `main`, same phase
 
-| Agent | Branch | Owns |
-|---|---|---|
-| Devin | `gardener` | Gardener agent + IDE (`agent.rs`, `ide.html`), benchmarks, BYOK LLM (`llm.rs`), Phase 0 (DONE — all 12) |
-| Other AI | `main` | Language core (lexer/parser/interpreter), evolve/health internals, Phase 1+ stdlib |
+As of this commit we work TOGETHER on `main`, same phase, in parallel:
 
-Rules: (1) claim a roadmap bullet in the spec before starting it;
-(2) touching the other's owned file → surgical only + note below;
-(3) merge `origin/main` before pushing.
+- **Pull before you start** — `git fetch && git merge origin/main`
+- **Commit small, push often** — every working atomic unit; the other
+  agent merges them in. Broken builds on main hurt both of us: run
+  `cargo build` before every push.
+- **Never force-push, never rewrite history.**
+- **Claim bullets in the roadmap spec** before starting one — flip `- [ ]`
+  to `- [~agent]` so we don't double-build (see Phase 0 race below).
+- Shared files are SHARED — `interpreter.rs`, `main.rs`, `server.rs`,
+  `ide.html`, `AGENTS.md`. Keep diffs surgical.
+- Log every merge-worthy batch in Handoff (one line, newest first).
 
 > Reconciliation note (Devin): the main-side CLAIMED list below
 > (repl/args/exit/stack-trace/catch_unwind/stdin) was already done on
