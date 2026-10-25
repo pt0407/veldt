@@ -249,12 +249,11 @@ fn adopt_variant(target: &str) {
         if let Some(variants) = veldt.functions.get_mut(name) {
             let mut found = false;
             for v in variants.iter_mut() {
-                if v.id == id { v.fitness = 1_000_000.0; found = true; }
-                else { v.fitness = v.fitness.min(1_000.0); }
+                if v.id == id { v.trust = veldt::Trust::Canonical; found = true; }
             }
             if found {
                 veldt.save().unwrap_or_else(|e| eprintln!("Save error: {}", e));
-                println!("Adopted {}#{} — dispatch now prefers it", name, id);
+                println!("Adopted {}#{} — now Canonical, dispatch prefers it", name, id);
             } else { println!("{}#{} not found", name, id); }
         } else { println!("No lineage '{}'", name); }
     } else { eprintln!("Usage: veldt adopt <name#N>"); }

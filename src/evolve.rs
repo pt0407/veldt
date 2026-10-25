@@ -273,12 +273,13 @@ impl Evolver {
         veldt.load_into_interpreter(&mut interp);
 
         let mut probes = Vec::new();
-        for _ in 0..count {
-            // generate typed args
+        for i in 0..count {
+            // alternate normal and big-scale probes
+            let scale = if i % 2 == 1 { 1 } else { 0 };
             let mut args = Vec::new();
             let mut ok = true;
             for p in &fittest.params {
-                match self.gen_value(&p.typ) {
+                match self.gen_value_scaled(&p.typ, scale) {
                     Some(v) => args.push(v),
                     None => { ok = false; break; }
                 }
@@ -294,6 +295,7 @@ impl Evolver {
                         expected: serde_json::to_string(&expected).unwrap_or_default(),
                         niche: Self::niche_signature(&args),
                         born: now_ts(),
+                        scale,
                     });
                 }
                 Err(_) => {} // fittest can't answer this input either — skip
@@ -336,6 +338,12 @@ impl Evolver {
 
     /// Typed random value generation for probes.
     fn gen_value(&mut self, typ: &Type) -> Option<crate::interpreter::Value> {
+        self.gen_value_scaled(typ, 0)
+    }
+
+    /// scale 0 = small inputs; scale 1 = big inputs that amplify
+    /// step-count differences so algorithmic complexity shows up.
+    fn gen_value_scaled(&mut self, typ: &Type, scale: u32) -> Option<crate::interpreter::Value> {
         use crate::interpreter::Value;
         match typ {
             Type::Int => {
@@ -352,10 +360,10 @@ impl Evolver {
             }
             Type::Bool => Some(Value::Bool(self.rand_bool())),
             Type::List(inner) => {
-                let n = self.rand_range(6);
+                let n = if scale > 0 { 15 + self.rand_range(20) } else { self.rand_range(6) };
                 let mut items = Vec::new();
                 for _ in 0..n {
-                    items.push(self.gen_value(inner)?);
+                    items.push(self.gen_value_scaled(inner, 0)?);
                 }
                 Some(Value::List(items))
             }
