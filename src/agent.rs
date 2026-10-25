@@ -312,14 +312,19 @@ fn evolve_intent(words: &[&str], veldt: &mut Veldt) -> AgentResponse {
     let cycles: usize = words.iter()
         .find_map(|w| w.parse().ok())
         .unwrap_or(3);
-    let mut steps = vec![step("plan", format!("Running {} evolution cycle{}.", cycles, if cycles == 1 { "" } else { "s" }))];
+    let llm = words.contains(&"llm") || words.contains(&"ai") || words.contains(&"llms");
+    let mut steps = vec![step("plan", format!("Running {} evolution cycle{}{}.", cycles, if cycles == 1 { "" } else { "s" },
+        if llm && crate::llm::configured() { " (LLM mutations)" } else { "" }))];
     let mut evolver = Evolver::new();
+    evolver.llm = llm;
     let events = evolver.evolve(veldt, cycles);
     for ev in &events {
         steps.push(step("obs", ev.format()));
     }
     let reply = if events.is_empty() {
         "Nothing to evolve — the garden needs grown functions first. Ask me to write one.".to_string()
+    } else if llm && !crate::llm::configured() {
+        format!("Evolution complete (mechanical — set VELDT_LLM_KEY for LLM mutations): {} event{}.", events.len(), if events.len() == 1 { "" } else { "s" })
     } else {
         format!("Evolution complete: {} event{}.", events.len(), if events.len() == 1 { "" } else { "s" })
     };

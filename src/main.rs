@@ -7,6 +7,7 @@ mod fmt;
 mod health;
 mod interpreter;
 mod lexer;
+mod llm;
 mod parser;
 mod server;
 mod veldt;
@@ -206,6 +207,7 @@ fn main() {
                 process::exit(1);
             }
             let mut evolver = evolve::Evolver::new();
+            evolver.llm = args.iter().any(|a| a == "--llm");
             let events = evolver.evolve(&mut veldt, cycles);
             for event in &events {
                 eprintln!("{}", event.format());

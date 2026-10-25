@@ -7,6 +7,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 pub struct Evolver {
     rng_seed: u64,
+    /// BYOK LLM mutations — requires VELDT_LLM_KEY (see llm.rs).
+    /// Falls back to mechanical mutation when unconfigured or when
+    /// the model returns unparseable code.
+    pub llm: bool,
 }
 
 impl Evolver {
@@ -15,7 +19,7 @@ impl Evolver {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_nanos() as u64)
             .unwrap_or(42);
-        Evolver { rng_seed: seed }
+        Evolver { rng_seed: seed, llm: false }
     }
 
     fn rand(&mut self) -> u64 {
@@ -142,6 +146,16 @@ impl Evolver {
                     let body = self.crossover_bodies(&entry.body, &other.body);
                     (body, vec![entry.id, other_id],
                      format!("crossover {}#{} x {}#{}", name, entry.id, name, other_id))
+                } else if self.llm && crate::llm::configured() {
+                    match self.llm_mutate(name, &entry) {
+                        Some(body) => (body, vec![entry.id],
+                            format!("llm-rewrite of {}#{}", name, entry.id)),
+                        None => {
+                            let mutation = self.pick_mutation();
+                            (self.mutate_body(&entry.body, mutation), vec![entry.id],
+                             format!("{} of {}#{}", mutation_name(mutation), name, entry.id))
+                        }
+                    }
                 } else {
                     let mutation = self.pick_mutation();
                     let body = self.mutate_body(&entry.body, mutation);
@@ -393,6 +407,40 @@ impl Evolver {
             child = a.to_vec();
         }
         child
+    }
+
+    /// Ask the LLM for a variant of this function. Returns the parsed
+    /// body if the model produced parseable Veldt with the same arity.
+    fn llm_mutate(&self, name: &str, entry: &FunctionEntry) -> Option<Vec<Stmt>> {
+        let body_src = crate::fmt::format_program(&entry.body);
+        let params_src = entry.params.iter()
+            .map(|p| format!("{}: {}", p.name, type_str(&p.typ)))
+            .collect::<Vec<_>>().join(", ");
+        let src = format!("fn {}({}) {{\n{}\n}}", name, params_src, body_src);
+        let system = "You mutate functions written in Veldt. Veldt syntax: let x = 5, \
+            if/else/while/for-in, return, list literals [1,2,3], .push()/.contains()/\
+            .sort() methods, str+int coercion, and/or/not booleans, % modulo, \
+            dict()/put/get/has, no semicolons, # comments. Types: int float str bool list<int>.";
+        let user = format!(
+            "Rewrite this Veldt function with a meaningfully different approach — keep the exact signature, change the body. Return ONLY the fn definition, no fences, no explanation.\n\n{}", src);
+        let text = crate::llm::complete(system, &user)?;
+        // strip markdown fences if the model added them
+        let code = text.trim()
+            .trim_start_matches("```").trim_end_matches("```")
+            .trim_start_matches("veldt").trim().to_string();
+        let mut lx = crate::lexer::Lexer::new(&code);
+        let tokens = lx.tokenize().ok()?;
+        let lines = lx.token_lines.clone();
+        let mut p = crate::parser::Parser::new_with_lines(tokens, lines);
+        let stmts = p.parse_program().ok()?;
+        for s in &stmts {
+            if let Stmt::FnDef(_, params, body) = s {
+                if params.len() == entry.params.len() && !body.is_empty() {
+                    return Some(body.clone());
+                }
+            }
+        }
+        None
     }
 
     fn pick_mutation(&mut self) -> Mutation {
@@ -733,6 +781,19 @@ enum Mutation {
     StatementSwap,
     DeadCodeRemoval,
     Simplify,
+}
+
+fn type_str(t: &Type) -> String {
+    match t {
+        Type::Int => "int".into(),
+        Type::Float => "float".into(),
+        Type::Str => "str".into(),
+        Type::Bool => "bool".into(),
+        Type::List(inner) => format!("list<{}>", type_str(inner)),
+        Type::Fn => "fn".into(),
+        Type::Struct(n) => n.clone(),
+        Type::Any => "any".into(),
+    }
 }
 
 fn mutation_name(m: Mutation) -> &'static str {

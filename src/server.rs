@@ -142,6 +142,8 @@ async fn agent_task(
 #[derive(Deserialize)]
 struct EvolveRequest {
     cycles: usize,
+    #[serde(default)]
+    llm: bool,
 }
 
 #[derive(Serialize)]
@@ -160,6 +162,7 @@ async fn evolve(
     };
 
     let mut evolver = Evolver::new();
+    evolver.llm = req.llm;
     let events = evolver.evolve(&mut veldt, req.cycles);
     let event_strings: Vec<String> = events.iter().map(|e| e.format()).collect();
 
