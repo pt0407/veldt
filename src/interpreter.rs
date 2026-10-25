@@ -505,7 +505,17 @@ impl Interpreter {
                 }
                 let l = self.eval_expr(left)?;
                 let r = self.eval_expr(right)?;
-                self.eval_binop(&l, op, &r)
+                let v = self.eval_binop(&l, op, &r)?;
+                // Phase 3: alloc-weighed step accounting — big results cost
+                // extra steps, making the step limit crude-but-fair about
+                // memory churn, not just op count.
+                match &v {
+                    Value::Str(s) => self.step_count += (s.len() / 16) as u64,
+                    Value::List(xs) => self.step_count += (xs.len() / 4) as u64,
+                    Value::Dict(d) => self.step_count += d.len() as u64 / 4,
+                    _ => {}
+                }
+                Ok(v)
             }
             Expr::SafeGet(obj, name, args) => {
                 let o = self.eval_expr(obj)?;
