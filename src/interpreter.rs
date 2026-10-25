@@ -13,7 +13,7 @@ pub enum Value {
     Float(f64),
     Str(String),
     Bool(bool),
-    List(Vec<Value>),
+    List(im::Vector<Value>), // persistent — O(1) clone (Phase 3)
     Dict(HashMap<String, Value>),
     Set(Vec<Value>),
     Struct(String, HashMap<String, Value>),
@@ -490,7 +490,7 @@ impl Interpreter {
                 for item in items {
                     vals.push(self.eval_expr(item)?);
                 }
-                Ok(Value::List(vals))
+                Ok(Value::List(vals.into_iter().collect()))
             }
             Expr::Var(name) => {
                 self.vars.borrow().get(name).cloned()
@@ -616,7 +616,7 @@ impl Interpreter {
                     }
                 }
                 self.vars = old_vars;
-                Ok(Value::List(result))
+                Ok(Value::List(result.into_iter().collect()))
             }
             Expr::Slice(obj, lo, hi) => {
                 let obj_val = self.eval_expr(obj)?;
@@ -635,8 +635,8 @@ impl Interpreter {
                         let n = items.len() as i64;
                         let a = bound(&lo_v, n, 0)?.clamp(0, n) as usize;
                         let b = bound(&hi_v, n, n)?.clamp(0, n) as usize;
-                        if a > b { Ok(Value::List(vec![])) }
-                        else { Ok(Value::List(items[a..b].to_vec())) }
+                        if a > b { Ok(Value::List(im::vector![])) }
+                        else { Ok(Value::List(items.iter().skip(a).take(b - a).cloned().collect())) }
                     }
                     Value::Str(s) => {
                         let chars: Vec<char> = s.chars().collect();
@@ -1116,7 +1116,7 @@ impl Interpreter {
                 match &args[0] {
                     Value::Int(n) => {
                         let items: Vec<Value> = (0..*n).map(Value::Int).collect();
-                        Ok(Some(Value::List(items)))
+                        Ok(Some(Value::List(items.into_iter().collect())))
                     }
                     _ => Err("range() expects an integer".into()),
                 }
@@ -1373,7 +1373,7 @@ impl Interpreter {
                 let fargs = match args.get(1) {
                     Some(Value::List(l)) => l.clone(),
                     Some(_) => return Err("spawn() args must be a list".into()),
-                    None => Vec::new(),
+                    None => im::Vector::new(),
                 };
                 let json_args: Result<Vec<String>, _> = fargs.iter()
                     .map(|a| serde_json::to_string(a)).collect();
@@ -1424,7 +1424,7 @@ impl Interpreter {
                         Err(_) => return Err("pmap worker panicked".into()),
                     }
                 }
-                Ok(Some(Value::List(results)))
+                Ok(Some(Value::List(results.into_iter().collect())))
             }
             "call_best" => {
                 // call_best("name", arg1, arg2, ...) — dispatch to the
@@ -1536,7 +1536,7 @@ impl Interpreter {
                                 for e in rd.flatten() {
                                     names.push(Value::Str(e.file_name().to_string_lossy().to_string()));
                                 }
-                                Ok(Some(Value::List(names)))
+                                Ok(Some(Value::List(names.into_iter().collect())))
                             }
                             Err(e) => Err(format!("ls failed: {}", e)),
                         }
@@ -1702,7 +1702,7 @@ impl Interpreter {
                     }
                     "re_split" => {
                         let parts: Vec<Value> = re.split(&s).map(|p| Value::Str(p.to_string())).collect();
-                        Ok(Some(Value::List(parts)))
+                        Ok(Some(Value::List(parts.into_iter().collect())))
                     }
                     "re_captures" => {
                         // re_captures(s, pat) -> list of capture-group strings (or null)
@@ -1828,7 +1828,7 @@ impl Interpreter {
                                                     }
                                                     results.push(Value::Dict(record));
                                                 }
-                                                Ok(Some(Value::List(results)))
+                                                Ok(Some(Value::List(results.into_iter().collect())))
                                             }
                                             Err(e) => Err(format!("db_query failed: {}", e)),
                                         }
@@ -1976,7 +1976,7 @@ impl Interpreter {
     fn flatten_args(args: &[Value]) -> Result<Vec<Value>, String> {
         if args.len() == 1 {
             if let Value::List(items) = &args[0] {
-                return Ok(items.clone());
+                return Ok(items.iter().cloned().collect());
             }
         }
         Ok(args.to_vec())
@@ -2063,7 +2063,7 @@ impl Interpreter {
                 match &args[0] {
                     Value::Str(sep) => {
                         let parts: Vec<Value> = s.split(sep).map(|p| Value::Str(p.to_string())).collect();
-                        Ok(Value::List(parts))
+                        Ok(Value::List(parts.into_iter().collect()))
                     }
                     _ => Err("split() expects a string separator".into()),
                 }
@@ -2084,7 +2084,7 @@ impl Interpreter {
             }
             (Value::Str(s), "chars") => {
                 let chars: Vec<Value> = s.chars().map(|c| Value::Str(c.to_string())).collect();
-                Ok(Value::List(chars))
+                Ok(Value::List(chars.into_iter().collect()))
             }
             (Value::Str(s), "starts_with") => {
                 if args.len() != 1 { return Err("starts_with() expects 1 argument".into()); }
@@ -2168,7 +2168,7 @@ impl Interpreter {
             (Value::Str(s), "split_at") => match args.get(0) {
                 Some(Value::Int(i)) => {
                     let i = (*i).clamp(0, s.len() as i64) as usize;
-                    Ok(Value::List(vec![
+                    Ok(Value::List(im::vector![
                         Value::Str(s[..i].to_string()), Value::Str(s[i..].to_string())]))
                 }
                 _ => Err("split_at(i) expects int".into()),
@@ -2187,12 +2187,12 @@ impl Interpreter {
             },
             (Value::List(items), "enumerate") => Ok(Value::List(
                 items.iter().enumerate()
-                    .map(|(i, v)| Value::List(vec![Value::Int(i as i64), v.clone()]))
+                    .map(|(i, v)| Value::List(im::vector![Value::Int(i as i64), v.clone()]))
                     .collect())),
             (Value::List(items), "zip") => match args.get(0) {
                 Some(Value::List(other)) => Ok(Value::List(
                     items.iter().zip(other.iter())
-                        .map(|(a, b)| Value::List(vec![a.clone(), b.clone()]))
+                        .map(|(a, b)| Value::List(im::vector![a.clone(), b.clone()]))
                         .collect())),
                 _ => Err("zip(other) expects a list".into()),
             },
@@ -2204,7 +2204,7 @@ impl Interpreter {
                         _ => out.push(v.clone()),
                     }
                 }
-                Ok(Value::List(out))
+                Ok(Value::List(out.into_iter().collect()))
             }
             (Value::List(items), "take") => match args.get(0) {
                 Some(Value::Int(n)) =>
@@ -2233,8 +2233,8 @@ impl Interpreter {
                     for v in items {
                         let k = format!("{}", self.call_closure_value(f, vec![v.clone()])?);
                         match groups.get_mut(&k) {
-                            Some(Value::List(l)) => l.push(v.clone()),
-                            _ => { groups.insert(k, Value::List(vec![v.clone()])); }
+                            Some(Value::List(l)) => l.push_back(v.clone()),
+                            _ => { groups.insert(k, Value::List(im::vector![v.clone()])); }
                         }
                     }
                     Ok(Value::Dict(groups))
@@ -2246,7 +2246,7 @@ impl Interpreter {
                     if items.is_empty() { return Ok(Value::Null); }
                     let mut best = items[0].clone();
                     let mut best_key = self.call_closure_value(f, vec![best.clone()])?;
-                    for v in &items[1..] {
+                    for v in items.iter().skip(1) {
                         let k = self.call_closure_value(f, vec![v.clone()])?;
                         let ord = self.cmp_values(&k, &best_key);
                         if (m == "min_by" && ord == std::cmp::Ordering::Less)
@@ -2264,7 +2264,7 @@ impl Interpreter {
                 Ok(Value::List(d.values().cloned().collect())),
             (Value::Dict(d), "items") =>
                 Ok(Value::List(d.iter()
-                    .map(|(k, v)| Value::List(vec![Value::Str(k.clone()), v.clone()]))
+                    .map(|(k, v)| Value::List(im::vector![Value::Str(k.clone()), v.clone()]))
                     .collect())),
             (Value::Dict(d), "keys") =>
                 Ok(Value::List(d.keys().map(|k| Value::Str(k.clone())).collect())),
@@ -2295,7 +2295,7 @@ impl Interpreter {
             (Value::Str(s), "to_upper") => Ok(Value::Str(s.to_uppercase())),
             (Value::Str(s), "split_lines") => {
                 let parts: Vec<Value> = s.lines().map(|l| Value::Str(l.to_string())).collect();
-                Ok(Value::List(parts))
+                Ok(Value::List(parts.into_iter().collect()))
             }
             (Value::Str(s), "count") => {
                 if args.len() != 1 { return Err("count() expects 1 argument".into()); }
@@ -2309,7 +2309,7 @@ impl Interpreter {
             (Value::List(items), "push") => {
                 let mut new_items = items.clone();
                 if args.len() != 1 { return Err("push() expects 1 argument".into()); }
-                new_items.push(args[0].clone());
+                new_items.push_back(args[0].clone());
                 Ok(Value::List(new_items))
             }
             (Value::List(items), "len") => Ok(Value::Int(items.len() as i64)),
@@ -2319,7 +2319,7 @@ impl Interpreter {
             }
             (Value::List(items), "reverse") => {
                 let mut new_items = items.clone();
-                new_items.reverse();
+                new_items = new_items.iter().rev().cloned().collect();
                 Ok(Value::List(new_items))
             }
             (Value::List(items), "join") => {
@@ -2360,7 +2360,7 @@ impl Interpreter {
                     (Value::Str(a), Value::Str(b)) => a.cmp(b),
                     _ => std::cmp::Ordering::Equal,
                 });
-                Ok(Value::List(sorted))
+                Ok(Value::List(sorted.into_iter().collect()))
             }
             (Value::List(items), "map") => {
                 if args.len() != 1 { return Err("map() expects 1 closure argument".into()); }
@@ -2370,7 +2370,7 @@ impl Interpreter {
                     let r = self.call_closure_value(&closure, vec![item.clone()])?;
                     result.push(r);
                 }
-                Ok(Value::List(result))
+                Ok(Value::List(result.into_iter().collect()))
             }
             (Value::List(items), "filter") => {
                 if args.len() != 1 { return Err("filter() expects 1 closure argument".into()); }
@@ -2382,7 +2382,7 @@ impl Interpreter {
                         result.push(item.clone());
                     }
                 }
-                Ok(Value::List(result))
+                Ok(Value::List(result.into_iter().collect()))
             }
             (Value::List(items), "reduce") => {
                 if args.len() != 2 { return Err("reduce() expects (initial, closure) arguments".into()); }
@@ -2411,9 +2411,9 @@ impl Interpreter {
                         let s = (*start as usize).min(items.len());
                         let e = (*end as usize).min(items.len());
                         if s <= e {
-                            Ok(Value::List(items[s..e].to_vec()))
+                            Ok(Value::List(items.iter().skip(s).take(e - s).cloned().collect()))
                         } else {
-                            Ok(Value::List(vec![]))
+                            Ok(Value::List(im::vector![]))
                         }
                     }
                     _ => Err("slice() expects two integers".into()),
@@ -2449,7 +2449,7 @@ impl Interpreter {
             }
             (Value::Dict(entries), "keys") => {
                 let keys: Vec<Value> = entries.keys().map(|k| Value::Str(k.clone())).collect();
-                Ok(Value::List(keys))
+                Ok(Value::List(keys.into_iter().collect()))
             }
             (Value::Dict(entries), "len") => Ok(Value::Int(entries.len() as i64)),
             (Value::Dict(entries), "remove") => {
@@ -2481,7 +2481,7 @@ impl Interpreter {
                 if args.len() != 1 { return Err("has() expects 1 argument".into()); }
                 Ok(Value::Bool(items.iter().any(|x| self.values_eq(x, &args[0]))))
             }
-            (Value::Set(items), "to_list") => Ok(Value::List(items.clone())),
+            (Value::Set(items), "to_list") => Ok(Value::List(items.clone().into_iter().collect())),
             (Value::Set(items), "len") => Ok(Value::Int(items.len() as i64)),
             (Value::Set(items), "union") => {
                 if args.len() != 1 { return Err("union() expects 1 argument".into()); }
