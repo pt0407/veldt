@@ -545,8 +545,12 @@ impl Evolver {
                         // first let whose rhs reads no loop-mutated var
                         body.iter().position(|st| {
                             if let Stmt::Let(name, e) = st {
-                                !assigned.contains(name)
-                                    && !Self::expr_uses_any(e, &assigned)
+                                // RHS must read no loop-mutated var, and
+                                // the name must not be re-assigned inside
+                                // (else hoisting changes reset semantics)
+                                !Self::expr_uses_any(e, &assigned)
+                                    && !body.iter().any(|s2| matches!(s2,
+                                        Stmt::Assign(n2, _) if n2 == name))
                             } else { false }
                         }).map(|pos| pos)
                     } else { None };
@@ -1173,5 +1177,89 @@ mod tests {
         let mut evolver = Evolver::new();
         let events = evolver.evolve(&mut veldt, 1);
         assert!(events.iter().any(|e| matches!(e, EvolutionEvent::NoCandidates)));
+    }
+}
+
+#[cfg(test)]
+mod phase7_tests {
+    use super::*;
+    use crate::ast::*;
+
+    fn ev() -> Evolver { Evolver::new() }
+
+    #[test]
+    fn const_eval_folds_binop() {
+        let e = Expr::BinOp(
+            Box::new(Expr::Int(2)), BinOp::Mul, Box::new(Expr::Int(3)));
+        assert!(matches!(Evolver::const_eval(&e), Some(Expr::Int(6))));
+    }
+
+    #[test]
+    fn const_eval_rejects_nonconst() {
+        let e = Expr::BinOp(
+            Box::new(Expr::Var("x".into())), BinOp::Mul, Box::new(Expr::Int(3)));
+        assert!(Evolver::const_eval(&e).is_none());
+    }
+
+    #[test]
+    fn dead_branch_splices_taken_arm() {
+        let body = vec![
+            Stmt::If(Expr::Bool(false),
+                vec![Stmt::Let("a".into(), Expr::Int(1))],
+                Some(vec![Stmt::Let("b".into(), Expr::Int(2))])),
+        ];
+        let mut e = ev();
+        let out = e.mutate_body(&body, Mutation::DeadBranch);
+        assert_eq!(out.len(), 1);
+        assert!(matches!(&out[0], Stmt::Let(n, _) if n == "b"));
+    }
+
+    #[test]
+    fn dead_branch_removes_false_while() {
+        let body = vec![
+            Stmt::While(Expr::Bool(false), vec![Stmt::Let("a".into(), Expr::Int(1))]),
+        ];
+        let mut e = ev();
+        let out = e.mutate_body(&body, Mutation::DeadBranch);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn hoist_invariant_lifts_let() {
+        let body = vec![
+            Stmt::While(Expr::BinOp(
+                    Box::new(Expr::Var("i".into())), BinOp::Lt, Box::new(Expr::Var("n".into()))),
+                vec![
+                    Stmt::Let("scale".into(), Expr::BinOp(
+                        Box::new(Expr::Int(2)), BinOp::Mul, Box::new(Expr::Int(50)))),
+                    Stmt::Assign("total".into(), Expr::Var("scale".into())),
+                    Stmt::Assign("i".into(), Expr::Int(1)),
+                ]),
+        ];
+        let mut e = ev();
+        let out = e.mutate_body(&body, Mutation::HoistInvariant);
+        // first stmt should now be the hoisted let
+        assert!(matches!(&out[0], Stmt::Let(n, _) if n == "scale"));
+        // while body no longer contains it
+        if let Stmt::While(_, b) = &out[1] {
+            assert!(!b.iter().any(|s| matches!(s, Stmt::Let(n, _) if n == "scale")));
+        } else { panic!("expected while second"); }
+    }
+
+    #[test]
+    fn hoist_skips_loop_dependent_lets() {
+        // `let k = i + 1` reads a loop-mutated var — must NOT hoist
+        let body = vec![
+            Stmt::While(Expr::BinOp(
+                    Box::new(Expr::Var("i".into())), BinOp::Lt, Box::new(Expr::Var("n".into()))),
+                vec![
+                    Stmt::Let("k".into(), Expr::BinOp(
+                        Box::new(Expr::Var("i".into())), BinOp::Add, Box::new(Expr::Int(1)))),
+                    Stmt::Assign("i".into(), Expr::Int(1)),
+                ]),
+        ];
+        let mut e = ev();
+        let out = e.mutate_body(&body, Mutation::HoistInvariant);
+        assert!(matches!(&out[0], Stmt::While(_, _)));
     }
 }
