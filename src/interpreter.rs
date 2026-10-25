@@ -311,6 +311,19 @@ impl Interpreter {
                 let program = parser.parse_program()?;
                 self.exec_block(&program)
             }
+            Stmt::Match(scrutinee, arms, else_arm) => {
+                let val = self.eval_expr(scrutinee)?;
+                for (pat, body) in arms {
+                    let pat_val = self.eval_expr(pat)?;
+                    if self.values_eq(&val, &pat_val) {
+                        return self.exec_block(body);
+                    }
+                }
+                if let Some(body) = else_arm {
+                    return self.exec_block(body);
+                }
+                Ok(FlowControl::Normal)
+            }
         }
     }
 
@@ -432,6 +445,31 @@ impl Interpreter {
             Expr::Lambda(params, body) => {
                 // Capture current variables as closure environment
                 Ok(Value::Closure(params.clone(), body.clone(), self.vars.clone()))
+            }
+            Expr::ListComp(expr, var, iter, cond) => {
+                let iter_val = self.eval_expr(iter)?;
+                let items = match iter_val {
+                    Value::List(items) => items,
+                    Value::Str(s) => s.chars().map(|c| Value::Str(c.to_string())).collect(),
+                    _ => return Err("Comprehension requires a list or string to iterate".into()),
+                };
+                let mut result = Vec::new();
+                let old_vars = self.vars.clone();
+                for item in items {
+                    self.vars.insert(var.clone(), item);
+                    let include = match cond {
+                        Some(c) => {
+                            let cv = self.eval_expr(c)?;
+                            self.is_truthy(&cv)
+                        }
+                        None => true,
+                    };
+                    if include {
+                        result.push(self.eval_expr(expr)?);
+                    }
+                }
+                self.vars = old_vars;
+                Ok(Value::List(result))
             }
             Expr::Index(obj, index) => {
                 let obj_val = self.eval_expr(obj)?;
@@ -679,17 +717,33 @@ impl Interpreter {
                 }
             }
             "max" => {
-                if args.len() != 2 { return Err("max() expects 2 arguments".into()); }
-                match (&args[0], &args[1]) {
-                    (Value::Int(a), Value::Int(b)) => Ok(Some(Value::Int(*a.max(b)))),
-                    _ => Err("max() expects integers".into()),
+                let nums = Self::flatten_args(args)?;
+                let mut best: Option<f64> = None;
+                let mut all_int = true;
+                for v in &nums {
+                    let f = self.to_f64(v)?;
+                    if !matches!(v, Value::Int(_)) { all_int = false; }
+                    best = Some(match best { Some(b) => b.max(f), None => f });
+                }
+                match best {
+                    None => Err("max() of empty list".into()),
+                    Some(f) if all_int => Ok(Some(Value::Int(f as i64))),
+                    Some(f) => Ok(Some(Value::Float(f))),
                 }
             }
             "min" => {
-                if args.len() != 2 { return Err("min() expects 2 arguments".into()); }
-                match (&args[0], &args[1]) {
-                    (Value::Int(a), Value::Int(b)) => Ok(Some(Value::Int(*a.min(b)))),
-                    _ => Err("min() expects integers".into()),
+                let nums = Self::flatten_args(args)?;
+                let mut best: Option<f64> = None;
+                let mut all_int = true;
+                for v in &nums {
+                    let f = self.to_f64(v)?;
+                    if !matches!(v, Value::Int(_)) { all_int = false; }
+                    best = Some(match best { Some(b) => b.min(f), None => f });
+                }
+                match best {
+                    None => Err("min() of empty list".into()),
+                    Some(f) if all_int => Ok(Some(Value::Int(f as i64))),
+                    Some(f) => Ok(Some(Value::Float(f))),
                 }
             }
             "abs" => {
@@ -880,6 +934,15 @@ impl Interpreter {
         }
     }
 
+    fn flatten_args(args: &[Value]) -> Result<Vec<Value>, String> {
+        if args.len() == 1 {
+            if let Value::List(items) = &args[0] {
+                return Ok(items.clone());
+            }
+        }
+        Ok(args.to_vec())
+    }
+
     fn json_to_value(json: serde_json::Value) -> Value {
         match json {
             serde_json::Value::Null => Value::Null,
@@ -971,6 +1034,60 @@ impl Interpreter {
             (Value::Str(s), "chars") => {
                 let chars: Vec<Value> = s.chars().map(|c| Value::Str(c.to_string())).collect();
                 Ok(Value::List(chars))
+            }
+            (Value::Str(s), "starts_with") => {
+                if args.len() != 1 { return Err("starts_with() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::Str(prefix) => Ok(Value::Bool(s.starts_with(prefix))),
+                    _ => Err("starts_with() expects a string".into()),
+                }
+            }
+            (Value::Str(s), "ends_with") => {
+                if args.len() != 1 { return Err("ends_with() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::Str(suffix) => Ok(Value::Bool(s.ends_with(suffix))),
+                    _ => Err("ends_with() expects a string".into()),
+                }
+            }
+            (Value::Str(s), "find") => {
+                if args.len() != 1 { return Err("find() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::Str(sub) => Ok(Value::Int(s.find(sub).map(|i| i as i64).unwrap_or(-1))),
+                    _ => Err("find() expects a string".into()),
+                }
+            }
+            (Value::Str(s), "substr") => {
+                if args.len() != 2 { return Err("substr() expects 2 arguments (start, end)".into()); }
+                match (&args[0], &args[1]) {
+                    (Value::Int(start), Value::Int(end)) => {
+                        let st = (*start).max(0) as usize;
+                        let en = (*end).max(0) as usize;
+                        let en = en.min(s.len());
+                        if st >= en { return Ok(Value::Str("".into())); }
+                        Ok(Value::Str(s[st..en].to_string()))
+                    }
+                    _ => Err("substr() expects two integers".into()),
+                }
+            }
+            (Value::Str(s), "repeat") => {
+                if args.len() != 1 { return Err("repeat() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::Int(n) => Ok(Value::Str(s.repeat((*n).max(0) as usize))),
+                    _ => Err("repeat() expects an integer".into()),
+                }
+            }
+            (Value::Str(s), "index_of") => {
+                if args.len() != 1 { return Err("index_of() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::Str(ch) => {
+                        if let Some(c) = ch.chars().next() {
+                            Ok(Value::Int(s.find(c).map(|i| i as i64).unwrap_or(-1)))
+                        } else {
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    _ => Err("index_of() expects a string".into()),
+                }
             }
             // List methods
             (Value::List(items), "push") => {

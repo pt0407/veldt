@@ -54,6 +54,8 @@ pub enum Expr {
     Index(Box<Expr>, Box<Expr>),
     // anonymous function / lambda
     Lambda(Vec<Param>, Vec<Stmt>),
+    // list comprehension: [expr for var in iter (if cond)?]
+    ListComp(Box<Expr>, String, Box<Expr>, Option<Box<Expr>>),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -81,6 +83,7 @@ pub enum Stmt {
     Grow(GrowItem),
     Try(Vec<Stmt>, String, Vec<Stmt>), // try { body } catch var { handler }
     Import(String), // import "path"
+    Match(Expr, Vec<(Expr, Vec<Stmt>)>, Option<Vec<Stmt>>), // match expr { pat => body, ... else => body }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

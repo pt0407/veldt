@@ -9,7 +9,7 @@ pub enum Token {
     InterpStr(Vec<String>), // alternating literal, expr-source, literal, ...
     Ident(String),
     // Keywords
-    Let, Fn, If, Else, While, For, Return, Print, Grow, Struct, Test, Try, Catch, Import,
+    Let, Fn, If, Else, While, For, Return, Print, Grow, Struct, Test, Try, Catch, Import, In, Match, Arrow,
     True, False, And, Or, Not,
     // Type names
     TypeInt, TypeStr, TypeBool, TypeList, TypeFloat, TypeFn,
@@ -216,6 +216,8 @@ impl Lexer {
             "try" => Token::Try,
             "catch" => Token::Catch,
             "import" => Token::Import,
+            "in" => Token::In,
+            "match" => Token::Match,
             "true" => Token::True,
             "false" => Token::False,
             "and" => Token::And,
@@ -297,6 +299,9 @@ impl Lexer {
                     if self.peek() == Some('=') {
                         self.advance();
                         self.token_lines.push(tok_line); tokens.push(Token::EqEq);
+                    } else if self.peek() == Some('>') {
+                        self.advance();
+                        self.token_lines.push(tok_line); tokens.push(Token::Arrow);
                     } else {
                         self.token_lines.push(tok_line); tokens.push(Token::Eq);
                     }

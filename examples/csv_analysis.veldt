@@ -1,0 +1,172 @@
+# csv_analysis.veldt — real-world data processing with Veldt
+# Reads a CSV file, parses it, computes statistics, writes results as JSON
+
+# === CSV PARSER ===
+grow fn parse_csv(content: str) {
+    let lines = content.split("\n")
+    let rows = []
+    for line in lines {
+        if line != "" {
+            let fields = line.split(",")
+            rows = rows.push(fields)
+        }
+    }
+    return rows
+}
+
+# === STATISTICS ===
+grow fn mean(nums: list<int>) {
+    let total = 0
+    for n in nums {
+        total = total + n
+    }
+    return float(total) / float(len(nums))
+}
+
+grow fn sum(nums: list<int>) {
+    let total = 0
+    for n in nums {
+        total = total + n
+    }
+    return total
+}
+
+grow fn std_dev(nums: list<int>, avg: float) {
+    let sq_diffs = [(float(x) - avg) * (float(x) - avg) for x in nums]
+    let total = 0.0
+    for d in sq_diffs {
+        total = total + d
+    }
+    return sqrt(total / float(len(nums)))
+}
+
+# === MAIN ===
+print("=== CSV Data Processor ===")
+print("")
+
+# Create sample CSV data
+let csv_data = "name,age,score,department\nAlice,30,95,Engineering\nBob,25,82,Marketing\nCharlie,35,78,Engineering\nDiana,28,91,Sales\nEve,32,88,Engineering\nFrank,45,76,Marketing\nGrace,29,93,Sales"
+
+# Write CSV to file
+let write_ok = write_file("/tmp/employees.csv", csv_data)
+print("Wrote CSV file: {write_ok}")
+
+# Read it back
+let file_content = read_file("/tmp/employees.csv")
+print("Read {len(file_content)} bytes")
+print("")
+
+# Parse CSV
+let rows = parse_csv(file_content)
+let headers = rows[0]
+let data_rows = rows.slice(1, len(rows))
+print("Headers: {headers}")
+print("Data rows: {len(data_rows)}")
+print("")
+
+# Extract columns using list comprehensions
+let ages = [int(row[1]) for row in data_rows]
+let scores = [int(row[2]) for row in data_rows]
+let depts = [row[3] for row in data_rows]
+
+print("Ages: {ages}")
+print("Scores: {scores}")
+print("Departments: {depts}")
+print("")
+
+# Compute statistics
+let avg_age = mean(ages)
+let avg_score = mean(scores)
+let age_std = std_dev(ages, avg_age)
+let score_std = std_dev(scores, avg_score)
+let max_score = max(scores)
+let min_score = min(scores)
+
+print("=== Statistics ===")
+print("Average age: {avg_age} (std dev: {age_std})")
+print("Average score: {avg_score} (std dev: {score_std})")
+print("Score range: {min_score} - {max_score}")
+print("")
+
+# Group by department using dict
+print("=== By Department ===")
+let dept_scores = dict()
+for row in data_rows {
+    let dept = row[3]
+    let score = int(row[2])
+    if dept_scores.has(dept) {
+        let existing = dept_scores.get(dept)
+        dept_scores = dept_scores.put(dept, existing.push(score))
+    } else {
+        dept_scores = dept_scores.put(dept, [score])
+    }
+}
+
+let dept_keys = dept_scores.keys()
+for dept in dept_keys {
+    let scores = dept_scores.get(dept)
+    let avg = mean(scores)
+    let count = len(scores)
+    print("  {dept}: {count} employees, avg score {avg}")
+}
+print("")
+
+# Find top performer using closures
+let top_score = max(scores)
+let top_performers = [row for row in data_rows if int(row[2]) == top_score]
+print("Top performer(s): {top_performers}")
+print("")
+
+# Match on department size
+let total_employees = len(data_rows)
+match total_employees {
+    0 => print("No employees")
+    1 => print("Single employee")
+    else => print("Total: {total_employees} employees")
+}
+print("")
+
+# Build JSON output
+let results = dict()
+results = results.put("total_employees", total_employees)
+results = results.put("avg_age", avg_age)
+results = results.put("avg_score", avg_score)
+results = results.put("age_std_dev", age_std)
+results = results.put("score_std_dev", score_std)
+results = results.put("max_score", max_score)
+results = results.put("min_score", min_score)
+
+let json_output = json_stringify(results)
+let write_json = write_file("/tmp/results.json", json_output)
+print("Wrote JSON results: {write_json}")
+print("")
+print("JSON output:")
+print(json_output)
+print("")
+
+# Error handling demo
+print("=== Error Handling ===")
+try {
+    let bad = read_file("/nonexistent/data.csv")
+} catch e {
+    print("Handled missing file: {e}")
+}
+
+try {
+    let bad_parse = json_parse("not valid json \{\{\{")
+} catch e {
+    print("Handled bad JSON: {e}")
+}
+print("")
+
+print("=== All features used successfully ===")
+print("1. File I/O (read/write CSV and JSON)")
+print("2. Dicts (department grouping, results)")
+print("3. Floats (statistics, std dev)")
+print("4. List comprehensions (column extraction)")
+print("5. Closures (mean, std_dev)")
+print("6. Match (employee count)")
+print("7. Error handling (missing files, bad JSON)")
+print("8. String methods (split, etc)")
+print("9. JSON (output)")
+print("10. String interpolation (output formatting)")

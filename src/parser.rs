@@ -366,17 +366,35 @@ impl Parser {
             }
             Token::LBracket => {
                 self.advance();
-                let mut items = Vec::new();
-                if !self.check(&Token::RBracket) {
-                    loop {
-                        items.push(self.parse_expr()?);
-                        if !self.match_tok(&Token::Comma) {
-                            break;
-                        }
-                    }
+                if self.check(&Token::RBracket) {
+                    self.advance();
+                    return Ok(Expr::List(Vec::new()));
                 }
-                self.expect(&Token::RBracket, "]")?;
-                Ok(Expr::List(items))
+                let first = self.parse_expr()?;
+                // Check for comprehension: [expr for var in iter (if cond)?]
+                if self.check(&Token::For) {
+                    self.advance(); // for
+                    let var = match self.advance() {
+                        Token::Ident(n) => n,
+                        t => return Err(format!("Expected variable name in comprehension but got {:?}", t)),
+                    };
+                    self.expect(&Token::In, "in")?;
+                    let iter = self.parse_expr()?;
+                    let cond = if self.check(&Token::If) {
+                        self.advance();
+                        Some(Box::new(self.parse_expr()?))
+                    } else { None };
+                    self.expect(&Token::RBracket, "]")?;
+                    Ok(Expr::ListComp(Box::new(first), var, Box::new(iter), cond))
+                } else {
+                    let mut items = vec![first];
+                    while self.match_tok(&Token::Comma) {
+                        if self.check(&Token::RBracket) { break; }
+                        items.push(self.parse_expr()?);
+                    }
+                    self.expect(&Token::RBracket, "]")?;
+                    Ok(Expr::List(items))
+                }
             }
             Token::Ident(name) => {
                 self.advance();
@@ -397,6 +415,10 @@ impl Parser {
             Token::TypeList => {
                 self.advance();
                 self.parse_ident_postfix("list".into())
+            }
+            Token::TypeFloat => {
+                self.advance();
+                self.parse_ident_postfix("float".into())
             }
             Token::Fn => {
                 // Lambda: fn(params) { body }
@@ -448,6 +470,7 @@ impl Parser {
             Token::Struct => self.parse_struct(),
             Token::Try => self.parse_try(),
             Token::Import => self.parse_import(),
+            Token::Match => self.parse_match(),
             Token::Ident(_) => {
                 // Parse as expression, then check for assignment
                 let target = self.parse_expr()?;
@@ -535,7 +558,7 @@ impl Parser {
         };
         // expect "in"
         match self.advance() {
-            Token::Ident(n) if n == "in" => {}
+            Token::In => {}
             t => return Err(format!("Expected 'in' but got {:?}", t)),
         }
         let iter = self.parse_expr()?;
@@ -581,6 +604,40 @@ impl Parser {
             t => return Err(format!("Expected string path after import but got {:?}", t)),
         };
         Ok(Stmt::Import(path))
+    }
+
+    fn parse_match(&mut self) -> Result<Stmt, String> {
+        self.advance(); // match
+        let scrutinee = self.parse_expr()?;
+        self.expect(&Token::LBrace, "{")?;
+        let mut arms = Vec::new();
+        let mut else_arm = None;
+        while !self.check(&Token::RBrace) {
+            if self.check(&Token::Else) {
+                self.advance();
+                self.expect(&Token::Arrow, "=>")?;
+                let body = if self.check(&Token::LBrace) {
+                    self.parse_block()?
+                } else {
+                    vec![self.parse_stmt()?]
+                };
+                else_arm = Some(body);
+                self.match_tok(&Token::Comma);
+                break;
+            }
+            let pat = self.parse_expr()?;
+            self.expect(&Token::Arrow, "=>")?;
+            // Body is either a block or a single statement
+            let body = if self.check(&Token::LBrace) {
+                self.parse_block()?
+            } else {
+                vec![self.parse_stmt()?]
+            };
+            arms.push((pat, body));
+            self.match_tok(&Token::Comma);
+        }
+        self.expect(&Token::RBrace, "}")?;
+        Ok(Stmt::Match(scrutinee, arms, else_arm))
     }
 
     fn parse_struct(&mut self) -> Result<Stmt, String> {
