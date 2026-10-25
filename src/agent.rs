@@ -13,7 +13,7 @@ use crate::parser::Parser;
 use crate::veldt::{Health, Veldt};
 use serde::Serialize;
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct AgentStep {
     pub kind: &'static str, // "plan" | "act" | "obs" | "ok" | "err"
     pub text: String,
@@ -189,6 +189,9 @@ pub fn respond(task: &str, editor_source: &str, veldt: &mut Veldt) -> AgentRespo
     }
     if hasw(&["evolve", "mutate", "generation"]) {
         return evolve_intent(&words, veldt);
+    }
+    if hasw(&["fix", "repair"]) && !has(&["garden"]) {
+        return fix_intent(&words, veldt);
     }
     if hasw(&["heal", "tend", "mend"]) || has(&["sick", "fix the garden"]) {
         return tend_intent(veldt);
@@ -558,7 +561,91 @@ fn adopt_intent(words: &[&str], veldt: &mut Veldt) -> AgentResponse {
     }
 }
 
+// Heal sick variants of one specific lineage (or variant) — the
+// targeted version of "tend".
+fn fix_intent(words: &[&str], veldt: &mut Veldt) -> AgentResponse {
+    let (name, want_id) = match parse_variant_ref(words) {
+        Some((n, i)) => (n, i),
+        None => match find_lineage(words, veldt) {
+            Some(n) => (n, None),
+            None => return plain("Fix what? Name a lineage or variant — e.g. \"fix fib\" or \"fix fib#2\"."),
+        },
+    };
+    let sick: Vec<u32> = veldt.functions.get(&name)
+        .map(|vs| vs.iter()
+            .filter(|e| matches!(e.health, Health::Sick(_)) && want_id.map(|i| i == e.id).unwrap_or(true))
+            .map(|e| e.id).collect())
+        .unwrap_or_default();
+    if sick.is_empty() {
+        return match want_id {
+            Some(id) => plain(&format!("{}#{} isn't sick (or doesn't exist).", name, id)),
+            None => plain(&format!("No sick variants in the {} lineage — it's healthy.", name)),
+        };
+    }
+    let mut steps = vec![step("plan", format!("Attempting hybrid-merge heal on {} sick variant{} of {}.", sick.len(), if sick.len() == 1 { "" } else { "s" }, name))];
+    let mut events = Vec::new();
+    let mut healed = 0;
+    for id in sick {
+        let mut entry = veldt.functions[&name].iter().find(|e| e.id == id).cloned().unwrap();
+        if HealthChecker::heal(&mut entry, veldt) {
+            healed += 1;
+            let msg = format!("[HEALED] {}#{}", name, id);
+            steps.push(step("ok", msg.clone()));
+            events.push(msg);
+            if let Some(vs) = veldt.functions.get_mut(&name) {
+                for e in vs.iter_mut() {
+                    if e.id == id { *e = entry.clone(); break; }
+                }
+            }
+        } else {
+            let msg = format!("{}#{} resisted healing.", name, id);
+            steps.push(step("obs", msg.clone()));
+            events.push(msg);
+        }
+    }
+    AgentResponse {
+        steps,
+        reply: format!("Fixed {}/{} sick variant{} of {}.", healed, events.len(), if events.len() == 1 { "" } else { "s" }, name),
+        code: None, ran: false, output: None, success: None, events,
+    }
+}
+
 fn test_intent(words: &[&str], veldt: &mut Veldt) -> AgentResponse {
+    // "test all" — every lineage
+    if words.contains(&"all") || words.contains(&"everything") {
+        let mut names: Vec<String> = veldt.functions.keys().cloned().collect();
+        names.sort();
+        if names.is_empty() {
+            return plain("Nothing to test — the garden is empty.");
+        }
+        let mut steps = vec![step("plan", format!("Re-trialing all {} lineages.", names.len()))];
+        let mut events = Vec::new();
+        let mut totals = (0, 0);
+        for name in &names {
+            for e in veldt.functions[name].clone().iter() {
+                let mut entry = e.clone();
+                HealthChecker::check_at_birth(&mut entry, veldt);
+                let ok = matches!(entry.health, Health::Healthy);
+                if ok { totals.0 += 1; }
+                totals.1 += 1;
+                let msg = format!("{}#{} — {} (trial: {:.2})", name, e.id,
+                    match &entry.health { Health::Healthy => "healthy".into(), Health::Sick(m) => format!("sick: {}", m), Health::Dying => "dying".into() },
+                    entry.trial_score);
+                steps.push(step(if ok { "ok" } else { "err" }, msg.clone()));
+                events.push(format!("[TRIAL] {}", msg));
+                if let Some(vs) = veldt.functions.get_mut(name) {
+                    for v in vs.iter_mut() {
+                        if v.id == e.id { *v = entry.clone(); break; }
+                    }
+                }
+            }
+        }
+        return AgentResponse {
+            steps,
+            reply: format!("Trials done: {}/{} variants healthy across {} lineages.", totals.0, totals.1, names.len()),
+            code: None, ran: false, output: None, success: None, events,
+        };
+    }
     let name = match find_lineage(words, veldt) {
         Some(n) => n,
         None => {
@@ -682,11 +769,45 @@ print("@N@(30) = " + @N@(30))
             veldt,
         );
     }
+    if t.contains("prime") {
+        let name = "is_prime";
+        let code = r#"grow fn @N@(n: int) test @N@(2) == true, @N@(7) == true, @N@(4) == false, @N@(97) == true {
+    if n < 2 {
+        return false
+    }
+    if n == 2 {
+        return true
+    }
+    if n % 2 == 0 {
+        return false
+    }
+    let i = 3
+    while i * i <= n {
+        if n % i == 0 {
+            return false
+        }
+        i = i + 2
+    }
+    return true
+}
+
+print("@N@(97) = " + @N@(97))
+"#.replace("@N@", name);
+        let note = if veldt.functions.contains_key(name) {
+            "This strain skips even candidates — half the trial work. Should out-compete the naive one."
+        } else {
+            "No is_prime lineage yet — this plants as the founding variant."
+        };
+        return grow_and_report_stages(
+            vec![StageSpec { label: "odd-only is_prime".into(), code }],
+            Some(note.to_string()), veldt,
+        );
+    }
     let target = find_lineage(words, veldt);
     match target {
         Some(n) => plain(&format!(
-            "I don't know a faster strain for {} — my improvements are limited to fib (fast-doubling). Try \"evolve\" and let mutation try instead.", n)),
-        None => plain("Improve what? I know a fast-doubling strain for fib — say \"improve fib\". For others, \"evolve\" is the path."),
+            "I don't know a faster strain for {} — my improvements cover fib (fast-doubling) and is_prime (odd-only). Try \"evolve\" and let mutation try instead.", n)),
+        None => plain("Improve what? I know fast strains for fib and is_prime — say \"improve fib\" or \"improve prime\". For others, \"evolve\" is the path."),
     }
 }
 
@@ -1145,6 +1266,62 @@ print(@N@([4, 4, 1, 4, 2, 1]))
 }
 
 print(@N@("veldt", "ldtev"))
+"#,
+        },
+        Template {
+            keywords: &["repeat", "times str", "string times"],
+            canonical: "repeat_str",
+            desc: "repeat a string n times",
+            needs: &[],
+            make: r#"grow fn @N@(s: str, n: int) test @N@("ab", 3) == "ababab", @N@("x", 0) == "" {
+    let result = ""
+    let i = 0
+    while i < n {
+        result = result + s
+        i = i + 1
+    }
+    return result
+}
+
+print(@N@("veldt ", 3))
+"#,
+        },
+        Template {
+            keywords: &["sum squares", "squares", "sum_sq"],
+            canonical: "sum_sq",
+            desc: "sum of squares",
+            needs: &[],
+            make: r#"grow fn @N@(nums: list<int>) test @N@([1, 2, 3]) == 14, @N@([]) == 0 {
+    let total = 0
+    for n in nums {
+        total = total + n * n
+    }
+    return total
+}
+
+print(@N@([3, 4]))
+"#,
+        },
+        Template {
+            keywords: &["collatz seq", "hailstone seq", "collatz sequence"],
+            canonical: "collatz_seq",
+            desc: "collatz sequence",
+            needs: &[],
+            make: r#"grow fn @N@(n: int) test @N@(6) == [6, 3, 10, 5, 16, 8, 4, 2, 1] {
+    let seq = [n]
+    let x = n
+    while x != 1 {
+        if x % 2 == 0 {
+            x = x / 2
+        } else {
+            x = 3 * x + 1
+        }
+        seq = seq.push(x)
+    }
+    return seq
+}
+
+print(@N@(27))
 "#,
         },
         Template {
@@ -1689,5 +1866,24 @@ mod tests {
 
         let resp = respond("what's alive?", "", &mut veldt);
         assert!(resp.reply.contains("Garden census"));
+    }
+
+    #[test]
+    fn fix_and_test_all() {
+        let (mut veldt, _guard) = fresh_veldt();
+        respond("write a fibonacci function", "", &mut veldt);
+        // fix on a healthy lineage
+        let resp = respond("fix fib", "", &mut veldt);
+        assert!(resp.reply.contains("isn't sick") || resp.reply.contains("healthy"), "{}", resp.reply);
+        // fix on a missing lineage
+        let resp = respond("fix nonexistent_thing", "", &mut veldt);
+        assert!(resp.reply.contains("Fix what"), "{}", resp.reply);
+        // sick the variant, then fix heals or reports resistance
+        veldt.functions.get_mut("fib").unwrap()[0].health = Health::Sick("broke".into());
+        let resp = respond("fix fib", "", &mut veldt);
+        assert!(resp.steps.iter().any(|s| s.text.contains("heal")), "no heal attempt: {:?}", resp.steps);
+        // test all — every lineage
+        let resp = respond("test all", "", &mut veldt);
+        assert!(resp.events.iter().any(|e| e.contains("[TRIAL]")));
     }
 }

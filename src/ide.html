@@ -546,6 +546,7 @@
 <script>
 const API = '';
 let gardenData = null;
+let lastAgentCode = null;
 let selectedVariant = null;
 let editor = null;
 let currentFilename = '';
@@ -1041,6 +1042,7 @@ function renderAgentResponse(data) {
   div.appendChild(bubble);
 
   if (data.code) {
+    lastAgentCode = data.code;
     const block = document.createElement('div');
     block.className = 'agent-block';
     const pre = document.createElement('pre');
@@ -1085,6 +1087,18 @@ async function sendAgentTask() {
   if (!task) return;
   input.value = '';
   appendUserMsg(task);
+
+  // Client-side: "insert it" / "add it to the editor" — no server round-trip
+  if (/insert|add (it|that|the code) to (the )?editor|put (it|that) in/i.test(task)) {
+    if (lastAgentCode) {
+      const cur = editor.getValue();
+      editor.setValue(cur ? cur.replace(/\s+$/, '') + '\n\n' + lastAgentCode : lastAgentCode);
+      renderAgentResponse({ reply: 'Inserted the last generated code into your editor.' });
+    } else {
+      renderAgentResponse({ reply: 'Nothing to insert — ask me to write something first.' });
+    }
+    return;
+  }
 
   const msgs = document.getElementById('agentMessages');
   const thinking = document.createElement('div');

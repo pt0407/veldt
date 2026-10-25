@@ -152,6 +152,19 @@ fn main() {
                 process::exit(1);
             }
             let resp = agent::respond(&task, &source, &mut veldt);
+            if args.iter().any(|a| a == "--json") {
+                println!("{}", serde_json::to_string(&serde_json::json!({
+                    "steps": resp.steps.iter().map(|s| serde_json::json!({"kind": s.kind, "text": s.text})).collect::<Vec<_>>(),
+                    "reply": resp.reply,
+                    "code": resp.code,
+                    "ran": resp.ran,
+                    "output": resp.output,
+                    "success": resp.success,
+                    "events": resp.events,
+                })).unwrap_or_else(|_| "{}".into()));
+                veldt.save().unwrap_or_else(|e| eprintln!("Save error: {}", e));
+                return;
+            }
             for s in &resp.steps {
                 let marker = match s.kind {
                     "plan" => ">", "act" => "*", "obs" => "-", "ok" => "+", "err" => "x",
