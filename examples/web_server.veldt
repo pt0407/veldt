@@ -1,0 +1,54 @@
+# web_server.veldt — a real web API written in Veldt!
+#
+#   serve(8080, handler)
+#
+# handler is a closure: it receives a request dict
+#   { method: str, path: str, body: str, headers: dict }
+# and returns a response dict
+#   { status: int, body: str }
+#
+# Run:  veldt run examples/web_server.veldt
+# Then: curl http://127.0.0.1:8080/hello
+
+let handler = fn(req) {
+    let method = req.get("method")
+    let path = req.get("path")
+    print("Request: {method} {path}")
+    match path {
+        "/" => {
+            let resp = dict()
+            resp = resp.put("status", 200)
+            resp = resp.put("body", "Welcome to the Veldt web server!")
+            return resp
+        }
+        "/hello" => {
+            let resp = dict()
+            resp = resp.put("status", 200)
+            let data = dict()
+            data = data.put("message", "Hello from Veldt!")
+            data = data.put("language", "Veldt")
+            resp = resp.put("body", json_stringify(data))
+            return resp
+        }
+        "/squares" => {
+            let resp = dict()
+            resp = resp.put("status", 200)
+            let nums = [1, 2, 3, 4, 5]
+            let squares = nums.map(fn(x) { return x * x })
+            let data = dict()
+            data = data.put("input", nums)
+            data = data.put("squares", squares)
+            resp = resp.put("body", json_stringify(data))
+            return resp
+        }
+        else => {
+            let resp = dict()
+            resp = resp.put("status", 404)
+            resp = resp.put("body", "Not found: {path}")
+            return resp
+        }
+    }
+}
+
+print("Starting Veldt web server on port 8080...")
+serve(8080, handler)

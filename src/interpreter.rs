@@ -13,6 +13,7 @@ pub enum Value {
     Bool(bool),
     List(Vec<Value>),
     Dict(HashMap<String, Value>),
+    Set(Vec<Value>),
     Struct(String, HashMap<String, Value>),
     Closure(Vec<Param>, Vec<Stmt>, HashMap<String, Value>),
     Null,
@@ -28,6 +29,10 @@ impl std::fmt::Display for Value {
             Value::Str(s) => write!(f, "{}", s),
             Value::Bool(b) => write!(f, "{}", b),
             Value::Null => write!(f, "null"),
+            Value::Set(items) => {
+                let strs: Vec<String> = items.iter().map(|v| format!("{}", v)).collect();
+                write!(f, "set[{}]", strs.join(", "))
+            }
             Value::List(items) => {
                 let strs: Vec<String> = items.iter().map(|v| format!("{}", v)).collect();
                 write!(f, "[{}]", strs.join(", "))
@@ -69,6 +74,9 @@ pub struct Interpreter {
     rng_state: u64,
     // Current source line for error reporting
     pub current_line: usize,
+    // SQLite connections (id -> connection)
+    db_connections: HashMap<i64, rusqlite::Connection>,
+    next_db_id: i64,
 }
 
 pub struct FunctionVariant {
@@ -96,6 +104,8 @@ impl Interpreter {
                 .map(|d| d.as_nanos() as u64)
                 .unwrap_or(0x1234567890ABCDEF),
             current_line: 0,
+            db_connections: HashMap::new(),
+            next_db_id: 1,
         }
     }
 
@@ -346,6 +356,7 @@ impl Interpreter {
             Value::Null => false,
             Value::List(items) => !items.is_empty(),
             Value::Dict(entries) => !entries.is_empty(),
+            Value::Set(items) => !items.is_empty(),
             Value::Closure(_, _, _) => true,
             Value::Struct(_, fields) => !fields.is_empty(),
         }
@@ -524,6 +535,10 @@ impl Interpreter {
                     let strs: Vec<String> = b.iter().map(|(k, v)| format!("{}: {}", k, v)).collect();
                     Ok(Value::Str(format!("{}{{{}}}", a, strs.join(", "))))
                 }
+                (Value::Str(a), Value::Set(b)) => {
+                    let strs: Vec<String> = b.iter().map(|v| format!("{}", v)).collect();
+                    Ok(Value::Str(format!("{}set[{}]", a, strs.join(", "))))
+                }
                 (Value::Str(a), Value::Null) => Ok(Value::Str(format!("{}null", a))),
                 _ => Err("Cannot add these types".into()),
             },
@@ -613,6 +628,7 @@ impl Interpreter {
                 a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| self.values_eq(x, y))
             }
             (Value::Dict(a), Value::Dict(b)) => a == b,
+            (Value::Set(a), Value::Set(b)) => a == b,
             (Value::Struct(n1, f1), Value::Struct(n2, f2)) => {
                 n1 == n2 && f1 == f2
             }
@@ -700,6 +716,97 @@ impl Interpreter {
             }
             _ => Err("Expected a closure".into()),
         }
+    }
+
+    fn serve_requests(&mut self, port: i64, params: Vec<Param>, body: Vec<Stmt>, captured: HashMap<String, Value>) -> Result<(), String> {
+        use std::net::TcpListener;
+        use std::io::{BufRead, BufReader, Read, Write};
+
+        let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
+            .map_err(|e| format!("Cannot bind port {}: {}", port, e))?;
+
+        println!("Veldt server listening on http://127.0.0.1:{}", port);
+
+        for stream in listener.incoming() {
+            let stream = stream.map_err(|e| format!("Accept error: {}", e))?;
+            let mut reader = BufReader::new(stream.try_clone().map_err(|e| e.to_string())?);
+            let mut request_line = String::new();
+            if reader.read_line(&mut request_line).is_err() { continue; }
+
+            // Parse request line: METHOD PATH HTTP/1.1
+            let parts: Vec<&str> = request_line.trim().split_whitespace().collect();
+            if parts.len() < 3 { continue; }
+            let method = parts[0].to_string();
+            let path = parts[1].to_string();
+
+            // Read headers
+            let mut headers_map = std::collections::HashMap::new();
+            let mut content_length = 0usize;
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).is_err() { break; }
+                let line = line.trim_end().to_string();
+                if line.is_empty() { break; }
+                if let Some((k, v)) = line.split_once(": ") {
+                    headers_map.insert(k.to_lowercase(), v.to_string());
+                    if k.to_lowercase() == "content-length" {
+                        content_length = v.parse().unwrap_or(0);
+                    }
+                }
+            }
+
+            // Read body
+            let mut body_str = String::new();
+            if content_length > 0 {
+                let mut buf = vec![0u8; content_length];
+                if reader.read_exact(&mut buf).is_ok() {
+                    body_str = String::from_utf8_lossy(&buf).to_string();
+                }
+            }
+
+            // Build request dict
+            let mut req_map = std::collections::HashMap::new();
+            req_map.insert("method".to_string(), Value::Str(method));
+            req_map.insert("path".to_string(), Value::Str(path));
+            req_map.insert("body".to_string(), Value::Str(body_str));
+            let mut headers_val = std::collections::HashMap::new();
+            for (k, v) in headers_map {
+                headers_val.insert(k, Value::Str(v));
+            }
+            req_map.insert("headers".to_string(), Value::Dict(headers_val));
+            let req_val = Value::Dict(req_map);
+
+            // Call Veldt handler
+            let result = match self.call_closure(params.clone(), body.clone(), captured.clone(), vec![req_val]) {
+                Ok(v) => v,
+                Err(e) => {
+                    let mut resp = std::collections::HashMap::new();
+                    resp.insert("status".to_string(), Value::Int(500));
+                    resp.insert("body".to_string(), Value::Str(format!("Handler error: {}", e)));
+                    Value::Dict(resp)
+                }
+            };
+
+            // Extract response
+            let (status, resp_body) = match &result {
+                Value::Dict(d) => {
+                    let status = match d.get("status") { Some(Value::Int(n)) => *n, _ => 200 };
+                    let body = match d.get("body") { Some(Value::Str(s)) => s.clone(), Some(v) => format!("{}", v), None => "".into() };
+                    (status, body)
+                }
+                Value::Str(s) => (200, s.clone()),
+                _ => (200, format!("{}", result)),
+            };
+
+            let response = format!(
+                "HTTP/1.1 {} OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: *\r\n\r\n{}",
+                status, resp_body.len(), resp_body
+            );
+            let mut stream = stream;
+            if stream.write_all(response.as_bytes()).is_err() { continue; }
+            if stream.flush().is_err() { continue; }
+        }
+        Ok(())
     }
 
     fn try_builtin(&mut self, name: &str, args: &[Value]) -> Result<Option<Value>, String> {
@@ -892,6 +999,183 @@ impl Interpreter {
                     _ => Err("post() expects (url, body) strings".into()),
                 }
             }
+            "sleep" => {
+                if args.len() != 1 { return Err("sleep() expects 1 argument (ms)".into()); }
+                match &args[0] {
+                    Value::Int(ms) => {
+                        std::thread::sleep(std::time::Duration::from_millis(*ms as u64));
+                        Ok(Some(Value::Null))
+                    }
+                    _ => Err("sleep() expects an integer (milliseconds)".into()),
+                }
+            }
+            "time_ms" => {
+                let ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as i64;
+                Ok(Some(Value::Int(ms)))
+            }
+            "env" => {
+                if args.len() != 1 { return Err("env() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::Str(name) => {
+                        match std::env::var(name) {
+                            Ok(v) => Ok(Some(Value::Str(v))),
+                            Err(_) => Ok(Some(Value::Null)),
+                        }
+                    }
+                    _ => Err("env() expects a string name".into()),
+                }
+            }
+            "exec" => {
+                if args.len() != 1 { return Err("exec() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::Str(cmd) => {
+                        let output = std::process::Command::new("sh")
+                            .arg("-c")
+                            .arg(cmd)
+                            .output();
+                        match output {
+                            Ok(o) => {
+                                let mut result = std::collections::HashMap::new();
+                                result.insert("stdout".to_string(), Value::Str(String::from_utf8_lossy(&o.stdout).to_string()));
+                                result.insert("stderr".to_string(), Value::Str(String::from_utf8_lossy(&o.stderr).to_string()));
+                                result.insert("exit_code".to_string(), Value::Int(o.status.code().unwrap_or(-1) as i64));
+                                Ok(Some(Value::Dict(result)))
+                            }
+                            Err(e) => Err(format!("exec() failed: {}", e)),
+                        }
+                    }
+                    _ => Err("exec() expects a string command".into()),
+                }
+            }
+            "set" => {
+                let mut items: Vec<Value> = Vec::new();
+                for arg in args {
+                    if let Value::List(l) = arg {
+                        for v in l {
+                            if !items.iter().any(|x| self.values_eq(x, v)) { items.push(v.clone()); }
+                        }
+                    } else {
+                        if !items.iter().any(|x| self.values_eq(x, arg)) { items.push(arg.clone()); }
+                    }
+                }
+                Ok(Some(Value::Set(items)))
+            }
+            "serve" => {
+                if args.len() != 2 { return Err("serve() expects (port, handler_fn)".into()); }
+                match (&args[0], &args[1]) {
+                    (Value::Int(port), Value::Closure(params, body, captured)) => {
+                        self.serve_requests(*port, params.clone(), body.clone(), captured.clone())
+                            .map_err(|e| format!("Server error: {}", e))?;
+                        Ok(Some(Value::Null))
+                    }
+                    _ => Err("serve() expects (port_int, closure)".into()),
+                }
+            }
+            "render" => {
+                if args.len() != 2 { return Err("render() expects (template, data)".into()); }
+                match (&args[0], &args[1]) {
+                    (Value::Str(tpl), Value::Dict(data)) => {
+                        let mut result = tpl.clone();
+                        for (k, v) in data {
+                            let key = format!("{{{}}}", k);
+                            result = result.replace(&key, &format!("{}", v));
+                        }
+                        Ok(Some(Value::Str(result)))
+                    }
+                    _ => Err("render() expects (template_str, dict)".into()),
+                }
+            }
+            "db_open" => {
+                if args.len() != 1 { return Err("db_open() expects a path".into()); }
+                match &args[0] {
+                    Value::Str(path) => {
+                        match rusqlite::Connection::open(path) {
+                            Ok(conn) => {
+                                // Store connection in a global — use a simple ID-based registry
+                                let id = self.next_db_id;
+                                self.db_connections.insert(id, conn);
+                                self.next_db_id += 1;
+                                Ok(Some(Value::Int(id)))
+                            }
+                            Err(e) => Err(format!("db_open failed: {}", e)),
+                        }
+                    }
+                    _ => Err("db_open() expects a path string".into()),
+                }
+            }
+            "db_exec" => {
+                if args.len() != 2 { return Err("db_exec() expects (db_id, sql)".into()); }
+                match (&args[0], &args[1]) {
+                    (Value::Int(id), Value::Str(sql)) => {
+                        match self.db_connections.get(id) {
+                            Some(conn) => {
+                                match conn.execute(sql, []) {
+                                    Ok(n) => Ok(Some(Value::Int(n as i64))),
+                                    Err(e) => Err(format!("db_exec failed: {}", e)),
+                                }
+                            }
+                            None => Err(format!("Invalid db id: {}", id)),
+                        }
+                    }
+                    _ => Err("db_exec() expects (db_id, sql_string)".into()),
+                }
+            }
+            "db_query" => {
+                if args.len() != 2 { return Err("db_query() expects (db_id, sql)".into()); }
+                match (&args[0], &args[1]) {
+                    (Value::Int(id), Value::Str(sql)) => {
+                        match self.db_connections.get(id) {
+                            Some(conn) => {
+                                match conn.prepare(sql) {
+                                    Ok(mut stmt) => {
+                                        let cols = stmt.column_names();
+                                        let col_names: Vec<String> = cols.iter().map(|c| c.to_string()).collect();
+                                        match stmt.query([]) {
+                                            Ok(mut rows) => {
+                                                let mut results = Vec::new();
+                                                while let Ok(Some(row)) = rows.next() {
+                                                    let mut record = std::collections::HashMap::new();
+                                                    for (i, col) in col_names.iter().enumerate() {
+                                                        let val: rusqlite::Result<rusqlite::types::Value> = row.get(i);
+                                                        let v = match val {
+                                                            Ok(rusqlite::types::Value::Null) => Value::Null,
+                                                            Ok(rusqlite::types::Value::Integer(n)) => Value::Int(n),
+                                                            Ok(rusqlite::types::Value::Real(f)) => Value::Float(f),
+                                                            Ok(rusqlite::types::Value::Text(s)) => Value::Str(s),
+                                                            Ok(rusqlite::types::Value::Blob(_)) => Value::Null,
+                                                            _ => Value::Null,
+                                                        };
+                                                        record.insert(col.clone(), v);
+                                                    }
+                                                    results.push(Value::Dict(record));
+                                                }
+                                                Ok(Some(Value::List(results)))
+                                            }
+                                            Err(e) => Err(format!("db_query failed: {}", e)),
+                                        }
+                                    }
+                                    Err(e) => Err(format!("db_query prepare failed: {}", e)),
+                                }
+                            }
+                            None => Err(format!("Invalid db id: {}", id)),
+                        }
+                    }
+                    _ => Err("db_query() expects (db_id, sql_string)".into()),
+                }
+            }
+            "db_close" => {
+                if args.len() != 1 { return Err("db_close() expects a db_id".into()); }
+                match &args[0] {
+                    Value::Int(id) => {
+                        self.db_connections.remove(id);
+                        Ok(Some(Value::Bool(true)))
+                    }
+                    _ => Err("db_close() expects a db_id".into()),
+                }
+            }
             "input" => {
                 if !args.is_empty() {
                     if let Value::Str(prompt) = &args[0] {
@@ -1067,6 +1351,9 @@ impl Interpreter {
                     map.insert(k.clone(), Self::value_to_json(val));
                 }
                 serde_json::Value::Object(map)
+            }
+            Value::Set(items) => {
+                serde_json::Value::Array(items.iter().map(Self::value_to_json).collect())
             }
             Value::Struct(name, fields) => {
                 let mut map = serde_json::Map::new();
@@ -1341,6 +1628,61 @@ impl Interpreter {
                         Ok(Value::Dict(new_entries))
                     }
                     _ => Err("remove() expects a string key".into()),
+                }
+            }
+            // Set methods
+            (Value::Set(items), "add") => {
+                if args.len() != 1 { return Err("add() expects 1 argument".into()); }
+                let mut new_items = items.clone();
+                if !new_items.iter().any(|x| self.values_eq(x, &args[0])) {
+                    new_items.push(args[0].clone());
+                }
+                Ok(Value::Set(new_items))
+            }
+            (Value::Set(items), "remove") => {
+                if args.len() != 1 { return Err("remove() expects 1 argument".into()); }
+                let new_items: Vec<Value> = items.iter().filter(|x| !self.values_eq(x, &args[0])).cloned().collect();
+                Ok(Value::Set(new_items))
+            }
+            (Value::Set(items), "has") => {
+                if args.len() != 1 { return Err("has() expects 1 argument".into()); }
+                Ok(Value::Bool(items.iter().any(|x| self.values_eq(x, &args[0]))))
+            }
+            (Value::Set(items), "to_list") => Ok(Value::List(items.clone())),
+            (Value::Set(items), "len") => Ok(Value::Int(items.len() as i64)),
+            (Value::Set(items), "union") => {
+                if args.len() != 1 { return Err("union() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::Set(other) => {
+                        let mut new_items = items.clone();
+                        for v in other {
+                            if !new_items.iter().any(|x| self.values_eq(x, v)) {
+                                new_items.push(v.clone());
+                            }
+                        }
+                        Ok(Value::Set(new_items))
+                    }
+                    _ => Err("union() expects a set".into()),
+                }
+            }
+            (Value::Set(items), "intersection") => {
+                if args.len() != 1 { return Err("intersection() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::Set(other) => {
+                        let new_items: Vec<Value> = items.iter().filter(|x| other.iter().any(|y| self.values_eq(x, y))).cloned().collect();
+                        Ok(Value::Set(new_items))
+                    }
+                    _ => Err("intersection() expects a set".into()),
+                }
+            }
+            (Value::Set(items), "difference") => {
+                if args.len() != 1 { return Err("difference() expects 1 argument".into()); }
+                match &args[0] {
+                    Value::Set(other) => {
+                        let new_items: Vec<Value> = items.iter().filter(|x| !other.iter().any(|y| self.values_eq(x, y))).cloned().collect();
+                        Ok(Value::Set(new_items))
+                    }
+                    _ => Err("difference() expects a set".into()),
                 }
             }
             _ => Err(format!("No method '{}' on this value", method)),
