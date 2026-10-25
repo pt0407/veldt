@@ -199,6 +199,10 @@ pub fn respond(task: &str, editor_source: &str, veldt: &mut Veldt) -> AgentRespo
     if hasw(&["suggest", "surprise"]) {
         return suggest_intent(&words, veldt);
     }
+    if hasw(&["benchmark", "bench", "benchmarks"]) {
+        let (report, _) = bench_report(veldt);
+        return plain(&report);
+    }
     if has(&["garden", "status", "alive", "what's growing", "what is growing", "what have you", "ecosystem"]) {
         return status_intent(veldt);
     }
@@ -1099,6 +1103,36 @@ print(@N@("code is alive"))
 "#,
         },
         Template {
+            keywords: &["dedupe", "unique", "distinct", "duplicates"],
+            canonical: "dedupe",
+            desc: "remove duplicates",
+            needs: &[],
+            make: r#"grow fn @N@(nums: list<int>) test @N@([1, 2, 2, 3]) == [1, 2, 3], @N@([]) == [] {
+    let result = []
+    for n in nums {
+        if not result.contains(n) {
+            result = result.push(n)
+        }
+    }
+    return result
+}
+
+print(@N@([4, 4, 1, 4, 2, 1]))
+"#,
+        },
+        Template {
+            keywords: &["anagram", "scramble"],
+            canonical: "is_anagram",
+            desc: "anagram check",
+            needs: &[],
+            make: r#"grow fn @N@(a: str, b: str) test @N@("listen", "silent") == true, @N@("abc", "abd") == false {
+    return a.chars().sort() == b.chars().sort()
+}
+
+print(@N@("veldt", "ldtev"))
+"#,
+        },
+        Template {
             keywords: &["count prime", "prime count", "primes under", "how many prime"],
             canonical: "count_primes",
             desc: "prime counter — depends on is_prime",
@@ -1366,6 +1400,87 @@ fn extract_name(words: &[&str]) -> Option<String> {
     None
 }
 
+// === Benchmarks ===
+// Runs every catalog species through the real pipeline on a sandboxed
+// garden (temp dir — never touches the user's) and times each stage,
+// then times canned intents. `veldt bench` and "benchmark" both hit this.
+
+pub struct BenchRow {
+    pub name: String,
+    pub ms: u128,
+    pub stages: usize,
+    pub healthy: bool,
+    pub trial: f64,
+}
+
+pub fn bench_report(veldt: &Veldt) -> (String, Vec<BenchRow>) {
+    // serialize: HOME is process-global and pmap reads it
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+    let home = std::env::temp_dir().join(format!("veldt-bench-{}", std::process::id()));
+    let garden = home.join(".veldt").join("garden");
+    let _ = std::fs::remove_dir_all(&garden);
+    let prev_home = std::env::var("HOME").ok();
+    std::env::set_var("HOME", &home);
+    let mut bv = Veldt::with_path(garden);
+
+    let mut rows = Vec::new();
+    let mut lines = vec![format!(
+        "Gardener benchmark — {} species (sandboxed garden)", catalog().len())];
+
+    for tmpl in catalog() {
+        let start = std::time::Instant::now();
+        let mut stages = Vec::new();
+        let mut visiting = Vec::new();
+        let resolved = resolve_stages(&tmpl, tmpl.canonical.to_string(), &bv, &mut stages, &mut visiting).is_ok();
+        let mut ok = resolved;
+        if resolved {
+            for s in &stages {
+                let r = execute_source(&s.code, &mut bv);
+                let _ = bv.save();
+                if !r.success { ok = false; break; }
+            }
+        }
+        let ms = start.elapsed().as_millis();
+        let (healthy, trial) = bv.functions.get(tmpl.canonical)
+            .and_then(|v| v.last())
+            .map(|e| (matches!(e.health, Health::Healthy), e.trial_score))
+            .unwrap_or((false, 0.0));
+        rows.push(BenchRow { name: tmpl.canonical.to_string(), ms, stages: stages.len(), healthy, trial });
+        let tag = if !ok { "FAILED" } else if tmpl.make.contains("grow fn") {
+            if healthy { "healthy" } else { "sick" }
+        } else { "ran" };
+        lines.push(format!("  {:<16} {:>6}ms  {:<7} trial {:.2}  ({} stage{})",
+            tmpl.canonical, ms, tag, trial, stages.len(), if stages.len() == 1 { "" } else { "s" }));
+    }
+
+    // Intent latency — canned tasks against the now-populated sandbox
+    lines.push(String::new());
+    lines.push("Intent latency:".to_string());
+    for task in [
+        "what's alive?", "show fib", "test fib", "adopt fib#1", "obituaries",
+        "suggest", "write a function that counts primes", "improve fib",
+        "surprise me", "help",
+    ] {
+        let start = std::time::Instant::now();
+        let _ = respond(task, "", &mut bv);
+        lines.push(format!("  {:<45} {:>6}ms", format!("\"{}\"", task), start.elapsed().as_millis()));
+    }
+
+    // garden state at bench end + user garden summary
+    let alive: usize = bv.functions.values().map(|v| v.len()).sum();
+    lines.push(String::new());
+    lines.push(format!("sandbox end: {} variants across {} lineages | your garden: {} lineages",
+        alive, bv.functions.len(), veldt.functions.len()));
+
+    match prev_home {
+        Some(h) => std::env::set_var("HOME", h),
+        None => std::env::remove_var("HOME"),
+    }
+    (lines.join("\n"), rows)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1468,6 +1583,18 @@ mod tests {
         respond("write a fibonacci function", "", &mut veldt);
         let resp = respond("test fib", "", &mut veldt);
         assert!(resp.events.iter().any(|e| e.contains("[TRIAL] fib#1 — healthy")));
+    }
+
+    #[test]
+    fn bench_smoke() {
+        let (mut veldt, _guard) = fresh_veldt();
+        let (report, rows) = bench_report(&veldt);
+        assert!(report.contains("Gardener benchmark"));
+        assert!(report.contains("fib"));
+        assert_eq!(rows.len(), catalog().len());
+        assert!(rows.iter().all(|r| r.ms < 60_000));
+        let resp = respond("run benchmarks", "", &mut veldt);
+        assert!(resp.reply.contains("Gardener benchmark"));
     }
 
     #[test]

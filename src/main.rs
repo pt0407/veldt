@@ -157,6 +157,15 @@ fn main() {
             }
             veldt.save().unwrap_or_else(|e| eprintln!("Save error: {}", e));
         }
+        "bench" => {
+            let mut veldt = veldt::Veldt::new();
+            if let Err(e) = veldt.load() {
+                eprintln!("Error loading veldt: {}", e);
+                process::exit(1);
+            }
+            let (report, _) = agent::bench_report(&veldt);
+            println!("{}", report);
+        }
         "clear" => {
             let mut veldt = veldt::Veldt::new();
             veldt.clear();
@@ -218,6 +227,7 @@ fn print_usage() {
     println!("  veldt clear                  Clear the entire veldt");
     println!("  veldt evolve [N]             Run N evolution cycles (garden self-grows)");
     println!("  veldt agent \"task\"          Ask the Gardener (rule-based coding agent)");
+    println!("  veldt bench                  Benchmark the Gardener's species + intents");
     println!("  veldt studio [port]          Start Veldt Studio IDE (default port 7777)
   veldt fmt <file>             Print canonical formatted source (--write to overwrite)
   veldt test <name>            Re-trial all variants of a function family
