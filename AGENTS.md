@@ -28,7 +28,21 @@ to it when you change shared surface area.
   loudly anyway.
 - New species go in `catalog()`; new agent verbs go in `respond()`.
 
+## Phase split — parallel work (v1.0 roadmap)
+
+| Agent | Branch | Owns |
+|---|---|---|
+| Devin | `gardener` | Gardener agent + IDE panel (`agent.rs`, `ide.html`), benchmarks, BYOK LLM (`llm.rs`), Phase 0 leftovers |
+| Other AI | `main` | Language core (lexer/parser/interpreter), evolve/health internals, Phase 1+ stdlib |
+
+Rules: (1) claim a roadmap bullet in the spec before starting it;
+(2) touching the other's owned file → surgical only + note below;
+(3) merge `origin/main` before pushing.
+
 ## Handoff log (append, newest first)
+- [Devin] Phase 0 leftovers: `veldt repl` (:help :garden :load :agent),
+  `args()`/`exit()`/`eprint`/`input` builtins, `x[a:b]` slicing +
+  negative index, catch_unwind on both run paths, `veldt run -- args`.
 - [Devin/main-side] Garden engine + language batch (all on main, merged
   into gardener): traced call I/O evidence (veldt.traces + Phase 3 in
   run_trial), asymptotic efficiency via scaled probes
