@@ -728,6 +728,18 @@ impl Interpreter {
         }
     }
 
+    fn cmp_values(&self, a: &Value, b: &Value) -> std::cmp::Ordering {
+        use std::cmp::Ordering;
+        match (a, b) {
+            (Value::Int(x), Value::Int(y)) => x.cmp(y),
+            (Value::Int(x), Value::Float(y)) => (*x as f64).partial_cmp(y).unwrap_or(Ordering::Equal),
+            (Value::Float(x), Value::Int(y)) => x.partial_cmp(&(*y as f64)).unwrap_or(Ordering::Equal),
+            (Value::Float(x), Value::Float(y)) => x.partial_cmp(y).unwrap_or(Ordering::Equal),
+            (Value::Str(x), Value::Str(y)) => x.cmp(y),
+            _ => Ordering::Equal,
+        }
+    }
+
     fn values_eq(&self, l: &Value, r: &Value) -> bool {
         match (l, r) {
             (Value::Int(a), Value::Int(b)) => a == b,
@@ -1789,6 +1801,154 @@ impl Interpreter {
                 }
             }
             (Value::Str(s), "trim") => Ok(Value::Str(s.trim().to_string())),
+            // === Phase 1 stdlib: strings ===
+            (Value::Str(s), "replace") => match (args.get(0), args.get(1)) {
+                (Some(Value::Str(f)), Some(Value::Str(t))) =>
+                    Ok(Value::Str(s.replace(f.as_str(), t))),
+                _ => Err("replace(old, new) — both strings".into()),
+            },
+            (Value::Str(s), "pad") => match args.get(0) {
+                Some(Value::Int(n)) => {
+                    let n = *n as usize;
+                    let ch = match args.get(1) {
+                        Some(Value::Str(c)) => c.chars().next().unwrap_or(' '),
+                        _ => ' ',
+                    };
+                    Ok(Value::Str(if s.len() >= n { s.clone() }
+                        else { format!("{}{}", s, ch.to_string().repeat(n - s.len())) }))
+                }
+                _ => Err("pad(len[, char]) expects int".into()),
+            },
+            (Value::Str(s), "chars") => Ok(Value::List(
+                s.chars().map(|c| Value::Str(c.to_string())).collect())),
+            (Value::Str(s), "repeat") => match args.get(0) {
+                Some(Value::Int(n)) => Ok(Value::Str(s.repeat((*n).max(0) as usize))),
+                _ => Err("repeat(n) expects int".into()),
+            },
+            (Value::Str(s), "split_at") => match args.get(0) {
+                Some(Value::Int(i)) => {
+                    let i = (*i).clamp(0, s.len() as i64) as usize;
+                    Ok(Value::List(vec![
+                        Value::Str(s[..i].to_string()), Value::Str(s[i..].to_string())]))
+                }
+                _ => Err("split_at(i) expects int".into()),
+            },
+            // === Phase 1 stdlib: lists ===
+            (Value::List(items), "join") => {
+                let sep = match args.get(0) {
+                    Some(Value::Str(s)) => s.clone(),
+                    _ => ", ".into(),
+                };
+                Ok(Value::Str(items.iter().map(|v| format!("{}", v)).collect::<Vec<_>>().join(&sep)))
+            }
+            (Value::List(items), "contains") => match args.get(0) {
+                Some(v) => Ok(Value::Bool(items.iter().any(|i| self.values_eq(i, v)))),
+                None => Err("contains(x) needs an argument".into()),
+            },
+            (Value::List(items), "enumerate") => Ok(Value::List(
+                items.iter().enumerate()
+                    .map(|(i, v)| Value::List(vec![Value::Int(i as i64), v.clone()]))
+                    .collect())),
+            (Value::List(items), "zip") => match args.get(0) {
+                Some(Value::List(other)) => Ok(Value::List(
+                    items.iter().zip(other.iter())
+                        .map(|(a, b)| Value::List(vec![a.clone(), b.clone()]))
+                        .collect())),
+                _ => Err("zip(other) expects a list".into()),
+            },
+            (Value::List(items), "flatten") => {
+                let mut out = Vec::new();
+                for v in items {
+                    match v {
+                        Value::List(inner) => out.extend(inner.iter().cloned()),
+                        _ => out.push(v.clone()),
+                    }
+                }
+                Ok(Value::List(out))
+            }
+            (Value::List(items), "take") => match args.get(0) {
+                Some(Value::Int(n)) =>
+                    Ok(Value::List(items.iter().take((*n).max(0) as usize).cloned().collect())),
+                _ => Err("take(n) expects int".into()),
+            },
+            (Value::List(items), "skip") => match args.get(0) {
+                Some(Value::Int(n)) =>
+                    Ok(Value::List(items.iter().skip((*n).max(0) as usize).cloned().collect())),
+                _ => Err("skip(n) expects int".into()),
+            },
+            (Value::List(items), "sort_by") => match args.get(0) {
+                Some(f @ Value::Closure(_, _, _)) => {
+                    let mut keyed: Vec<(Value, Value)> = Vec::new();
+                    for v in items {
+                        keyed.push((self.call_closure_value(f, vec![v.clone()])?, v.clone()));
+                    }
+                    keyed.sort_by(|a, b| self.cmp_values(&a.0, &b.0));
+                    Ok(Value::List(keyed.into_iter().map(|(_, v)| v).collect()))
+                }
+                _ => Err("sort_by(fn) expects a closure".into()),
+            },
+            (Value::List(items), "group_by") => match args.get(0) {
+                Some(f @ Value::Closure(_, _, _)) => {
+                    let mut groups: HashMap<String, Value> = HashMap::new();
+                    for v in items {
+                        let k = format!("{}", self.call_closure_value(f, vec![v.clone()])?);
+                        match groups.get_mut(&k) {
+                            Some(Value::List(l)) => l.push(v.clone()),
+                            _ => { groups.insert(k, Value::List(vec![v.clone()])); }
+                        }
+                    }
+                    Ok(Value::Dict(groups))
+                }
+                _ => Err("group_by(fn) expects a closure".into()),
+            },
+            (Value::List(items), m @ ("min_by" | "max_by")) => match args.get(0) {
+                Some(f @ Value::Closure(_, _, _)) => {
+                    if items.is_empty() { return Ok(Value::Null); }
+                    let mut best = items[0].clone();
+                    let mut best_key = self.call_closure_value(f, vec![best.clone()])?;
+                    for v in &items[1..] {
+                        let k = self.call_closure_value(f, vec![v.clone()])?;
+                        let ord = self.cmp_values(&k, &best_key);
+                        if (m == "min_by" && ord == std::cmp::Ordering::Less)
+                            || (m == "max_by" && ord == std::cmp::Ordering::Greater) {
+                            best = v.clone();
+                            best_key = k;
+                        }
+                    }
+                    Ok(best)
+                }
+                _ => Err("min_by/max_by(fn) expects a closure".into()),
+            },
+            // === Phase 1 stdlib: dicts ===
+            (Value::Dict(d), "values") =>
+                Ok(Value::List(d.values().cloned().collect())),
+            (Value::Dict(d), "items") =>
+                Ok(Value::List(d.iter()
+                    .map(|(k, v)| Value::List(vec![Value::Str(k.clone()), v.clone()]))
+                    .collect())),
+            (Value::Dict(d), "keys") =>
+                Ok(Value::List(d.keys().map(|k| Value::Str(k.clone())).collect())),
+            (Value::Dict(d), "merge") => match args.get(0) {
+                Some(Value::Dict(other)) => {
+                    let mut m = d.clone();
+                    m.extend(other.iter().map(|(k, v)| (k.clone(), v.clone())));
+                    Ok(Value::Dict(m))
+                }
+                _ => Err("merge(dict) expects a dict".into()),
+            },
+            (Value::Dict(d), "delete") => match args.get(0) {
+                Some(Value::Str(k)) => {
+                    let mut m = d.clone();
+                    m.remove(k.as_str());
+                    Ok(Value::Dict(m))
+                }
+                _ => Err("delete(key) expects a string".into()),
+            },
+            (Value::Dict(d), "get_or") => match (args.get(0), args.get(1)) {
+                (Some(Value::Str(k)), Some(def)) =>
+                    Ok(d.get(k.as_str()).cloned().unwrap_or_else(|| def.clone())),
+                _ => Err("get_or(key, default) — key must be a string".into()),
+            },
             (Value::Str(s), "ltrim") => Ok(Value::Str(s.trim_start().to_string())),
             (Value::Str(s), "rtrim") => Ok(Value::Str(s.trim_end().to_string())),
             (Value::Str(s), "to_lower") => Ok(Value::Str(s.to_lowercase())),

@@ -45,6 +45,12 @@ Rules: (1) claim a roadmap bullet in the spec before starting it;
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin] Phase 1 (my lane — str/list/dict methods): replace, pad,
+  chars, repeat, split_at, join, contains, enumerate, zip, flatten,
+  take, skip, sort_by(fn), group_by(fn), min_by/max_by(fn) — dicts:
+  values, items, keys, merge, delete, get_or. NOTE: dicts are
+  immutable-style (`d.put(k,v)` returns new dict; `d["k"]=v` doesn't
+  work) — I kept my methods consistent with that.
 - [Devin] PHASE 0 DONE (all 12 boxes ticked in roadmap): stack traces
   landed last — call_function/call_closure push (name,line) frames,
   error path dumps "called from line N in f" (CLI + agent + REPL).
