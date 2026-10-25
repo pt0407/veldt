@@ -1,0 +1,65 @@
+{
+  "name": "Veldt",
+  "scopeName": "source.veldt",
+  "fileTypes": [
+    "veldt"
+  ],
+  "patterns": [
+    {
+      "match": "#.*$",
+      "name": "comment.line.number-sign.veldt"
+    },
+    {
+      "match": "\\b(grow|fn|let|if|else|while|for|in|match|try|catch|return|break|continue|import|as|struct|immortal|test|and|or|not)\\b",
+      "name": "keyword.control.veldt"
+    },
+    {
+      "match": "\\b(true|false|null)\\b",
+      "name": "constant.language.veldt"
+    },
+    {
+      "match": "\\b(int|str|bool|list|dict|set|float)\\b",
+      "name": "support.type.veldt"
+    },
+    {
+      "match": "\\b(print|eprint|len|range|dict|set|args|exit|input|fetch|post|serve|spawn|join|pmap|call_best|env|exec|sleep|date|time_ms|json_parse|json_stringify|re_match|re_find|re_replace|re_split|re_captures|sha256|b64_encode|b64_decode|url_encode|url_decode|exists|ls|mkdir|rm|cp|mv|cwd|file_size|read_file|write_file|read_lines|write_lines|db_open|db_exec|db_query|db_close|sqrt|pow|exp|log|log10|floor|ceil|round|abs|fabs|sin|cos|tan|pi|rand|max|min|format|parse_date|match_path|render)\\b",
+      "name": "support.function.builtin.veldt"
+    },
+    {
+      "begin": "\"\"\"",
+      "end": "\"\"\"",
+      "name": "string.quoted.triple.veldt"
+    },
+    {
+      "begin": "\"",
+      "end": "\"",
+      "name": "string.quoted.double.veldt",
+      "patterns": [
+        {
+          "match": "\\\\.",
+          "name": "constant.character.escape.veldt"
+        },
+        {
+          "match": "\\{[^}]*\\}",
+          "name": "meta.interpolation.veldt"
+        }
+      ]
+    },
+    {
+      "match": "\\b\\d+\\.\\d+\\b",
+      "name": "constant.numeric.float.veldt"
+    },
+    {
+      "match": "\\b\\d+\\b",
+      "name": "constant.numeric.integer.veldt"
+    },
+    {
+      "match": "(\\?\\.|\\?\\?|\\|>|==|!=|<=|>=|&&|\\|\\||[+\\-*/%<>=!&|?:@$]+)",
+      "name": "keyword.operator.veldt"
+    },
+    {
+      "match": "[a-zA-Z_][a-zA-Z0-9_]*(?=\\s*\\()",
+      "name": "entity.name.function.veldt"
+    }
+  ]
+}

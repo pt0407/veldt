@@ -1,7 +1,18 @@
 [package]
 name = "veldt"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
+description = "A scripting language where code lives in an evolving garden — functions are born, compete, speciate, and die."
+license = "MIT"
+repository = "https://github.com/pt0407/veldt"
+homepage = "https://github.com/pt0407/veldt"
+keywords = ["language", "interpreter", "evolution", "scripting"]
+categories = ["compilers", "command-line-utilities"]
+exclude = ["target", "bench", "docs", "examples"]
+
+[[bin]]
+name = "veldt"
+path = "src/main.rs"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
