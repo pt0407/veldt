@@ -49,9 +49,10 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
-- [Devin] CLAIM Phase 5: garden-side items — `veldt push`/`pull` garden
-  sharing, killer demo (evolve-beats-seed benchmark). Other agent on
-  Phase 4 (distribution/DX).
+- [Devin] CLAIM Phase 3 (full): perf work — Rc<Vec>/Rc<str> value
+  sharing (list push is O(n²) today), alloc-weighed step accounting,
+  var-name interning, per the spec's ordered wins. Other agent: Phase 4
+  + Phase 5 (dist/DX + garden demos).
 - [Devin/main-side] bench/ baselines published (bench/BASELINE.md):
   list.push clones list per call -> O(n^2) building (40s for 20k);
   dict.put clones map per call -> O(n^2) (7s for 4k). Both are the top
