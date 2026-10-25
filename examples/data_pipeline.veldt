@@ -1,0 +1,32 @@
+# data_pipeline — a real scripting task: read a file, aggregate, write JSON.
+# Run: veldt run examples/data_pipeline.veldt -- input.csv out.json
+# Shows: args(), read_lines, dict index-assign, append, format, json_stringify.
+
+let infile = args().get(0) ?? "/tmp/pipeline_in.txt"
+let outfile = args().get(1) ?? "/tmp/pipeline_out.json"
+
+let lines = read_lines(infile)
+let counts = dict()
+let errors = []
+
+for line in lines {
+    if line.contains("ERROR") {
+        errors.append(line)
+    } else {
+        let key = line.split(",").get(0) ?? "misc"
+        let prev = counts.get(key) ?? 0
+        counts[key] = prev + 1
+    }
+}
+
+let total = counts.values().reduce(0, fn(a, b) { return a + b })
+let report = dict()
+report["input"] = infile
+report["lines"] = lines.len()
+report["groups"] = counts.keys().len()
+report["errors"] = errors.len()
+report["total"] = total
+
+write_file(outfile, json_stringify(report))
+print("wrote " + outfile + " — " + lines.len() + " lines, " +
+    counts.keys().len() + " groups, " + errors.len() + " errors")
