@@ -1560,6 +1560,13 @@ fn main() {
                 }
             } else {
                 veldt.print_lineage(&args[2]);
+                // --detail — append the per-family dashboard after the tree
+                if args.iter().any(|a| a == "--detail") {
+                    if let Some(vs) = veldt.functions.get(&args[2]) {
+                        println!("--- detail ---");
+                        print_family_detail(&veldt, &args[2], vs);
+                    }
+                }
             }
         }
         "prune" => {
