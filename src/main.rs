@@ -4892,20 +4892,26 @@ fn print_family_detail(veldt: &veldt::Veldt, fam: &String, vs: &[veldt::Function
     let trials: Vec<f64> = vs.iter().map(|e| e.trial_score).collect();
     if !trials.is_empty() {
         let avg = trials.iter().sum::<f64>() / trials.len() as f64;
-        println!("  trial_score: avg {:.2}", avg);
+        let mut sorted = trials.clone();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        println!("  trial_score: avg {:.2}  {}", avg, spark(&sorted));
     }
     let lifespans: Vec<f64> = vs.iter().map(|e| e.lifespan).collect();
     if !lifespans.is_empty() {
         let avg = lifespans.iter().sum::<f64>() / lifespans.len() as f64;
         let max = lifespans.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-        println!("  lifespan: avg {:.1} (peak {:.1})", avg, max);
+        let mut sorted = lifespans.clone();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        println!("  lifespan: avg {:.1} (peak {:.1})  {}", avg, max, spark(&sorted));
     }
     // args distribution — the signature profile
     let args_counts: Vec<usize> = vs.iter().map(|e| e.params.len()).collect();
     if !args_counts.is_empty() {
         let avg = args_counts.iter().sum::<usize>() as f64 / args_counts.len() as f64;
         let max = args_counts.iter().max().unwrap();
-        println!("  args: avg {:.1} params (peak {})", avg, max);
+        let mut sorted: Vec<f64> = args_counts.iter().map(|a| *a as f64).collect();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        println!("  args: avg {:.1} params (peak {})  {}", avg, max, spark(&sorted));
     }
     // niche count — the coverage breadth
     let niche_counts: Vec<usize> = vs.iter().map(|e| e.niche_scores.len()).collect();
