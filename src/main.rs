@@ -420,6 +420,27 @@ fn main() {
                         process::exit(1);
                     }
                 }
+            } else if args.iter().any(|a| a == "--watch") {
+                // --watch — re-fuzz when the garden file changes
+                let mut v = veldt::Veldt::new();
+                let garden_path = if v.load().is_ok() {
+                    v.garden_path.join("veldt.json")
+                } else {
+                    std::path::PathBuf::from(".veldt/garden/veldt.json")
+                };
+                let mut last_mtime = None;
+                loop {
+                    if let Ok(meta) = std::fs::metadata(&garden_path) {
+                        if let Ok(mtime) = meta.modified() {
+                            if last_mtime != Some(mtime) {
+                                last_mtime = Some(mtime);
+                                print!("\x1b[2J\x1b[H");
+                                fuzz_family(&args[2], args.iter().any(|a| a == "--json"));
+                            }
+                        }
+                    }
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                }
             } else {
                 fuzz_family(&args[2], args.iter().any(|a| a == "--json"));
             }
