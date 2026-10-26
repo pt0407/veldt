@@ -1358,7 +1358,7 @@ mod tests {
 
         // Health check
         let mut entry = veldt.functions["add"][0].clone();
-        HealthChecker::check_at_birth_with(&mut entry, &veldt, self.use_vm);
+        HealthChecker::check_at_birth_with(&mut entry, &veldt, false);
         veldt.functions.get_mut("add").unwrap()[0] = entry;
 
         let initial_count = veldt.functions["add"].len();
