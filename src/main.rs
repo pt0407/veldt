@@ -1582,12 +1582,24 @@ fn main() {
             }
             // parse name#N
             let target = &args[2];
+            let json = args.iter().any(|a| a == "--json");
             if let Some(pos) = target.find('#') {
                 let name = &target[..pos];
                 let id: u32 = target[pos+1..].parse().unwrap_or(0);
                 if veldt.prune(name, id) {
-                    println!("Pruned {}#{}", name, id);
                     veldt.save().unwrap_or_else(|e| eprintln!("Save error: {}", e));
+                    if json {
+                        println!("{}", serde_json::json!({
+                            "pruned": true, "variant": format!("{}#{}", name, id),
+                        }));
+                    } else {
+                        println!("Pruned {}#{}", name, id);
+                    }
+                } else if json {
+                    println!("{}", serde_json::json!({
+                        "pruned": false, "variant": format!("{}#{}", name, id),
+                        "reason": "not found",
+                    }));
                 } else {
                     println!("{}#{} not found", name, id);
                 }
