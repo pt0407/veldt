@@ -962,16 +962,25 @@ impl Vm {
                     if chosen.calls.get() >= 64 && !chosen.jit_tried.get() {
                         chosen.jit_tried.set(true);
                         *chosen.jit.borrow_mut() = crate::jit::try_compile(
-                            &chosen.code, chosen.params.len());
+                            &chosen.code, chosen.params.len(), &name);
                     }
                     if let Some(j) = chosen.jit.borrow().as_ref() {
-                        if args.iter().all(|a| matches!(a, Value::Int(_))) {
-                            let argv: Vec<i64> = args.iter().map(|a|
+                        if args.len() <= 4
+                            && args.iter().all(|a| matches!(a, Value::Int(_))) {
+                            let av: Vec<i64> = args.iter().map(|a|
                                 if let Value::Int(n) = a { *n } else { 0 }
                             ).collect();
-                            let f: crate::jit::NativeFn =
-                                unsafe { std::mem::transmute(j.code_ptr) };
-                            let r = unsafe { f(argv.as_ptr()) };
+                            let p = j.code_ptr;
+                            let r = unsafe {
+                                match av.as_slice() {
+                                    [] => std::mem::transmute::<_, crate::jit::NativeFn0>(p)(),
+                                    [a] => std::mem::transmute::<_, crate::jit::NativeFn1>(p)(*a),
+                                    [a,b] => std::mem::transmute::<_, crate::jit::NativeFn2>(p)(*a,*b),
+                                    [a,b,c] => std::mem::transmute::<_, crate::jit::NativeFn3>(p)(*a,*b,*c),
+                                    [a,b,c,d] => std::mem::transmute::<_, crate::jit::NativeFn4>(p)(*a,*b,*c,*d),
+                                    _ => -1,
+                                }
+                            };
                             stack.push(Value::Int(r));
                             return Ok(());
                         }
