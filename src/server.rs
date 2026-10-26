@@ -156,7 +156,7 @@ async fn quarantine_family(
     let divergent = crate::verify_family_find_divergent(&req.name);
     let mut quarantined: Vec<u32> = Vec::new();
     if let Some(id) = divergent {
-        let mut veldt = veldt::Veldt::new();
+        let mut veldt = Veldt::new();
         if veldt.load().is_ok() {
             if let Some(vs) = veldt.functions.get_mut(&req.name) {
                 for e in vs.iter_mut() {
@@ -202,7 +202,7 @@ struct LineageRequest { name: String }
 async fn lineage_family(
     axum::extract::Query(req): axum::extract::Query<LineageRequest>,
 ) -> Json<serde_json::Value> {
-    let mut veldt = veldt::Veldt::new();
+    let mut veldt = Veldt::new();
     if veldt.load().is_err() {
         return Json(serde_json::json!({"error": "garden load failed"}));
     }
@@ -218,7 +218,7 @@ async fn lineage_family(
 }
 
 async fn obituaries() -> Json<serde_json::Value> {
-    let mut veldt = veldt::Veldt::new();
+    let mut veldt = Veldt::new();
     if veldt.load().is_err() {
         return Json(serde_json::json!({"error": "garden load failed"}));
     }
@@ -230,7 +230,7 @@ async fn obituaries() -> Json<serde_json::Value> {
 }
 
 async fn traces() -> Json<serde_json::Value> {
-    let mut veldt = veldt::Veldt::new();
+    let mut veldt = Veldt::new();
     if veldt.load().is_err() {
         return Json(serde_json::json!({"error": "garden load failed"}));
     }
@@ -241,7 +241,7 @@ async fn traces() -> Json<serde_json::Value> {
 }
 
 async fn probes() -> Json<serde_json::Value> {
-    let mut veldt = veldt::Veldt::new();
+    let mut veldt = Veldt::new();
     if veldt.load().is_err() {
         return Json(serde_json::json!({"error": "garden load failed"}));
     }
@@ -253,7 +253,7 @@ async fn probes() -> Json<serde_json::Value> {
 }
 
 async fn niches() -> Json<serde_json::Value> {
-    let mut veldt = veldt::Veldt::new();
+    let mut veldt = Veldt::new();
     if veldt.load().is_err() {
         return Json(serde_json::json!({"error": "garden load failed"}));
     }
@@ -274,7 +274,7 @@ async fn niches() -> Json<serde_json::Value> {
 }
 
 async fn usage() -> Json<serde_json::Value> {
-    let mut veldt = veldt::Veldt::new();
+    let mut veldt = Veldt::new();
     if veldt.load().is_err() {
         return Json(serde_json::json!({"error": "garden load failed"}));
     }
@@ -289,7 +289,7 @@ async fn usage() -> Json<serde_json::Value> {
 }
 
 async fn trend() -> Json<serde_json::Value> {
-    let mut veldt = veldt::Veldt::new();
+    let mut veldt = Veldt::new();
     if veldt.load().is_err() {
         return Json(serde_json::json!({"error": "garden load failed"}));
     }
@@ -297,7 +297,7 @@ async fn trend() -> Json<serde_json::Value> {
 }
 
 async fn sources() -> Json<serde_json::Value> {
-    let mut veldt = veldt::Veldt::new();
+    let mut veldt = Veldt::new();
     if veldt.load().is_err() {
         return Json(serde_json::json!({"error": "garden load failed"}));
     }
@@ -319,7 +319,7 @@ async fn sources() -> Json<serde_json::Value> {
 }
 
 async fn fitness() -> Json<serde_json::Value> {
-    let mut veldt = veldt::Veldt::new();
+    let mut veldt = Veldt::new();
     if veldt.load().is_err() {
         return Json(serde_json::json!({"error": "garden load failed"}));
     }
@@ -336,7 +336,7 @@ async fn fitness() -> Json<serde_json::Value> {
 }
 
 async fn health() -> Json<serde_json::Value> {
-    let mut veldt = veldt::Veldt::new();
+    let mut veldt = Veldt::new();
     if veldt.load().is_err() {
         return Json(serde_json::json!({"error": "garden load failed"}));
     }
@@ -354,7 +354,7 @@ async fn health() -> Json<serde_json::Value> {
 }
 
 async fn trust() -> Json<serde_json::Value> {
-    let mut veldt = veldt::Veldt::new();
+    let mut veldt = Veldt::new();
     if veldt.load().is_err() {
         return Json(serde_json::json!({"error": "garden load failed"}));
     }
@@ -372,7 +372,7 @@ async fn trust() -> Json<serde_json::Value> {
 }
 
 async fn bare() -> Json<serde_json::Value> {
-    let mut veldt = veldt::Veldt::new();
+    let mut veldt = Veldt::new();
     if veldt.load().is_err() {
         return Json(serde_json::json!({"error": "garden load failed"}));
     }
@@ -383,7 +383,7 @@ async fn bare() -> Json<serde_json::Value> {
 }
 
 async fn immigrants() -> Json<serde_json::Value> {
-    let mut veldt = veldt::Veldt::new();
+    let mut veldt = Veldt::new();
     if veldt.load().is_err() {
         return Json(serde_json::json!({"error": "garden load failed"}));
     }
@@ -399,7 +399,7 @@ async fn immigrants() -> Json<serde_json::Value> {
 }
 
 async fn mutation() -> Json<serde_json::Value> {
-    let mut veldt = veldt::Veldt::new();
+    let mut veldt = Veldt::new();
     if veldt.load().is_err() {
         return Json(serde_json::json!({"error": "garden load failed"}));
     }
@@ -418,7 +418,7 @@ async fn mutation() -> Json<serde_json::Value> {
 }
 
 async fn families() -> Json<serde_json::Value> {
-    let mut veldt = veldt::Veldt::new();
+    let mut veldt = Veldt::new();
     if veldt.load().is_err() {
         return Json(serde_json::json!({"error": "garden load failed"}));
     }
@@ -436,7 +436,7 @@ struct VariantRequest { name: String, id: u32 }
 async fn variant(
     axum::extract::Query(req): axum::extract::Query<VariantRequest>,
 ) -> Json<serde_json::Value> {
-    let mut veldt = veldt::Veldt::new();
+    let mut veldt = Veldt::new();
     if veldt.load().is_err() {
         return Json(serde_json::json!({"error": "garden load failed"}));
     }
@@ -456,7 +456,7 @@ async fn variant(
 }
 
 async fn heal() -> Json<serde_json::Value> {
-    let mut veldt = veldt::Veldt::new();
+    let mut veldt = Veldt::new();
     if veldt.load().is_err() {
         return Json(serde_json::json!({"error": "garden load failed"}));
     }
@@ -470,7 +470,7 @@ async fn heal() -> Json<serde_json::Value> {
 }
 
 async fn ages() -> Json<serde_json::Value> {
-    let mut veldt = veldt::Veldt::new();
+    let mut veldt = Veldt::new();
     if veldt.load().is_err() {
         return Json(serde_json::json!({"error": "garden load failed"}));
     }
@@ -484,7 +484,7 @@ async fn ages() -> Json<serde_json::Value> {
 }
 
 async fn census() -> Json<serde_json::Value> {
-    let mut veldt = veldt::Veldt::new();
+    let mut veldt = Veldt::new();
     if veldt.load().is_err() {
         return Json(serde_json::json!({"error": "garden load failed"}));
     }
@@ -498,7 +498,7 @@ async fn census() -> Json<serde_json::Value> {
 }
 
 async fn args() -> Json<serde_json::Value> {
-    let mut veldt = veldt::Veldt::new();
+    let mut veldt = Veldt::new();
     if veldt.load().is_err() {
         return Json(serde_json::json!({"error": "garden load failed"}));
     }
@@ -511,7 +511,7 @@ async fn args() -> Json<serde_json::Value> {
 }
 
 async fn sizes() -> Json<serde_json::Value> {
-    let mut veldt = veldt::Veldt::new();
+    let mut veldt = Veldt::new();
     if veldt.load().is_err() {
         return Json(serde_json::json!({"error": "garden load failed"}));
     }
@@ -525,7 +525,7 @@ async fn sizes() -> Json<serde_json::Value> {
 }
 
 async fn last_used() -> Json<serde_json::Value> {
-    let mut veldt = veldt::Veldt::new();
+    let mut veldt = Veldt::new();
     if veldt.load().is_err() {
         return Json(serde_json::json!({"error": "garden load failed"}));
     }
@@ -540,7 +540,7 @@ async fn last_used() -> Json<serde_json::Value> {
 }
 
 async fn niche_scores() -> Json<serde_json::Value> {
-    let mut veldt = veldt::Veldt::new();
+    let mut veldt = Veldt::new();
     if veldt.load().is_err() {
         return Json(serde_json::json!({"error": "garden load failed"}));
     }
@@ -554,7 +554,7 @@ async fn niche_scores() -> Json<serde_json::Value> {
 }
 
 async fn origins() -> Json<serde_json::Value> {
-    let mut veldt = veldt::Veldt::new();
+    let mut veldt = Veldt::new();
     if veldt.load().is_err() {
         return Json(serde_json::json!({"error": "garden load failed"}));
     }
@@ -567,7 +567,7 @@ async fn origins() -> Json<serde_json::Value> {
 }
 
 async fn deaths() -> Json<serde_json::Value> {
-    let mut veldt = veldt::Veldt::new();
+    let mut veldt = Veldt::new();
     if veldt.load().is_err() {
         return Json(serde_json::json!({"error": "garden load failed"}));
     }
@@ -584,7 +584,7 @@ async fn deaths() -> Json<serde_json::Value> {
 }
 
 async fn selection() -> Json<serde_json::Value> {
-    let mut veldt = veldt::Veldt::new();
+    let mut veldt = Veldt::new();
     if veldt.load().is_err() {
         return Json(serde_json::json!({"error": "garden load failed"}));
     }
@@ -610,7 +610,7 @@ async fn selection() -> Json<serde_json::Value> {
 }
 
 async fn mutation_rate() -> Json<serde_json::Value> {
-    let mut veldt = veldt::Veldt::new();
+    let mut veldt = Veldt::new();
     if veldt.load().is_err() {
         return Json(serde_json::json!({"error": "garden load failed"}));
     }
@@ -632,7 +632,7 @@ async fn mutation_rate() -> Json<serde_json::Value> {
 }
 
 async fn turnover() -> Json<serde_json::Value> {
-    let mut veldt = veldt::Veldt::new();
+    let mut veldt = Veldt::new();
     if veldt.load().is_err() {
         return Json(serde_json::json!({"error": "garden load failed"}));
     }
@@ -653,7 +653,7 @@ async fn turnover() -> Json<serde_json::Value> {
 }
 
 async fn diversity() -> Json<serde_json::Value> {
-    let mut veldt = veldt::Veldt::new();
+    let mut veldt = Veldt::new();
     if veldt.load().is_err() {
         return Json(serde_json::json!({"error": "garden load failed"}));
     }
@@ -672,7 +672,7 @@ async fn diversity() -> Json<serde_json::Value> {
 }
 
 async fn pressure() -> Json<serde_json::Value> {
-    let mut veldt = veldt::Veldt::new();
+    let mut veldt = Veldt::new();
     if veldt.load().is_err() {
         return Json(serde_json::json!({"error": "garden load failed"}));
     }
@@ -690,7 +690,7 @@ async fn pressure() -> Json<serde_json::Value> {
 }
 
 async fn builtin_usage() -> Json<serde_json::Value> {
-    let mut veldt = veldt::Veldt::new();
+    let mut veldt = Veldt::new();
     if veldt.load().is_err() {
         return Json(serde_json::json!({"error": "garden load failed"}));
     }
@@ -1195,7 +1195,7 @@ fn garden_json(veldt: &Veldt) -> serde_json::Value {
 }
 
 async fn champions() -> Json<serde_json::Value> {
-    let mut veldt = veldt::Veldt::new();
+    let mut veldt = Veldt::new();
     if veldt.load().is_err() {
         return Json(serde_json::json!({"error": "garden load failed"}));
     }
@@ -1213,7 +1213,7 @@ async fn champions() -> Json<serde_json::Value> {
 }
 
 async fn summary() -> Json<serde_json::Value> {
-    let mut veldt = veldt::Veldt::new();
+    let mut veldt = Veldt::new();
     if veldt.load().is_err() {
         return Json(serde_json::json!({"error": "garden load failed"}));
     }
@@ -1253,7 +1253,7 @@ async fn why_variant(
     axum::extract::Query(req): axum::extract::Query<VariantRequest>,
 ) -> Json<serde_json::Value> {
     let task = format!("why {}#{}", req.name, req.id);
-    let mut veldt = veldt::Veldt::new();
+    let mut veldt = Veldt::new();
     if veldt.load().is_err() {
         return Json(serde_json::json!({"error": "garden load failed"}));
     }
@@ -1276,7 +1276,7 @@ struct FindRequest { q: String }
 async fn find_family(
     axum::extract::Query(req): axum::extract::Query<FindRequest>,
 ) -> Json<serde_json::Value> {
-    let mut veldt = veldt::Veldt::new();
+    let mut veldt = Veldt::new();
     if veldt.load().is_err() {
         return Json(serde_json::json!({"error": "garden load failed"}));
     }
@@ -1301,7 +1301,7 @@ async fn diff_variants(
         return Json(serde_json::json!({"error": "invalid 'a' — expected <fam>#<id>"})) };
     let (b_name, b_id) = match parse(&req.b) { Some(x) => x, None =>
         return Json(serde_json::json!({"error": "invalid 'b' — expected <fam>#<id>"})) };
-    let mut veldt = veldt::Veldt::new();
+    let mut veldt = Veldt::new();
     if veldt.load().is_err() {
         return Json(serde_json::json!({"error": "garden load failed"}));
     }
@@ -1317,7 +1317,7 @@ async fn diff_variants(
 async fn obituary(
     axum::extract::Query(req): axum::extract::Query<VariantRequest>,
 ) -> Json<serde_json::Value> {
-    let mut veldt = veldt::Veldt::new();
+    let mut veldt = Veldt::new();
     if veldt.load().is_err() {
         return Json(serde_json::json!({"error": "garden load failed"}));
     }
@@ -1339,15 +1339,15 @@ struct TraceRequest { name: String }
 async fn trace_family(
     axum::extract::Query(req): axum::extract::Query<TraceRequest>,
 ) -> Json<serde_json::Value> {
-    let mut veldt = veldt::Veldt::new();
+    let mut veldt = Veldt::new();
     if veldt.load().is_err() {
         return Json(serde_json::json!({"error": "garden load failed"}));
     }
     let tr: Vec<serde_json::Value> = veldt.traces.get(&req.name)
         .map(|ts| ts.iter().map(|t| serde_json::json!({
-            "input": format!("{:?}", t.input),
-            "output": format!("{:?}", t.output),
-            "timestamp": t.timestamp,
+            "input": format!("{:?}", t.args),
+            "output": format!("{:?}", t.result),
+            "timestamp": t.at,
         })).collect())
         .unwrap_or_default();
     Json(serde_json::json!({"name": req.name, "traces": tr}))
@@ -1356,13 +1356,13 @@ async fn trace_family(
 async fn probe_family(
     axum::extract::Query(req): axum::extract::Query<TraceRequest>,
 ) -> Json<serde_json::Value> {
-    let mut veldt = veldt::Veldt::new();
+    let mut veldt = Veldt::new();
     if veldt.load().is_err() {
         return Json(serde_json::json!({"error": "garden load failed"}));
     }
     let pr: Vec<serde_json::Value> = veldt.probes.get(&req.name)
         .map(|ps| ps.iter().map(|p| serde_json::json!({
-            "input": format!("{:?}", p.input),
+            "input": format!("{:?}", p.args),
             "expected": format!("{:?}", p.expected),
             "niche": p.niche,
         })).collect())
@@ -1373,7 +1373,7 @@ async fn probe_family(
 async fn family_detail(
     axum::extract::Query(req): axum::extract::Query<TraceRequest>,
 ) -> Json<serde_json::Value> {
-    let mut veldt = veldt::Veldt::new();
+    let mut veldt = Veldt::new();
     if veldt.load().is_err() {
         return Json(serde_json::json!({"error": "garden load failed"}));
     }
@@ -1396,7 +1396,7 @@ async fn family_detail(
 }
 
 async fn sick() -> Json<serde_json::Value> {
-    let mut veldt = veldt::Veldt::new();
+    let mut veldt = Veldt::new();
     if veldt.load().is_err() {
         return Json(serde_json::json!({"error": "garden load failed"}));
     }
@@ -1405,11 +1405,7 @@ async fn sick() -> Json<serde_json::Value> {
             .filter(|e| matches!(e.health, crate::veldt::Health::Sick(_)))
             .map(|e| {
                 let fails = if let crate::veldt::Health::Sick(f) = &e.health {
-                    f.iter().map(|(input, got, want)| serde_json::json!({
-                        "input": format!("{:?}", input),
-                        "got": format!("{:?}", got),
-                        "want": format!("{:?}", want),
-                    })).collect::<Vec<_>>()
+                    vec![serde_json::json!({"error": f})]
                 } else { Vec::new() };
                 serde_json::json!({
                     "variant": format!("{}#{}", n, e.id), "fitness": e.fitness,
@@ -1421,7 +1417,7 @@ async fn sick() -> Json<serde_json::Value> {
 }
 
 async fn vars() -> Json<serde_json::Value> {
-    let mut veldt = veldt::Veldt::new();
+    let mut veldt = Veldt::new();
     if veldt.load().is_err() {
         return Json(serde_json::json!({"error": "garden load failed"}));
     }
@@ -1432,12 +1428,12 @@ async fn vars() -> Json<serde_json::Value> {
 }
 
 async fn structs() -> Json<serde_json::Value> {
-    let mut veldt = veldt::Veldt::new();
+    let mut veldt = Veldt::new();
     if veldt.load().is_err() {
         return Json(serde_json::json!({"error": "garden load failed"}));
     }
     let struct_data: Vec<serde_json::Value> = veldt.structs.iter()
-        .map(|(n, s)| serde_json::json!({"name": n, "fields": s.len()}))
+        .map(|(n, s)| serde_json::json!({"name": n, "fields": s.fields.len()}))
         .collect();
     Json(serde_json::json!({"structs": struct_data}))
 }

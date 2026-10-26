@@ -566,6 +566,27 @@ fn main() {
                 }
                 println!("=== The Veldt (fitness >= {}) ===", min);
                 filtered.print_garden(sick_only, healthy_only);
+            } else if let Some(expr) = args.iter().position(|a| a == "--filter")
+                .and_then(|p| args.get(p + 1)).cloned() {
+                // --filter <expr> — composable variant query
+                // clauses split on && (AND) — each is `field op value`
+                // fields: fitness age usage size args lifespan last_used niches
+                //         health trust origin calls
+                // ops: > < >= <= == != ~ (contains)
+                let clauses: Vec<&str> = expr.split("&&").map(|s| s.trim()).collect();
+                let mut filtered = veldt::Veldt::new();
+                filtered.probes = veldt.probes.clone();
+                filtered.obituaries = veldt.obituaries.clone();
+                filtered.run_count = veldt.run_count;
+                filtered.garden_path = veldt.garden_path.clone();
+                for (name, vs) in &veldt.functions {
+                    let keep: Vec<_> = vs.iter()
+                        .filter(|e| clauses.iter().all(|c| variant_matches(e, c)))
+                        .cloned().collect();
+                    if !keep.is_empty() { filtered.functions.insert(name.clone(), keep); }
+                }
+                println!("=== The Veldt (filter: {}) ===", expr);
+                filtered.print_garden(sick_only, healthy_only);
             } else if let Some(spec) = args.iter().position(|a| a == "--max_niche_fam")
                 .and_then(|p| args.get(p + 1)).cloned() {
                 // --max_niche_fam <name:max> — variants in this family with <= max niches
@@ -2170,9 +2191,8 @@ fn main() {
                 for (name, vs) in &veldt.functions {
                     let keep: Vec<_> = vs.iter()
                         .filter(|e| {
-                            if let veldt::Health::Sick(fails) = &e.health {
-                                fails.iter().any(|(input, _, _)|
-                                    format!("{:?}", input).contains(&probe))
+                            if let veldt::Health::Sick(err) = &e.health {
+                                err.contains(&probe)
                             } else { false }
                         }).cloned().collect();
                     if !keep.is_empty() { filtered.functions.insert(name.clone(), keep); }
@@ -2590,8 +2610,8 @@ fn main() {
                 sorted.garden_path = veldt.garden_path.clone();
                 let mut fams: Vec<(&String, &Vec<veldt::FunctionEntry>)> =
                     veldt.functions.iter().collect();
-                fams.sort_by(|a, b| veldt.traces.get(*b.0).map(|t| t.len()).unwrap_or(0)
-                    .cmp(&veldt.traces.get(*a.0).map(|t| t.len()).unwrap_or(0)));
+                fams.sort_by(|a, b| veldt.traces.get(b.0.as_str()).map(|t| t.len()).unwrap_or(0)
+                    .cmp(&veldt.traces.get(a.0.as_str()).map(|t| t.len()).unwrap_or(0)));
                 for (name, vs) in fams {
                     sorted.functions.insert(name.clone(), vs.clone());
                 }
@@ -2606,8 +2626,8 @@ fn main() {
                 sorted.garden_path = veldt.garden_path.clone();
                 let mut fams: Vec<(&String, &Vec<veldt::FunctionEntry>)> =
                     veldt.functions.iter().collect();
-                fams.sort_by(|a, b| veldt.probes.get(*b.0).map(|p| p.len()).unwrap_or(0)
-                    .cmp(&veldt.probes.get(*a.0).map(|p| p.len()).unwrap_or(0)));
+                fams.sort_by(|a, b| veldt.probes.get(b.0.as_str()).map(|p| p.len()).unwrap_or(0)
+                    .cmp(&veldt.probes.get(a.0.as_str()).map(|p| p.len()).unwrap_or(0)));
                 for (name, vs) in fams {
                     sorted.functions.insert(name.clone(), vs.clone());
                 }
@@ -4296,7 +4316,7 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
     // no top-level statements — a file with only fn defs is a module
     let has_toplevel = stmts.iter().any(|s| !matches!(s,
         Stmt::FnDef(..) | Stmt::Grow(GrowItem::Fn(..)) | Stmt::Grow(GrowItem::Struct(..))
-        | Stmt::Struct(..) | Stmt::Import(..) | Stmt::TypeAlias(..)));
+        | Stmt::StructDef(..) | Stmt::Import(..)));
     if !stmts.is_empty() && !has_toplevel {
         out.push("no top-level statements — file is a module, not a program".into());
     }
@@ -5160,6 +5180,67 @@ pub fn run_program_capture(path: &str) -> String {
     match std::process::Command::new(exe).arg("run").arg(path).output() {
         Ok(o) => String::from_utf8_lossy(&o.stdout).to_string(),
         Err(e) => format!("Error running {}: {}", path, e),
+    }
+}
+
+fn variant_matches(e: &veldt::FunctionEntry, clause: &str) -> bool {
+    // clause: `field op value` — field is a variant property,
+    // op is > < >= <= == != or ~ (contains), value is the comparand
+    let parts: Vec<&str> = clause.split_whitespace().collect();
+    if parts.len() < 3 { return false; }
+    let (field, op, val) = (parts[0], parts[1], parts[2..].join(" "));
+
+    let num_val = val.parse::<f64>().ok();
+    let num_field = |v: f64| -> Option<f64> { Some(v) };
+
+    let field_num: Option<f64> = match field {
+        "fitness" => num_field(e.fitness),
+        "age" => num_field(e.age as f64),
+        "usage" => num_field(e.usage_count as f64),
+        "size" => num_field(crate::fmt::format_program(&e.body).len() as f64),
+        "args" => num_field(e.params.len() as f64),
+        "lifespan" => num_field(e.lifespan),
+        "last_used" => num_field(e.last_used as f64),
+        "niches" => num_field(e.niche_scores.len() as f64),
+        _ => None,
+    };
+    if let (Some(fv), Some(v)) = (field_num, num_val) {
+        return match op {
+            ">" => fv > v, "<" => fv < v,
+            ">=" => fv >= v, "<=" => fv <= v,
+            "==" => (fv - v).abs() < f64::EPSILON,
+            "!=" => (fv - v).abs() >= f64::EPSILON,
+            _ => false,
+        };
+    }
+
+    // string fields
+    match field {
+        "health" => {
+            let h = match &e.health {
+                veldt::Health::Healthy => "healthy",
+                veldt::Health::Sick(_) => "sick",
+                veldt::Health::Dying => "dying",
+            };
+            match op { "==" => h == val, "!=" => h != val, _ => false }
+        }
+        "trust" => {
+            let t = match e.trust {
+                veldt::Trust::Seedling => "seedling",
+                veldt::Trust::Established => "established",
+                veldt::Trust::Canonical => "canonical",
+                _ => "unknown",
+            };
+            match op { "==" => t == val, "!=" => t != val, _ => false }
+        }
+        "origin" => {
+            match op { "~" => e.origin.contains(&val), "==" => e.origin == val, _ => false }
+        }
+        "calls" => {
+            let src = crate::fmt::format_program(&e.body);
+            match op { "~" => src.contains(&val), _ => false }
+        }
+        _ => false,
     }
 }
 
