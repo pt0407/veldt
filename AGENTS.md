@@ -1041,3 +1041,6 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   file-level imports. Other agent: full instr set JIT +
   100% garden coverage + CallId JIT + test --vm. Both
   streams on main, no conflicts.
+- [Devin] Lint batch 43 (HEAD post-binop-alias): ~74 strict
+  checks. New: let a = b where b is bound to a binop —
+  the let copies a computed expression.
