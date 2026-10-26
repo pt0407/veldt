@@ -1398,6 +1398,42 @@ impl Vm {
         Ok(stack.pop().unwrap_or(Value::Null))
     }
 
+    /// Fast path for value-mode nested calls — resolves the chosen
+    /// variant's compiled ptr and calls it with a JitRt sharing the
+    /// PARENT's arena/argbuf/iters/err, so results land in the same
+    /// arena (no clone round-trip). Returns None when the variant
+    /// isn't mode-2-compiled — caller falls back to jit_call.
+    pub(crate) fn jit_call_fast(&mut self, name: &str, vid: Option<u32>,
+        argbox: &[*mut Value], rt: *mut crate::jit::JitRt)
+        -> Option<*mut Value> {
+        let variants = self.fns.get(name)?;
+        let chosen = match vid {
+            Some(id) => variants.iter().find(|v| v.id == id)?,
+            None => variants.iter()
+                .max_by(|a, b| a.fitness.partial_cmp(&b.fitness)
+                    .unwrap_or(std::cmp::Ordering::Equal))?,
+        };
+        if argbox.len() != chosen.params.len() { return None; }
+        let (p, code) = chosen.jit.borrow().as_ref()
+            .filter(|j| j.mode == 2)
+            .map(|j| (j.code_ptr, chosen.code.clone()))?;
+        let mut rt2 = crate::jit::JitRt {
+            vm: self as *mut Vm,
+            consts: code.consts.as_ptr(),
+            names: code.names.as_ptr(),
+            slot_names: code.slot_names.as_ptr(),
+            n_slot_names: code.slot_names.len(),
+            arena: unsafe { (*rt).arena },
+            argbuf: unsafe { (*rt).argbuf },
+            iters: unsafe { (*rt).iters },
+            err: unsafe { (*rt).err },
+        };
+        type VFn = unsafe extern "C" fn(
+            *mut crate::jit::JitRt, *const *mut Value, i64) -> *mut Value;
+        Some(unsafe { std::mem::transmute::<_, VFn>(p)(
+            &mut rt2, argbox.as_ptr(), argbox.len() as i64) })
+    }
+
     /// Invoke JIT'd code by signature mode. Mode 2 takes any args —
     /// the boxed-Value ABI. Modes 0/1 need scalar args in range and
     /// fall back to bytecode otherwise.
@@ -1445,20 +1481,24 @@ impl Vm {
                 Ok(Value::Float(r))
             }
             2 => {
+                let mut arena: Vec<*mut Value> = Vec::new();
+                let mut argbuf: Vec<*mut Value> = Vec::new();
+                let mut iters: Vec<(Vec<Value>, usize)> = Vec::new();
+                let mut err: Option<String> = None;
                 let mut rt = crate::jit::JitRt {
                     vm: self as *mut Vm,
                     consts: code.consts.as_ptr(),
                     names: code.names.as_ptr(),
                     slot_names: code.slot_names.as_ptr(),
                     n_slot_names: code.slot_names.len(),
-                    arena: Vec::new(), argbuf: Vec::new(),
-                    iters: Vec::new(), err: None,
+                    arena: &mut arena, argbuf: &mut argbuf,
+                    iters: &mut iters, err: &mut err,
                 };
                 // args arrive as boxed *mut Value in the arena — the
                 // JIT loads ptr-sized elements, not Value structs
                 let argbox: Vec<*mut Value> = args.into_iter().map(|a| {
                     let p = Box::into_raw(Box::new(a));
-                    rt.arena.push(p); p
+                    arena.push(p); p
                 }).collect();
                 type VFn = unsafe extern "C" fn(
                     *mut crate::jit::JitRt, *const *mut Value,
@@ -1469,12 +1509,12 @@ impl Vm {
                 if !out.is_null() {
                     res = *unsafe { Box::from_raw(out) };
                 }
-                for q in rt.arena.drain(..) {
+                for q in arena.drain(..) {
                     if q != out && !q.is_null() {
                         unsafe { drop(Box::from_raw(q)); }
                     }
                 }
-                if let Some(e) = rt.err.take() { return Err(e); }
+                if let Some(e) = err.take() { return Err(e); }
                 Ok(res)
             }
             _ => self.run_compiled(code.clone(), args),

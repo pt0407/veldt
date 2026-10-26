@@ -1229,24 +1229,26 @@ pub struct JitRt {
     pub names: *const String,
     pub slot_names: *const String,
     pub n_slot_names: usize,
-    pub arena: Vec<*mut Value>,
-    pub argbuf: Vec<*mut Value>,
-    pub iters: Vec<(Vec<Value>, usize)>,
-    pub err: Option<String>,
+    // shared across nested value-mode calls — the root caller owns
+    // the backing storage so a whole call tree allocs into one arena
+    pub arena: *mut Vec<*mut Value>,
+    pub argbuf: *mut Vec<*mut Value>,
+    pub iters: *mut Vec<(Vec<Value>, usize)>,
+    pub err: *mut Option<String>,
 }
 
 unsafe fn mk(rt: *mut JitRt, v: Value) -> *mut Value {
-    if rt.is_null() || (*rt).err.is_some() { return std::ptr::null_mut(); }
+    if rt.is_null() || (*(*rt).err).is_some() { return std::ptr::null_mut(); }
     let p = Box::into_raw(Box::new(v));
-    (*rt).arena.push(p);
+    (*(*rt).arena).push(p);
     p
 }
 unsafe fn rfail(rt: *mut JitRt, e: String) -> *mut Value {
-    if !rt.is_null() && (*rt).err.is_none() { (*rt).err = Some(e); }
+    if !rt.is_null() && (*(*rt).err).is_none() { *(*rt).err = Some(e); }
     std::ptr::null_mut()
 }
 unsafe fn nok(rt: *mut JitRt, e: String) -> i64 {
-    if !rt.is_null() && (*rt).err.is_none() { (*rt).err = Some(e); }
+    if !rt.is_null() && (*(*rt).err).is_none() { *(*rt).err = Some(e); }
     -1
 }
 unsafe fn nname(rt: *mut JitRt, ni: i64) -> String {
@@ -1254,7 +1256,7 @@ unsafe fn nname(rt: *mut JitRt, ni: i64) -> String {
 }
 unsafe fn take_args(rt: *mut JitRt, argc: i64) -> Vec<Value> {
     let n = argc as usize;
-    let buf = &mut (*rt).argbuf;
+    let buf = &mut *(*rt).argbuf;
     let tail: Vec<Value> = buf.iter().rev().take(n)
         .filter(|p| !p.is_null()).map(|p| (**p).clone()).collect();
     let keep = buf.len().saturating_sub(n);
@@ -1331,13 +1333,31 @@ pub unsafe extern "C" fn veldt_rt_isnull(v: *mut Value) -> i64 {
 }
 #[no_mangle]
 pub unsafe extern "C" fn veldt_rt_pusharg(rt: *mut JitRt, v: *mut Value) -> i64 {
-    (*rt).argbuf.push(v); 0
+    (*(*rt).argbuf).push(v); 0
+}
+unsafe fn argbox_ptrs(rt: *mut JitRt, argc: i64) -> Vec<*mut Value> {
+    let buf = &mut *(*rt).argbuf;
+    let n = argc as usize;
+    let tail: Vec<*mut Value> = buf.iter().rev().take(n).copied().collect();
+    let keep = buf.len().saturating_sub(n);
+    buf.truncate(keep);
+    tail.into_iter().rev().collect()
 }
 #[no_mangle]
 pub unsafe extern "C" fn veldt_rt_call(rt: *mut JitRt, ni: i64,
     argc: i64) -> *mut Value {
     let name = nname(rt, ni);
-    let args = take_args(rt, argc);
+    let ptrs = argbox_ptrs(rt, argc);
+    // clone args into the shared arena — by-value semantics — then a
+    // direct native call when the variant is already mode-2 compiled
+    let argbox: Vec<*mut Value> = ptrs.iter().map(|p|
+        if p.is_null() { std::ptr::null_mut() } else { mk(rt, (**p).clone()) }
+    ).collect();
+    if let Some(out) = (*(*rt).vm).jit_call_fast(&name, None, &argbox, rt) {
+        return out;
+    }
+    let args: Vec<Value> = ptrs.iter()
+        .filter(|p| !p.is_null()).map(|p| (**p).clone()).collect();
     match (*(*rt).vm).jit_call(&name, None, args) {
         Ok(v) => mk(rt, v),
         Err(e) => rfail(rt, e),
@@ -1347,7 +1367,16 @@ pub unsafe extern "C" fn veldt_rt_call(rt: *mut JitRt, ni: i64,
 pub unsafe extern "C" fn veldt_rt_callid(rt: *mut JitRt, ni: i64, vid: i64,
     argc: i64) -> *mut Value {
     let name = nname(rt, ni);
-    let args = take_args(rt, argc);
+    let ptrs = argbox_ptrs(rt, argc);
+    let argbox: Vec<*mut Value> = ptrs.iter().map(|p|
+        if p.is_null() { std::ptr::null_mut() } else { mk(rt, (**p).clone()) }
+    ).collect();
+    if let Some(out) =
+        (*(*rt).vm).jit_call_fast(&name, Some(vid as u32), &argbox, rt) {
+        return out;
+    }
+    let args: Vec<Value> = ptrs.iter()
+        .filter(|p| !p.is_null()).map(|p| (**p).clone()).collect();
     match (*(*rt).vm).jit_call(&name, Some(vid as u32), args) {
         Ok(v) => mk(rt, v),
         Err(e) => rfail(rt, e),
@@ -1477,13 +1506,15 @@ pub unsafe extern "C" fn veldt_rt_iternew(rt: *mut JitRt, v: *mut Value) -> i64 
             .map(|k| Value::Str(k.clone().into())).collect(),
         _ => return nok(rt, "for needs a list, string, or dict".into()),
     };
-    (*rt).iters.push((items, 0));
-    ((*rt).iters.len() - 1) as i64
+    let it = &mut *(*rt).iters;
+    it.push((items, 0));
+    (it.len() - 1) as i64
 }
 #[no_mangle]
 pub unsafe extern "C" fn veldt_rt_iternext(rt: *mut JitRt, h: i64) -> *mut Value {
     let r = &mut *rt;
-    let (items, i) = &mut r.iters[h as usize];
+    let it = &mut *r.iters;
+    let (items, i) = &mut it[h as usize];
     if *i >= items.len() { return std::ptr::null_mut(); }
     let v = items[*i].clone(); *i += 1;
     mk(rt, v)
@@ -1491,7 +1522,8 @@ pub unsafe extern "C" fn veldt_rt_iternext(rt: *mut JitRt, h: i64) -> *mut Value
 #[no_mangle]
 pub unsafe extern "C" fn veldt_rt_iterpop(rt: *mut JitRt, h: i64) -> i64 {
     let r = &mut *rt;
-    if let Some(it) = r.iters.get_mut(h as usize) {
+    let it = &mut *r.iters;
+    if let Some(it) = it.get_mut(h as usize) {
         it.0.clear(); it.1 = 0;
     }
     0
@@ -1570,7 +1602,7 @@ pub unsafe extern "C" fn veldt_rt_nullbox(rt: *mut JitRt) -> *mut Value {
 }
 #[no_mangle]
 pub unsafe extern "C" fn veldt_rt_take_err(rt: *mut JitRt) -> *mut Value {
-    let e = (*rt).err.take().unwrap_or_else(|| "error".into());
+    let e = (*(*rt).err).take().unwrap_or_else(|| "error".into());
     mk(rt, Value::Str(e.into()))
 }
 #[no_mangle]
