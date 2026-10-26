@@ -646,6 +646,8 @@ impl Veldt {
                 .max_by(|a, b| a.fitness.partial_cmp(&b.fitness)
                     .unwrap_or(std::cmp::Ordering::Equal))
                 .map(|e| e.id);
+            let peak = variants.iter().map(|e| e.fitness)
+                .fold(f64::NEG_INFINITY, f64::max);
             for entry in variants {
                 let show = if sick_only {
                     matches!(entry.health, Health::Sick(_) | Health::Dying)
@@ -661,8 +663,10 @@ impl Veldt {
                         Health::Dying => "dying".into(),
                     };
                     let marker = if Some(entry.id) == best_id { " *" } else { "" };
-                    println!("  {}#{}{} — {} | age: {} | lifespan: {:.1} | usage: {} | fitness: {:.2}",
-                        name, entry.id, marker, health_str, entry.age, entry.lifespan, entry.usage_count, entry.fitness);
+                    let bar = "█".repeat(
+                        ((entry.fitness / peak.max(f64::EPSILON)) * 6.0).round() as usize);
+                    println!("  {}#{}{} — {} | age: {} | lifespan: {:.1} | usage: {} | fitness: {:.2} {}",
+                        name, entry.id, marker, health_str, entry.age, entry.lifespan, entry.usage_count, entry.fitness, bar);
                     func_count += 1;
                 }
             }
