@@ -2511,6 +2511,12 @@ fn print_stats(veldt: &veldt::Veldt) {
                     println!("  healing success: {}/{} ({}%)", healed_ok, healed_total,
                         (healed_ok * 100) / healed_total);
                 }
+                // trace-rate — calls traced per variant (the observability profile)
+                let trace_n = veldt.traces.get(fam).map(|t| t.len()).unwrap_or(0);
+                if trace_n > 0 {
+                    println!("  trace rate: {} traces (avg {:.1} per variant)", trace_n,
+                        trace_n as f64 / vs.len().max(1) as f64);
+                }
             }
         }
         if veldt.fitness_history.len() >= 2 {
