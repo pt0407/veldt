@@ -914,6 +914,15 @@ fn print_stats(veldt: &veldt::Veldt) {
             .map(|(s, h, t)| format!("{}:{}/{}", s, h, t)).collect();
         println!("mutation success (healthy/total): {}", line.join(" "));
     }
+    // fitness trend — peak per run, is the garden improving?
+    if veldt.fitness_history.len() >= 2 {
+        let trend: Vec<String> = veldt.fitness_history.iter()
+            .map(|f| format!("{:.2}", f)).collect();
+        let (first, last) = (trend.first().unwrap(), trend.last().unwrap());
+        let arrow = if veldt.fitness_history.last() > veldt.fitness_history.first() { "↑" }
+                    else if veldt.fitness_history.last() < veldt.fitness_history.first() { "↓" } else { "→" };
+        println!("fitness trend: {} → {} {}", first, last, arrow);
+    }
     // coverage line — which families carry probe mass vs bare lineages
     let bare: Vec<&String> = veldt.functions.keys()
         .filter(|n| veldt.probes.get(*n).map(|p| p.is_empty()).unwrap_or(true))

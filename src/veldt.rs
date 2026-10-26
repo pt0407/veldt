@@ -112,6 +112,7 @@ pub struct Veldt {
     pub probes: HashMap<String, Vec<Probe>>,
     // real call traces: observed input/output evidence per family
     pub traces: HashMap<String, Vec<Trace>>,
+    pub fitness_history: Vec<f64>,
     pub run_count: u64,
     pub garden_path: PathBuf,
 }
@@ -131,6 +132,7 @@ impl Veldt {
             obituaries: Vec::new(),
             probes: HashMap::new(),
             traces: HashMap::new(),
+            fitness_history: Vec::new(),
             run_count: 0,
             garden_path,
         }
@@ -144,6 +146,7 @@ impl Veldt {
             obituaries: Vec::new(),
             probes: HashMap::new(),
             traces: HashMap::new(),
+            fitness_history: Vec::new(),
             run_count: 0,
             garden_path: path,
         }
@@ -166,6 +169,7 @@ impl Veldt {
         self.obituaries = saved.obituaries;
         self.probes = saved.probes;
         self.traces = saved.traces;
+        self.fitness_history = saved.fitness_history;
         self.run_count = saved.run_count;
         Ok(())
     }
@@ -180,6 +184,7 @@ impl Veldt {
             obituaries: self.obituaries.clone(),
             probes: self.probes.clone(),
             traces: self.traces.clone(),
+            fitness_history: self.fitness_history.clone(),
             run_count: self.run_count,
         };
         let data = serde_json::to_string_pretty(&saved)
@@ -390,6 +395,12 @@ impl Veldt {
                 fitness_map.insert((name.clone(), entry.id), self.calculate_fitness(entry));
             }
         }
+
+        // find peak fitness across the whole garden this run
+        let peak = fitness_map.values().copied()
+            .fold(f64::NEG_INFINITY, f64::max);
+        if peak.is_finite() { self.fitness_history.push(peak); }
+        if self.fitness_history.len() > 200 { self.fitness_history.remove(0); }
 
         // Find fittest variant per lineage
         let mut fittest_map: HashMap<String, u32> = HashMap::new();
@@ -737,7 +748,9 @@ struct SavedVeldt {
     run_count: u64,
 
     #[serde(default)]
-    pub traces: HashMap<String, Vec<Trace>>,}
+    pub traces: HashMap<String, Vec<Trace>>,
+    #[serde(default)]
+    pub fitness_history: Vec<f64>,}
 
 // === Value serialization ===
 
