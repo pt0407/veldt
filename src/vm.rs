@@ -1410,6 +1410,25 @@ impl Vm {
         self.run_compiled(chosen.code.clone(), args)
     }
 
+    /// Eval a bare expr for the REPL — names resolve through globals
+    /// (same as top-level `let` export semantics).
+    pub fn eval_expr(&mut self, e: &Expr) -> Result<Value, String> {
+        let mut c = Compiler {
+            code: Vec::new(), consts: Vec::new(), names: Vec::new(),
+            slot_names: Vec::new(),
+            known_fns: self.fns.keys().cloned().collect(),
+            global_mode: true,
+            loops: Vec::new(), slots: HashMap::new(), next_slot: 0,
+        };
+        c.compile_expr(e)?;
+        c.emit(Instr::Return);
+        let chunk = Chunk {
+            code: c.code, consts: c.consts, names: c.names,
+            slot_names: c.slot_names,
+        };
+        self.run_compiled(Rc::new(chunk), vec![])
+    }
+
     /// Run a CompiledFn's bytecode on a private frame stack and take
     /// its Return value — the path JIT'd code uses to call fns that
     /// aren't (or can't be) in the JIT module.

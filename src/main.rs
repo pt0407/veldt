@@ -4352,6 +4352,13 @@ fn start_repl() {
     let _ = veldt.load();
     let mut interp = interpreter::Interpreter::new();
     veldt.load_into_interpreter(&mut interp);
+    // --vm: statements run on a persistent bytecode VM (+ JIT)
+    let use_vm = std::env::args().any(|a| a == "--vm");
+    let mut repl_vm = if use_vm {
+        let mut v = crate::vm::Vm::new();
+        let _ = v.load_garden(&veldt);
+        Some(v)
+    } else { None };
 
     println!("veldt {} — repl. :help for commands, ctrl-d to quit", env!("CARGO_PKG_VERSION"));
     let mut rl = rustyline::Editor::<VeldtHelper, rustyline::history::FileHistory>::new()
@@ -4442,13 +4449,22 @@ fn start_repl() {
         // print value of trailing bare expressions
         let n = stmts.len();
         for (i, stmt) in stmts.iter().enumerate() {
-            match interp.exec_stmt_pub(stmt) {
+            let r = if let Some(v) = &mut repl_vm {
+                v.run(std::slice::from_ref(stmt), 1_000_000)
+                    .map(|_| interpreter::FlowControl::Normal)
+            } else {
+                interp.exec_stmt_pub(stmt)
+            };
+            match r {
                 Ok(_) => {
                     if i + 1 == n {
                         if let ast::Stmt::ExprStmt(e) = stmt {
-                            if let Ok(v) = interp.eval_expr_in_scope(e) {
-                                println!("{}", v);
-                            }
+                            let rv = if let Some(v) = &mut repl_vm {
+                                v.eval_expr(e)
+                            } else {
+                                interp.eval_expr_in_scope(e)
+                            };
+                            if let Ok(v) = rv { println!("{}", v); }
                         }
                     }
                 }
