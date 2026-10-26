@@ -3293,11 +3293,13 @@ fn fmt_check(path: &str) {
 pub fn lint(stmts: &[ast::Stmt]) -> Vec<String> {
     use ast::*;
     let mut out = Vec::new();
-    lint_block(stmts, &mut out);
+    let mut outer = std::collections::HashSet::new();
+    lint_block(stmts, &mut out, &mut outer);
     out
 }
 
-fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
+fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
+              outer: &mut std::collections::HashSet<String>) {
     use ast::*;
     let mut returned = false;
     // vars bound in this block — flag if never read later
@@ -3316,7 +3318,10 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
                     }
                 }
                 let mut sub = Vec::new();
-                lint_block(body, &mut sub);
+                let mut inner = outer.clone();
+                for (_, n) in &bound { inner.insert((*n).clone()); }
+                for p in params { inner.insert(p.name.clone()); }
+                lint_block(body, &mut sub, &mut inner);
                 out.extend(sub.into_iter().map(|w| format!("{}: {}", name, w)));
             }
             Stmt::FnDef(name, params, body) => {
@@ -3327,12 +3332,24 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
                     }
                 }
                 let mut sub = Vec::new();
-                lint_block(body, &mut sub);
+                let mut inner = outer.clone();
+                for (_, n) in &bound { inner.insert((*n).clone()); }
+                for p in params { inner.insert(p.name.clone()); }
+                lint_block(body, &mut sub, &mut inner);
                 out.extend(sub.into_iter().map(|w| format!("{}: {}", name, w)));
             }
             Stmt::Let(name, e) => {
                 if !name.starts_with('_') && bound.iter().any(|(_, b)| *b == name) {
                     out.push(format!("let {} shadows an outer let", name));
+                }
+                // duplicate let — same expression bound twice in this block
+                for (j, s) in stmts.iter().enumerate().take(i) {
+                    if let Stmt::Let(prev, pe) = s {
+                        if !prev.starts_with('_') && prev != name && pe == e {
+                            out.push(format!("let {} = <same expr as {}> — reuse {}", name, prev, prev));
+                            break;
+                        }
+                    }
                 }
                 bound.push((i, name));
                 if let Expr::Var(v) = e {
@@ -3340,8 +3357,21 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
                 }
             }
             Stmt::Assign(name, e) => {
+                if !bound.iter().any(|(_, b)| *b == name) && !outer.contains(name.as_str()) {
+                    out.push(format!("{} assigned but never declared — let it first", name));
+                }
                 if let Expr::Var(v) = e {
                     if v == name { out.push(format!("{} = {} — self-assignment, likely a typo", name, name)); }
+                }
+                // compound assignment — x = x op y → x op= y
+                if let Expr::BinOp(l, op, _) = e {
+                    if let Expr::Var(v) = l.as_ref() {
+                        if v == name && matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div) {
+                            out.push(format!("{} = {} {} ... — use {} compound assign", name, name,
+                                match op { BinOp::Add => "+", BinOp::Sub => "-", BinOp::Mul => "*", BinOp::Div => "/", _ => "?" },
+                                match op { BinOp::Add => "+=", BinOp::Sub => "-=", BinOp::Mul => "*=", BinOp::Div => "/=", _ => "?" }));
+                        }
+                    }
                 }
                 // dead store — next mention of the var is another assign, not a read
                 let next = stmts.iter().skip(i + 1)
@@ -3388,9 +3418,13 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
                     if e.len() == 1 && matches!(e[0], Stmt::If(_, _, _)) {
                         out.push("else { if ... } — flatten to else if".into());
                     }
-                    lint_block(e, out);
+                    let mut inner = outer.clone();
+                    for (_, n) in &bound { inner.insert((*n).clone()); }
+                    lint_block(e, out, &mut inner);
                 }
-                lint_block(a, out);
+                let mut inner = outer.clone();
+                for (_, n) in &bound { inner.insert((*n).clone()); }
+                lint_block(a, out, &mut inner);
             }
             Stmt::While(cond, body) => {
                 if let Some(lit) = const_bool(cond) {
@@ -3420,7 +3454,20 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
                         out.push(format!("while condition {} never assigned inside the loop — likely infinite", v));
                     }
                 }
-                lint_block(body, out);
+                // while f(x) where x is never mutated — the call can't change
+                if let Expr::Call(_, _, args) = cond {
+                    for arg in args {
+                        if let Expr::Var(v) = arg {
+                            if !body.iter().any(|s| stmt_assigns(s, v)) {
+                                out.push(format!("while condition {} never assigned inside the loop — likely infinite", v));
+                                break;
+                            }
+                        }
+                    }
+                }
+                let mut inner = outer.clone();
+                for (_, n) in &bound { inner.insert((*n).clone()); }
+                lint_block(body, out, &mut inner);
             }
             Stmt::For(name, iter, body) => {
                 if let Expr::List(items) = iter {
@@ -3456,7 +3503,10 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
                     && !body.iter().any(|s| stmt_mentions(s, name)) {
                     out.push(format!("for variable {} never used — prefix with _", name));
                 }
-                lint_block(body, out);
+                let mut inner = outer.clone();
+                for (_, n) in &bound { inner.insert((*n).clone()); }
+                inner.insert(name.clone());
+                lint_block(body, out, &mut inner);
             }
             Stmt::Try(a, evar, b) => {
                 if !evar.starts_with('_')
@@ -3467,12 +3517,30 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
                 if b.len() == 1 && matches!(b[0], Stmt::Print(_)) {
                     out.push("catch body only prints the error — shallow error handling".into());
                 }
+                if b.len() == 1 && matches!(b[0], Stmt::Return(_) | Stmt::Break | Stmt::Continue) {
+                    out.push("catch body just exits — try adds no handling".into());
+                }
                 if a.is_empty() { out.push("empty try — nothing to guard".into()); }
-                lint_block(a, out); lint_block(b, out);
+                let mut inner = outer.clone();
+                for (_, n) in &bound { inner.insert((*n).clone()); }
+                lint_block(a, out, &mut inner.clone());
+                inner.insert(evar.clone());
+                lint_block(b, out, &mut inner);
             }
             Stmt::Match(scrut, arms, els) => {
                 if matches!(scrut, Expr::Int(_) | Expr::Str(_) | Expr::Bool(_) | Expr::Null) {
                     out.push("match on a literal — deterministic, use if or remove".into());
+                }
+                // match on a let-bound literal — constant propagation
+                if let Expr::Var(v) = scrut {
+                    for (_, s) in stmts.iter().enumerate().take(i) {
+                        if let Stmt::Let(n, e) = s {
+                            if n == v && matches!(e, Expr::Int(_) | Expr::Str(_) | Expr::Bool(_) | Expr::Null) {
+                                out.push(format!("match on {} — bound to a constant literal", v));
+                                break;
+                            }
+                        }
+                    }
                 }
                 if arms.is_empty() { out.push("match with no arms — dead statement".into()); }
                 if arms.len() == 1 && els.is_some() {
@@ -3504,8 +3572,25 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
                         }
                     }
                 }
-                for (_, body) in arms { lint_block(body, out); }
-                if let Some(e) = els { lint_block(e, out); }
+                // unbound Var pattern (not _) — evaluates the var, fails to match
+                for (p, _) in arms.iter() {
+                    if let Expr::Var(v) = p {
+                        if v != "_" && !bound.iter().any(|(_, b)| *b == v)
+                            && !outer.contains(v.as_str()) {
+                            out.push(format!("match pattern {} is unbound — never matches", v));
+                        }
+                    }
+                }
+                for (_, body) in arms {
+                    let mut inner = outer.clone();
+                    for (_, n) in &bound { inner.insert((*n).clone()); }
+                    lint_block(body, out, &mut inner);
+                }
+                if let Some(e) = els {
+                    let mut inner = outer.clone();
+                    for (_, n) in &bound { inner.insert((*n).clone()); }
+                    lint_block(e, out, &mut inner);
+                }
             }
             Stmt::Return(_) => {
                 if i == stmts.len() - 1 && returned {

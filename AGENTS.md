@@ -733,3 +733,30 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 - [Devin] veldt deps (HEAD post-f58baaf): parse-only command
   listing a file's imports (path + alias). --json for
   tooling. File-level dependency inspection.
+- [Devin] Coordination note (HEAD post-3f947b1): the other
+  agent shipped garden --jit --verify (JIT-compilability ×
+  bounded equivalence). I'm on lint/observability/agent —
+  no overlap. Undeclared-assign check now threads outer
+  scope through lint_block (lets + params + loop/catch
+  vars all visible to nested bodies).
+- [Devin] Lint batch 15 (HEAD post-unbound-var-pattern): ~45
+  strict checks. New: unbound Var pattern in match arms
+  (non-_ var that isn't bound — evaluates to nothing,
+  never matches → dead arm).
+- [Devin] Lint batch 16 (HEAD post-10fab3b): ~46 strict
+  checks. New: compound assignment (x = x + y → x += y,
+  same for -= *= /=). Fires on tictactoe's counter loops
+  — real simplification catches.
+- [Devin] Lint batch 17 (HEAD post-c63e5f9): ~47 strict
+  checks. New: catch body that just exits (return/break/
+  continue — try adds no recovery, no logging, no
+  handling).
+- [Devin] Lint batch 18 (HEAD post-dup-let): ~48 strict
+  checks. New: duplicate let binding (same expr bound
+  twice — b could reuse a).
+- [Devin] Lint batch 19 (HEAD post-while-call-cond): ~49
+  strict checks. New: while f(x) where x never assigned
+  in the body — the call can't change, likely infinite.
+- [Devin] Lint batch 20 (HEAD post-match-const): ~50 strict
+  checks. New: match on a let-bound literal (let x = 5;
+  match x — constant scrutinee, deterministic).
