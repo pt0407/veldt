@@ -338,6 +338,10 @@ pub fn respond(task: &str, editor_source: &str, veldt: &mut Veldt) -> AgentRespo
     if hasw(&["why"]) && !has(&["obituar", "why did", "why'd"]) {
         return why_intent(&words, veldt);
     }
+    if hasw(&["lint", "warnings", "bugs"])
+        || has(&["code health", "code quality", "static analysis", "lint report"]) {
+        return lint_intent(&words, veldt);
+    }
     if has(&["dead code", "deadcode", "unreachable", "stripped"]) {
         return dead_intent(veldt);
     }
@@ -1407,6 +1411,74 @@ fn dead_intent(veldt: &Veldt) -> AgentResponse {
     let mut text = format!("{} dead-code-removal variants:\n", rows.len());
     for (n, e) in rows.iter().take(8) {
         text.push_str(&format!("  {}#{} — fit {:.2} ({})\n", n, e.id, e.fitness, e.origin));
+    }
+    plain(&text)
+}
+
+/// Lint — "lint fib" / "code health" — strict-lint variant bodies:
+/// per-family warning counts, defect-class called out, or a
+/// garden-wide census when no family is named.
+fn lint_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
+    let lint_entry = |name: &str, e: &FunctionEntry| -> Vec<String> {
+        let wrapped = crate::ast::Stmt::Grow(crate::ast::GrowItem::Fn(
+            name.to_string(), e.params.clone(),
+            e.body.clone(), e.tests.clone()));
+        crate::lint(&[wrapped]).into_iter()
+            .filter(|w| !w.contains("defined but never called")
+                && !w.contains("no top-level statements"))
+            .collect()
+    };
+    if let Some(name) = find_lineage(words, veldt) {
+        let vs = match veldt.functions.get(&name) {
+            Some(v) => v,
+            None => return plain(&format!("No lineage called '{}'.", name)),
+        };
+        let mut bugs = 0usize;
+        let mut total = 0usize;
+        let mut text = String::new();
+        for e in vs {
+            let warns = lint_entry(&name, e);
+            if warns.is_empty() { continue; }
+            total += warns.len();
+            let n_bugs = warns.iter()
+                .filter(|w| crate::evolve::is_realbug_warning(w)).count();
+            bugs += n_bugs;
+            text.push_str(&format!("  {}#{} — {} warnings ({} defect-class)\n",
+                                   name, e.id, warns.len(), n_bugs));
+            for w in warns.iter().take(3) {
+                text.push_str(&format!("    ⚠ {}\n", w));
+            }
+        }
+        if total == 0 {
+            return plain(&format!("{} is lint-clean — no warnings across {} variant(s).",
+                                  name, vs.len()));
+        }
+        return plain(&format!("{}: {} warnings ({} defect-class) across the family:\n{}",
+                              name, total, bugs, text));
+    }
+    // garden-wide census — worst families first
+    let mut per_fam: Vec<(&String, usize, usize)> = Vec::new();
+    let mut total = 0usize;
+    let mut bugs = 0usize;
+    for (name, vs) in &veldt.functions {
+        let (mut fw, mut fb) = (0usize, 0usize);
+        for e in vs {
+            for w in lint_entry(name, e) {
+                fw += 1;
+                if crate::evolve::is_realbug_warning(&w) { fb += 1; }
+            }
+        }
+        if fw > 0 { per_fam.push((name, fw, fb)); }
+        total += fw;
+        bugs += fb;
+    }
+    if total == 0 {
+        return plain("The whole garden is lint-clean — zero warnings.");
+    }
+    per_fam.sort_by(|a, b| b.1.cmp(&a.1));
+    let mut text = format!("Garden lint: {} warnings ({} defect-class):\n", total, bugs);
+    for (n, w, b) in per_fam.iter().take(8) {
+        text.push_str(&format!("  {} — {} warnings ({} defect)\n", n, w, b));
     }
     plain(&text)
 }
