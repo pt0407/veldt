@@ -221,7 +221,7 @@ fn main() {
         }
         "find" => {
             if args.len() < 3 {
-                eprintln!("Usage: veldt find <substr>  (find local families by name)");
+                eprintln!("Usage: veldt find <substr> [--json]  (find local families by name)");
                 process::exit(1);
             }
             let mut veldt = veldt::Veldt::new();
@@ -229,12 +229,21 @@ fn main() {
             let needle = args[2].to_lowercase();
             let hits: Vec<_> = veldt.functions.iter()
                 .filter(|(n, _)| n.to_lowercase().contains(&needle)).collect();
-            if hits.is_empty() {
-                println!("No families matching '{}'", args[2]);
-            }
-            for (name, vs) in hits {
-                let top = vs.iter().map(|e| e.fitness).fold(f64::NEG_INFINITY, f64::max);
-                println!("{} — {} variants, peak fitness {:.2}", name, vs.len(), top);
+            if args.iter().any(|a| a == "--json") {
+                println!("{}", serde_json::json!({
+                    "matches": hits.iter().map(|(n, vs)| serde_json::json!({
+                        "name": n, "variants": vs.len(),
+                        "peak": vs.iter().map(|e| e.fitness).fold(f64::NEG_INFINITY, f64::max),
+                    })).collect::<Vec<_>>(),
+                }));
+            } else {
+                if hits.is_empty() {
+                    println!("No families matching '{}'", args[2]);
+                }
+                for (name, vs) in hits {
+                    let top = vs.iter().map(|e| e.fitness).fold(f64::NEG_INFINITY, f64::max);
+                    println!("{} — {} variants, peak fitness {:.2}", name, vs.len(), top);
+                }
             }
         }
         "search" => {
