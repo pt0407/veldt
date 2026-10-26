@@ -5092,7 +5092,8 @@ fn print_family_detail(veldt: &veldt::Veldt, fam: &String, vs: &[veldt::Function
         let mut runs: Vec<_> = borns.iter().collect();
         runs.sort_by_key(|(r, _)| *r);
         let timeline: Vec<_> = runs.iter().map(|(r, n)| format!("{}:{}", **r % 100, n)).collect();
-        println!("  birth timeline: {}", timeline.join(" "));
+        let counts: Vec<f64> = runs.iter().map(|(_, n)| **n as f64).collect();
+        println!("  birth timeline: {}  {}", timeline.join(" "), spark(&counts));
     }
     // siblings — variants sharing a parent (the sibling map)
     let mut parents_map: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
