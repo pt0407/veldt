@@ -759,22 +759,35 @@ fn family_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
 }
 
 /// Triage — the variants that need attention across the whole garden.
+/// Sick/dying by trial, weakest by fitness, AND defect-carrying by
+/// lint — a variant can pass every trial and still be buggy by
+/// inspection.
 fn triage_intent(veldt: &Veldt) -> AgentResponse {
     let mut sick: Vec<(&String, &FunctionEntry)> = Vec::new();
     let mut dying: Vec<(&String, &FunctionEntry)> = Vec::new();
     let mut weakest: Vec<(&String, &FunctionEntry)> = Vec::new();
+    let mut lint_bad: Vec<(&String, &FunctionEntry, Vec<String>)> = Vec::new();
     for (name, vs) in &veldt.functions {
         for e in vs {
             if matches!(e.health, Health::Sick(_)) { sick.push((name, e)); }
             if matches!(e.health, Health::Dying) { dying.push((name, e)); }
+            let wrapped = crate::ast::Stmt::Grow(crate::ast::GrowItem::Fn(
+                name.clone(), e.params.clone(),
+                e.body.clone(), e.tests.clone()));
+            let bugs: Vec<String> = crate::lint(&[wrapped]).into_iter()
+                .filter(|w| crate::evolve::is_realbug_warning(w)
+                    && !w.contains("defined but never called")
+                    && !w.contains("no top-level statements"))
+                .collect();
+            if !bugs.is_empty() { lint_bad.push((name, e, bugs)); }
         }
         if let Some(w) = vs.iter().min_by(|a, b| a.fitness.partial_cmp(&b.fitness)
             .unwrap_or(std::cmp::Ordering::Equal)) {
             weakest.push((name, w));
         }
     }
-    if sick.is_empty() && dying.is_empty() {
-        return plain("Nothing needs attention — the garden is healthy.");
+    if sick.is_empty() && dying.is_empty() && lint_bad.is_empty() {
+        return plain("Nothing needs attention — the garden is healthy and lint-clean.");
     }
     let mut text = String::from("Triage:\n");
     for (n, e) in &dying {
@@ -786,6 +799,14 @@ fn triage_intent(veldt: &Veldt) -> AgentResponse {
     }
     if sick.len() > 10 {
         text.push_str(&format!("  ... {} more sick\n", sick.len() - 10));
+    }
+    for (n, e, bugs) in lint_bad.iter().take(8) {
+        text.push_str(&format!("  lint {}#{} — {} defect warning{}: {}\n",
+            n, e.id, bugs.len(), if bugs.len() == 1 { "" } else { "s" },
+            bugs[0]));
+    }
+    if lint_bad.len() > 8 {
+        text.push_str(&format!("  ... {} more lint-flagged\n", lint_bad.len() - 8));
     }
     weakest.sort_by(|a, b| a.1.fitness.partial_cmp(&b.1.fitness)
         .unwrap_or(std::cmp::Ordering::Equal));
