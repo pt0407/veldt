@@ -502,6 +502,12 @@ fn main() {
             let mut stmts = p.parse_program()
                 .unwrap_or_else(|e| { eprintln!("Parse error: {}", e); process::exit(1); });
             if health::HealthChecker::repair_program(&mut stmts) {
+                // --check: dry-run — report but don't write, exit 1
+                // like fmt --check so CI can gate on it
+                if args.iter().any(|a| a == "--check") {
+                    println!("{} — has repairable dead code", path);
+                    process::exit(1);
+                }
                 let out = fmt::format_program(&stmts);
                 std::fs::write(path, &out)
                     .unwrap_or_else(|e| { eprintln!("Error writing {}: {}", path, e); process::exit(1); });
