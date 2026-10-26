@@ -566,6 +566,25 @@ impl HealthChecker {
         }
     }
 
+    /// Repair a whole parsed program — top-level dead code plus
+    /// each fn/grow-fn body (the per-block repairs don't recurse
+    /// into function definitions, so this walks them directly).
+    pub(crate) fn repair_program(stmts: &mut Vec<Stmt>) -> bool {
+        let mut changed = Self::repair_dead_tail(stmts);
+        changed |= Self::repair_dead_lets(stmts);
+        for s in stmts.iter_mut() {
+            match s {
+                Stmt::FnDef(_, _, b)
+                | Stmt::Grow(GrowItem::Fn(_, _, b, _)) => {
+                    changed |= Self::repair_dead_tail(b);
+                    changed |= Self::repair_dead_lets(b);
+                }
+                _ => {}
+            }
+        }
+        changed
+    }
+
     /// no calls — construction of a value that can't side-effect
     fn expr_pure(e: &Expr) -> bool {
         match e {

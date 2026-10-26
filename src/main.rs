@@ -483,6 +483,33 @@ fn main() {
                 }
             }
         }
+        // veldt fix <file> — mechanically repair dead code in-place:
+        // same conservative passes as check --garden --fix (dead-tail
+        // truncation, pure dead lets, trailing loop continue), then
+        // re-format the file
+        "fix" => {
+            if args.len() < 3 {
+                eprintln!("Usage: veldt fix <file.veldt>");
+                process::exit(1);
+            }
+            let path = &args[2];
+            let src = std::fs::read_to_string(path)
+                .unwrap_or_else(|e| { eprintln!("Error reading {}: {}", path, e); process::exit(1); });
+            let mut lx = lexer::Lexer::new(&src);
+            let toks = lx.tokenize()
+                .unwrap_or_else(|e| { eprintln!("Lex error: {}", e); process::exit(1); });
+            let mut p = parser::Parser::new_with_lines(toks, lx.token_lines.clone());
+            let mut stmts = p.parse_program()
+                .unwrap_or_else(|e| { eprintln!("Parse error: {}", e); process::exit(1); });
+            if health::HealthChecker::repair_program(&mut stmts) {
+                let out = fmt::format_program(&stmts);
+                std::fs::write(path, &out)
+                    .unwrap_or_else(|e| { eprintln!("Error writing {}: {}", path, e); process::exit(1); });
+                println!("{} — repaired dead code, reformatted", path);
+            } else {
+                println!("{} — nothing to repair", path);
+            }
+        }
         "check" => {
             if args.len() < 3 {
                 eprintln!("Usage: veldt check <file.veldt>");
