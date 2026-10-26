@@ -863,6 +863,25 @@ fn print_stats(veldt: &veldt::Veldt) {
             .map(|(n, c)| format!("{}:{}", n, c)).collect();
         println!("probe coverage: {}", line.join(" "));
     }
+    // avg niche scores across the garden — which niches drive fitness
+    let mut niche_sum: std::collections::HashMap<String, (f64, usize)> =
+        std::collections::HashMap::new();
+    for vs in veldt.functions.values() {
+        for e in vs {
+            for (n, s) in &e.niche_scores {
+                let ent = niche_sum.entry(n.clone()).or_default();
+                ent.0 += s; ent.1 += 1;
+            }
+        }
+    }
+    let mut niches: Vec<(String, f64)> = niche_sum.into_iter()
+        .map(|(n, (s, c))| (n, s / c.max(1) as f64)).collect();
+    niches.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    if !niches.is_empty() {
+        let line: Vec<String> = niches.iter().take(8)
+            .map(|(n, a)| format!("{}:{:.2}", n, a)).collect();
+        println!("avg niche scores: {}", line.join(" "));
+    }
     // coverage line — which families carry probe mass vs bare lineages
     let bare: Vec<&String> = veldt.functions.keys()
         .filter(|n| veldt.probes.get(*n).map(|p| p.is_empty()).unwrap_or(true))
