@@ -51,7 +51,8 @@ fn main() {
                 let tmp = std::env::temp_dir().join(format!("veldt-eval-{}.veldt", std::process::id()));
                 std::fs::write(&tmp, &code).unwrap_or_else(|e| { eprintln!("eval temp write: {}", e); process::exit(1); });
                 if args.iter().any(|a| a == "--vm") {
-                    run_program_vm(tmp.to_str().unwrap());
+                    run_program_vm(tmp.to_str().unwrap(),
+                        args.iter().any(|a| a == "--evolve"));
                 } else {
                     run_program(tmp.to_str().unwrap(), args.iter().any(|a| a == "--trace"), args.iter().any(|a| a == "--evolve"));
                 }
@@ -60,7 +61,8 @@ fn main() {
                 // Phase 11: bytecode VM executor (computational subset)
                 let file = args[2..].iter().find(|a| a.ends_with(".veldt"))
                     .cloned().unwrap_or_else(|| args[2].clone());
-                run_program_vm(&file);
+                run_program_vm(&file,
+                    args.iter().any(|a| a == "--evolve"));
             } else {
                 run_program(&args[2], args.iter().any(|a| a == "--trace"), args.iter().any(|a| a == "--evolve"));
             }
@@ -78,7 +80,7 @@ fn main() {
                 run_program(&f, false, false);
                 let tree = t0.elapsed();
                 let t1 = std::time::Instant::now();
-                run_program_vm(&f);
+                run_program_vm(&f, false);
                 let vm = t1.elapsed();
                 println!("{:>18} {:>10.0}ms {:>10.0}ms {:>7.1}x",
                          p.file_name().unwrap().to_str().unwrap(),
@@ -96,7 +98,7 @@ fn main() {
             let tree = t0.elapsed();
             println!("=== bytecode VM + JIT ===");
             let t1 = std::time::Instant::now();
-            run_program_vm(&file);
+            run_program_vm(&file, false);
             let vm = t1.elapsed();
             let speed = tree.as_secs_f64() / vm.as_secs_f64().max(1e-9);
             println!("--- compare ---");
@@ -1917,7 +1919,7 @@ impl rustyline::highlight::Highlighter for VeldtHelper {}
 impl rustyline::validate::Validator for VeldtHelper {}
 impl rustyline::Helper for VeldtHelper {}
 
-fn run_program_vm(path: &str) {
+fn run_program_vm(path: &str, evolve_after: bool) {
     // Phase 11: bytecode VM path. Same lex/parse; different executor.
     let source = match std::fs::read_to_string(path) {
         Ok(s) => s,
@@ -1953,6 +1955,16 @@ fn run_program_vm(path: &str) {
     }
     if std::env::var("VELDT_JIT_STATS").is_ok() {
         v.jit_stats();
+    }
+    // --evolve — same as the tree-walk path: mutate, trial, save.
+    if evolve_after {
+        let mut evolver = evolve::Evolver::new();
+        for event in evolver.evolve(&mut garden, 1) {
+            eprintln!("{}", event.format());
+        }
+    }
+    if let Err(e) = garden.save() {
+        eprintln!("Error saving veldt: {}", e);
     }
 }
 
