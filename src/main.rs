@@ -491,6 +491,56 @@ fn main() {
             let json_out = args.iter().any(|a| a == "--json");
             let strict = args.iter().any(|a| a == "--strict");
             let watch = args.iter().any(|a| a == "--watch");
+            // veldt check --garden [family] — strict-lint every variant
+            // body in the garden; mutations can produce the exact bug
+            // shapes the linter catches, so gate on it before adopting
+            if args.iter().any(|a| a == "--garden") {
+                let fam = args.iter().position(|a| a == "--garden")
+                    .and_then(|i| args.get(i + 1))
+                    .filter(|s| !s.starts_with("--"));
+                let mut v = veldt::Veldt::new();
+                if v.load().is_err() {
+                    eprintln!("no garden found (nothing to lint)");
+                    process::exit(1);
+                }
+                let mut total = 0usize;
+                let mut flagged = 0usize;
+                for (name, entries) in &v.functions {
+                    if let Some(f) = fam { if name != f { continue; } }
+                    for e in entries {
+                        let wrapped = ast::Stmt::Grow(ast::GrowItem::Fn(
+                            name.clone(), e.params.clone(),
+                            e.body.clone(), e.tests.clone()));
+                        // drop program-level noise — a wrapped body is a
+                        // module of one fn by construction; the garden
+                        // calls it dynamically, nothing here does
+                        let warns: Vec<String> = lint(&[wrapped])
+                            .into_iter()
+                            .filter(|w| !w.contains("defined but never called")
+                                && !w.contains("no top-level statements"))
+                            .collect();
+                        if warns.is_empty() { continue; }
+                        flagged += 1;
+                        total += warns.len();
+                        if json_out {
+                            println!("{}", serde_json::json!({
+                                "family": name, "variant": e.id,
+                                "warnings": warns}));
+                        } else {
+                            for w in &warns {
+                                eprintln!("  ⚠ {}#{}: {}", name, e.id,
+                                    w.strip_prefix(format!("{}: ", name).as_str())
+                                        .unwrap_or(w.as_str()));
+                            }
+                        }
+                    }
+                }
+                if !json_out {
+                    println!("garden lint — {} warnings across {} variant(s)",
+                             total, flagged);
+                }
+                return;
+            }
             let run = |src: &str| -> Result<(usize, Vec<String>), String> {
                 let mut lx = lexer::Lexer::new(src);
                 let toks = lx.tokenize().map_err(|e| format!("Lex error: {}", e))?;
