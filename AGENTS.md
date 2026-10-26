@@ -603,3 +603,10 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   proportional fitness bars. check --strict: while cond var
   never assigned inside body (stmt_assigns walks nested
   bodies), match one-arm + else → if/else.
+- [Devin] Final tail (HEAD post-d6a5be2): diff gets a fitness
+  delta (Δ ±x.xx) on both the default +++ header and the
+  --unified header. check --strict gained else { if } → else
+  if, match one-arm + else → if/else, while cond var never
+  assigned (stmt_assigns walks nested bodies). ~26 lint
+  checks; every diff/stats/garden/lineage surface shows
+  shape + delta, not just raw numbers.
