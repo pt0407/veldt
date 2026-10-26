@@ -3405,6 +3405,9 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
                 if body.len() == 1 && matches!(body[0], Stmt::Break) {
                     out.push("loop body is just break — degenerate loop".into());
                 }
+                if body.iter().any(|s| matches!(s, Stmt::Let(n, _) if n == name)) {
+                    out.push(format!("let {} inside the loop body shadows the loop var", name));
+                }
                 if !name.starts_with('_')
                     && !body.iter().any(|s| stmt_mentions(s, name)) {
                     out.push(format!("for variable {} never used — prefix with _", name));
