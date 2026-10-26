@@ -160,6 +160,8 @@
   .variant-item.sick { color: var(--rust); }
   .variant-item .vid { color: var(--text-dim); }
   .variant-item .origin-tag { color: var(--ash); font-size: 9px; font-style: italic; }
+  .variant-item .play { cursor: pointer; color: var(--moss); font-size: 11px; margin-left: 4px; }
+  .variant-item .play:hover { color: var(--glow); }
 
   /* Lineage tree */
   .tree-node { position: relative; }
@@ -699,6 +701,20 @@ async function fetchGarden() {
   renderGarden();
 }
 
+async function runVariant(name, id) {
+  const raw = prompt(`args for ${name}#${id} (JSON list)`, '[5]');
+  if (raw === null) return;
+  let args;
+  try { args = JSON.parse(raw); } catch { args = []; }
+  const res = await fetch(API + '/api/call', { method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, variant: id, args }) });
+  const d = await res.json();
+  document.getElementById('output').innerHTML =
+    '<pre style="color:#aef;margin:0">' + name + '#' + id + '(' + raw + ') = ' +
+    (d.ok ? JSON.stringify(d.result) : 'ERROR: ' + d.error) + '</pre>';
+}
+
 async function runProgram() {
   const source = editor.getValue();
   document.getElementById('output').innerHTML = '';
@@ -888,6 +904,7 @@ function renderGarden() {
           ${isFittest ? '<span class="star">◆</span> ' : ''}<span class="vid">#${v.id}</span> ${v.health}
           ${isChamp ? '<span class="niche-badge">niche</span>' : ''}
           <span style="float:right;color:var(--text-dim)">${v.fitness}%</span>
+          <span class="play" onclick="event.stopPropagation();runVariant('${lineage.name}',${v.id})" title="run this variant">▶</span>
           ${v.origin && v.origin !== 'seed' ? `<div class="origin-tag">${v.origin}</div>` : ''}
         </div>`;
         if (kids.length) {
