@@ -157,14 +157,13 @@ impl Evolver {
                         Some(body) => (body, vec![entry.id],
                             format!("llm-rewrite of {}#{}", name, entry.id)),
                         None => {
-                            let mutation = self.pick_mutation();
-                            (self.mutate_body(&entry.body, mutation), vec![entry.id],
+                            let (body, mutation) = self.mutate_retry(&entry.body);
+                            (body, vec![entry.id],
                              format!("{} of {}#{}", mutation_name(mutation), name, entry.id))
                         }
                     }
                 } else {
-                    let mutation = self.pick_mutation();
-                    let body = self.mutate_body(&entry.body, mutation);
+                    let (body, mutation) = self.mutate_retry(&entry.body);
                     (body, vec![entry.id],
                      format!("{} of {}#{}", mutation_name(mutation), name, entry.id))
                 };
@@ -477,6 +476,21 @@ impl Evolver {
             Mutation::HoistInvariant => format!("loop-invariant hoist on {}#{}", name, id),
             Mutation::EarlyExit => format!("early-exit fusion on {}#{}", name, id),
         }
+    }
+
+    /// Pick + apply a mutation; re-roll (≤6x) when it leaves the body
+    /// unchanged — conditional operators can't fire on every shape, and
+    /// no-op children only burn budget downstream (clone rejection).
+    fn mutate_retry(&mut self, body: &[Stmt]) -> (Vec<Stmt>, Mutation) {
+        let parent_key = format!("{:?}", body);
+        let mut last = Mutation::Simplify;
+        let mut out = body.to_vec();
+        for _ in 0..6 {
+            last = self.pick_mutation();
+            out = self.mutate_body(body, last);
+            if format!("{:?}", out) != parent_key { break; }
+        }
+        (out, last)
     }
 
     fn mutate_body(&mut self, body: &[Stmt], mutation: Mutation) -> Vec<Stmt> {
