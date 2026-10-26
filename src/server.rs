@@ -1178,6 +1178,24 @@ fn garden_json(veldt: &Veldt) -> serde_json::Value {
     })
 }
 
+async fn champions() -> Json<serde_json::Value> {
+    let mut veldt = veldt::Veldt::new();
+    if veldt.load().is_err() {
+        return Json(serde_json::json!({"error": "garden load failed"}));
+    }
+    let champs: Vec<serde_json::Value> = veldt.functions.iter()
+        .filter_map(|(n, vs)| vs.iter()
+            .max_by(|a, b| a.fitness.partial_cmp(&b.fitness)
+                .unwrap_or(std::cmp::Ordering::Equal))
+            .map(|e| serde_json::json!({
+                "family": n, "champion": format!("{}#{}", n, e.id),
+                "fitness": e.fitness, "health": format!("{:?}", e.health),
+                "trust": format!("{:?}", e.trust),
+            })))
+        .collect();
+    Json(serde_json::json!({"champions": champs}))
+}
+
 // --- IDE HTML ---
 
 async fn serve_ide() -> Html<&'static str> {
