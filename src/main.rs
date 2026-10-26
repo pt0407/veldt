@@ -1958,6 +1958,18 @@ fn main() {
                 if health::HealthChecker::heal(&mut entry, &veldt) {
                     healed += 1;
                     eprintln!("[TEND] {}#{} — healed", name, id);
+                    // residual lint — the healed body may still carry
+                    // warnings; report the honest code-health state
+                    let wrapped = ast::Stmt::Grow(ast::GrowItem::Fn(
+                        name.clone(), entry.params.clone(),
+                        entry.body.clone(), entry.tests.clone()));
+                    let w = lint(&[wrapped]).into_iter()
+                        .filter(|w| !w.contains("defined but never called")
+                            && !w.contains("no top-level statements")).count();
+                    if w > 0 {
+                        eprintln!("         {}#{} — {} warning{} remain",
+                            name, id, w, if w == 1 { "" } else { "s" });
+                    }
                     if let Some(vs) = veldt.functions.get_mut(&name) {
                         for e in vs.iter_mut() {
                             if e.id == id { *e = entry.clone(); break; }
