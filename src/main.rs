@@ -3477,6 +3477,11 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                                 out.push(format!("let {} = {} — {} is a constant alias", name, v, v));
                                 break;
                             }
+                            // let a = b where b was let-bound to Var(c) — transitive alias
+                            if n == v && matches!(pe, Expr::Var(_)) {
+                                out.push(format!("let {} = {} — {} is an alias itself", name, v, v));
+                                break;
+                            }
                         }
                     }
                 }
