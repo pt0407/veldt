@@ -1,0 +1,22 @@
+# Phase 7 demo: the garden picks algorithmic winners.
+# Seed max_val with sort().reverse()[0] (O(n log n) + allocations),
+# plant a second variant doing a single scan (O(n), no alloc),
+# then call_best shows which the garden prefers.
+
+grow fn max_val(xs: list) test max_val([3,1,4,1,5]) == 5, max_val([-2,-9]) == -2 {
+    let s = xs.sort()
+    let r = s.reverse()
+    return r[0]
+}
+
+grow fn max_val(xs: list) test max_val([3,1,4,1,5]) == 5, max_val([-2,-9]) == -2 {
+    let m = xs[0]
+    let i = 1
+    while i < xs.len() {
+        if xs[i] > m { m = xs[i] }
+        i = i + 1
+    }
+    return m
+}
+
+print(call_best("max_val", [9, 2, 7, 1]))
