@@ -2276,6 +2276,13 @@ fn print_stats(veldt: &veldt::Veldt) {
                     let max = parent_counts.iter().max().unwrap();
                     println!("  parents: avg {:.1} (peak {})", avg, max);
                 }
+                // turnover — the family's churn (born vs died)
+                let born_n = vs.len();
+                let died_n = veldt.obituaries.iter().filter(|o| o.name == *fam).count();
+                if born_n + died_n > 0 {
+                    let churn = died_n as f64 / (born_n + died_n) as f64;
+                    println!("  turnover: {} living · {} died ({:.0}% churn)", born_n, died_n, churn * 100.0);
+                }
             }
         }
         if veldt.fitness_history.len() >= 2 {
