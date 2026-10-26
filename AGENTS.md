@@ -1113,3 +1113,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   New: `let x = f()` / `x = f()` where fn f never returns a
   value — binds null. block_returns_value() walks bodies
   excluding nested fn/lambda scopes.
+- [Devin] Lint batch 57 (HEAD post-self-read): ~90 checks.
+  New: grow test calling a different fn (doesn't exercise the
+  grown fn); let x = <reads x> with x unbound (self-read
+  before binding — rebinds stay quiet).
