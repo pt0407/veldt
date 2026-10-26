@@ -5085,20 +5085,27 @@ fn print_family_detail(veldt: &veldt::Veldt, fam: &String, vs: &[veldt::Function
         let fastest = vs.iter().max_by(|a, b|
             (a.fitness / (a.age as f64 + 1.0)).partial_cmp(&(b.fitness / (b.age as f64 + 1.0)))
             .unwrap_or(std::cmp::Ordering::Equal)).unwrap();
-        println!("  fit_rate: avg {:.3} (peak {:.3} — {}#{})", avg, max, fastest.name, fastest.id);
+        let mut sorted = rates.clone();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        println!("  fit_rate: avg {:.3} (peak {:.3} — {}#{})  {}",
+            avg, max, fastest.name, fastest.id, spark(&sorted));
     }
     // usage_rate + size_rate — the throughput + growth-rate profile
     let usage_rates: Vec<f64> = vs.iter()
         .map(|e| e.usage_count as f64 / (e.age as f64 + 1.0)).collect();
     if !usage_rates.is_empty() {
         let avg = usage_rates.iter().sum::<f64>() / usage_rates.len() as f64;
-        println!("  usage_rate: avg {:.2} calls/run", avg);
+        let mut sorted = usage_rates.clone();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        println!("  usage_rate: avg {:.2} calls/run  {}", avg, spark(&sorted));
     }
     let size_rates: Vec<f64> = vs.iter()
         .map(|e| crate::fmt::format_program(&e.body).len() as f64 / (e.age as f64 + 1.0)).collect();
     if !size_rates.is_empty() {
         let avg = size_rates.iter().sum::<f64>() / size_rates.len() as f64;
-        println!("  size_rate: avg {:.1} chars/run", avg);
+        let mut sorted = size_rates.clone();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        println!("  size_rate: avg {:.1} chars/run  {}", avg, spark(&sorted));
     }
     // pressure — the family's selection pressure (fitness spread)
     if vs.len() > 1 {
