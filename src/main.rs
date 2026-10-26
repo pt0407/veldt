@@ -3753,6 +3753,11 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                                     out.push(format!("match pattern {} is bound to a literal — inline it", v));
                                     break;
                                 }
+                                // Var pattern bound to a call — the pattern is a call result
+                                if n == v && matches!(pe, Expr::Call(..) | Expr::MethodCall(..)) {
+                                    out.push(format!("match pattern {} is bound to a call — inline it", v));
+                                    break;
+                                }
                             }
                         }
                     }

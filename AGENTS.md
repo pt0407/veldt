@@ -893,3 +893,6 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 - [Devin] Lint batch 36 (HEAD post-match-lit-pattern): ~67
   strict checks. New: match Var pattern bound to a
   literal — the pattern is a constant, could inline.
+- [Devin] Lint batch 37 (HEAD post-match-call-pattern): ~68
+  strict checks. New: match Var pattern bound to a call —
+  the pattern is a call result, could inline it.
