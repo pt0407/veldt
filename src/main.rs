@@ -664,6 +664,7 @@ fn print_usage() {
   veldt run --trace <file>     Trace every executed statement
   veldt run --evolve <file>    Run 1 evolve cycle after the program
   veldt run --sandbox <file>   Run with all side-effect caps denied
+  veldt watch <file> --sandbox Re-run untrusted code under Stage-0 caps
   veldt fuzz <name>|--all      Boundary-corpus sweep; divergences become probes
   veldt absorb                 Convert live call traces into probes
   veldt tournament <url>       Pull pool, trial merged families, push winners
