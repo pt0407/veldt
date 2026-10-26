@@ -3299,6 +3299,11 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
                 if bool_cmp(cond) { out.push("condition compares to a bool literal — drop the == true/false".into()); }
                 if taut_cmp(cond) { out.push("if condition compares a value to complementary ranges — always true or always false".into()); }
                 if polar_cmp(cond) { out.push("if condition tests x and !x — contradiction or tautology".into()); }
+                if let Expr::BinOp(l, op, r) = cond {
+                    if matches!(op, BinOp::And | BinOp::Or) && **l == **r {
+                        out.push("if condition repeats the same operand — x && x / x || x".into());
+                    }
+                }
                 if let Some(e) = b {
                     if *a == *e { out.push("if branches are identical — dead conditional".into()); }
                     if a.is_empty() && !e.is_empty() {
@@ -3322,6 +3327,11 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
                 if bool_cmp(cond) { out.push("loop condition compares to a bool literal — drop the == true/false".into()); }
                 if taut_cmp(cond) { out.push("loop condition compares a value to complementary ranges — always true or always false".into()); }
                 if polar_cmp(cond) { out.push("loop condition tests x and !x — contradiction or tautology".into()); }
+                if let Expr::BinOp(l, op, r) = cond {
+                    if matches!(op, BinOp::And | BinOp::Or) && **l == **r {
+                        out.push("loop condition repeats the same operand — x && x / x || x".into());
+                    }
+                }
                 // condition var never assigned inside the body — likely infinite
                 if let Expr::Var(v) = cond {
                     if !body.iter().any(|s| stmt_assigns(s, v)) {
