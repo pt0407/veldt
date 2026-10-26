@@ -1193,3 +1193,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 - [Devin] garden --fix with dead-let pass: census 97 -> 85.
   Remaining are semantic warnings (play_game loop-no-exit,
   compound-assign) — not mechanically repairable.
+- [Devin] repair pass 3: trailing `continue` dropped from
+  while/for bodies (loop-body scope only — `if{continue}` can
+  skip stmts, kept). Now: dead-tail + dead-lets + trailing
+  continue in heal() and check --garden --fix.
