@@ -4886,7 +4886,10 @@ fn print_family_detail(veldt: &veldt::Veldt, fam: &String, vs: &[veldt::Function
         let min = lus.iter().min().unwrap();
         let max = lus.iter().max().unwrap();
         let stale = veldt.run_count.saturating_sub(*max);
-        println!("  last_used: {} – {} ({} runs stale)", min, max, stale);
+        let mut sorted: Vec<f64> = lus.iter().map(|l| *l as f64).collect();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        println!("  last_used: {} – {} ({} runs stale)  {}", min, max, stale,
+            spark(&sorted));
     }
     // trial_score + lifespan — the quality + longevity profile
     let trials: Vec<f64> = vs.iter().map(|e| e.trial_score).collect();
