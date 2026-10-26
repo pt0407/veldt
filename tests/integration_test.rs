@@ -127,3 +127,71 @@ fn test_cross_run_persistence() {
     let result = interp.call_function("helper", None, vec![veldt::interpreter::Value::Int(21)]);
     assert_eq!(result.unwrap(), veldt::interpreter::Value::Int(42));
 }
+
+fn run_src(source: &str) -> Interpreter {
+    let mut lex = Lexer::new(source);
+    let tokens = lex.tokenize().unwrap();
+    let mut parser = Parser::new(tokens);
+    let stmts = parser.parse_program().unwrap();
+    let mut interp = Interpreter::new();
+    interp.run(&stmts).unwrap();
+    interp
+}
+
+#[test]
+fn test_append_insert_dict_index() {
+    let i = run_src(r#"
+        let xs = []
+        xs.append(1)
+        xs.append(2)
+        let d = dict()
+        d.insert("a", 1)
+        d["b"] = 2
+        let s = set()
+        s.insert(5)
+    "#);
+    let xs_v = i.vars.borrow().get("xs").cloned().unwrap();
+    let d_v = i.vars.borrow().get("d").cloned().unwrap();
+    match xs_v {
+        veldt::interpreter::Value::List(l) => assert_eq!(l.len(), 2),
+        _ => panic!("xs not a list"),
+    }
+    match d_v {
+        veldt::interpreter::Value::Dict(m) => {
+            assert!(m.contains_key("a") && m.contains_key("b"));
+        }
+        _ => panic!("d not a dict"),
+    }
+}
+
+#[test]
+fn test_dict_index_read_and_str_len() {
+    let i = run_src(r#"
+        let d = dict()
+        d["k"] = 42
+        let got = d["k"]
+        let sl = "hello".len()
+        let xs = [10, 20, 30]
+        let last = xs[-1]
+    "#);
+    assert_eq!(i.vars.borrow().get("got").cloned(), Some(veldt::interpreter::Value::Int(42)));
+    assert_eq!(i.vars.borrow().get("sl").cloned(), Some(veldt::interpreter::Value::Int(5)));
+    assert_eq!(i.vars.borrow().get("last").cloned(), Some(veldt::interpreter::Value::Int(30)));
+}
+
+#[test]
+fn test_borrow_read_methods() {
+    let i = run_src(r#"
+        let d = dict()
+        d["x"] = 7
+        let g = d.get("x")
+        let h = d.has("x")
+        let n = d.len()
+        let xs = [1, 2, 3]
+        let e = xs.is_empty()
+    "#);
+    assert_eq!(i.vars.borrow().get("g").cloned(), Some(veldt::interpreter::Value::Int(7)));
+    assert_eq!(i.vars.borrow().get("h").cloned(), Some(veldt::interpreter::Value::Bool(true)));
+    assert_eq!(i.vars.borrow().get("n").cloned(), Some(veldt::interpreter::Value::Int(1)));
+    assert_eq!(i.vars.borrow().get("e").cloned(), Some(veldt::interpreter::Value::Bool(false)));
+}

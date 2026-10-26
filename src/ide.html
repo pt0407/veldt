@@ -599,14 +599,21 @@ require(['vs/editor/editor.main'], function() {
         endColumn: word.endColumn,
       };
       const kw = ['fn','let','if','else','while','for','in','return','grow','struct',
-        'test','try','catch','import','match','null','true','false','and','or','not'];
-      const builtins = ['print','len','push','keys','dict','set','int','float','str','bool',
-        'sqrt','floor','ceil','abs','max','min','range','type','has','get','remove',
-        'map','filter','reduce','sum','sorted','reverse','unique','join',
-        'fetch','json_parse','json_stringify','read_file','write_file','append_file',
-        'exec','env','sleep','time_ms','date','render','call_best',
-        'spawn','join','pmap','re_match','re_find','re_replace','re_split',
-        'db_open','db_exec','db_query','db_close','serve'];
+        'test','try','catch','import','as','match','null','true','false','and','or','not',
+        'break','continue','immortal'];
+      const builtins = ['print','eprint','len','push','append','pop_in','insert',
+        'keys','values','dict','set','int','float','str','bool','has','get','put',
+        'sqrt','floor','ceil','abs','fabs','max','min','range','pow','exp','log',
+        'log10','sin','cos','tan','pi','rand','round','type','merge','delete',
+        'map','filter','reduce','sum','sorted','reverse','unique','join','sort_by',
+        'fetch','post','json_parse','json_stringify','read_file','write_file',
+        'read_lines','write_lines','exists','file_size','ls','mkdir','rm','cp','mv','cwd',
+        'exec','env','sleep','time_ms','date','parse_date','render','call_best',
+        'spawn','join','pmap','re_match','re_find','re_replace','re_split','re_captures',
+        'db_open','db_exec','db_query','db_close','serve','match_path','args','exit',
+        'input','read_stdin','b64_encode','b64_decode','url_encode','url_decode',
+        'sha256','format','is_prime','nth_prime','collatz_seq','dedupe','anagram',
+        'repeat_str','sum_sq','lcm','gcd','isqrt'];
       const items = [];
       kw.forEach(k => items.push({
         label: k, kind: monaco.languages.CompletionItemKind.Keyword,
