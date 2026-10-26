@@ -3545,6 +3545,12 @@ fn print_stats(veldt: &veldt::Veldt) {
             "efficiency" => variants.iter().map(|e| e.efficiency).sum::<f64>() / n,
             "born" => variants.iter().map(|e| e.born).max().unwrap_or(0) as f64,
             "parents" => variants.iter().map(|e| e.parents.len() as f64).sum::<f64>() / n,
+            _ if sort_field.starts_with("niche:") => {
+                // niche:<name> — per-family avg score on a specific niche
+                let niche = &sort_field[6..];
+                variants.iter().map(|e|
+                    e.niche_scores.get(niche).copied().unwrap_or(0.0)).sum::<f64>() / n
+            }
             "name" => 0.0, // sorted separately below
             _ => if variants.is_empty() { 0.0 } else { top }, // "fitness" default
         };
