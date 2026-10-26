@@ -175,10 +175,13 @@ fn main() {
             if names.is_empty() {
                 println!("No families with multiple variants.");
             } else {
+                let strict = args.iter().any(|a| a == "--strict");
                 println!("Auditing {} families...", names.len());
                 let mut demoted = Vec::new();
+                let mut divergences = 0;
                 for n in &names {
                     if let Some(id) = verify_family_find_divergent(n) {
+                        divergences += 1;
                         if quarantine {
                             if let Some(vs) = veldt.functions.get_mut(n) {
                                 for v in vs.iter_mut() {
@@ -195,6 +198,10 @@ fn main() {
                     veldt.save().unwrap_or_else(
                         |e| eprintln!("Save error: {}", e));
                     println!("Quarantined (Dying): {}", demoted.join(", "));
+                }
+                if strict && divergences > 0 {
+                    eprintln!("{} divergent variant(s) found", divergences);
+                    process::exit(1);
                 }
             }
         }
