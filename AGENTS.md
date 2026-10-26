@@ -1305,3 +1305,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 - [Devin] check --fail: CI gate — exit 1 on defect-class
   warnings (file/stdin + --garden). Advisory warnings pass;
   defects fail the build.
+- [Devin] SUITE GREEN: 72/72 bin + 48/48 lib tests pass —
+  the only failing test anywhere is the intentional
+  jit_recursion_result_not_sentinel regression (your lane —
+  nok() -1 sentinel leaks boxed into callers).
