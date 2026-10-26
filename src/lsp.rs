@@ -63,6 +63,7 @@ pub fn run_lsp() {
                         "renameProvider": true,
                         "referencesProvider": true,
                         "signatureHelpProvider": {"triggerCharacters": ["(", ","]},
+                        "codeLensProvider": {"resolveProvider": false},
                         "completionProvider": {"triggerCharacters": [".", ":"]}
                     },
                     "serverInfo": {"name": "veldt-lsp", "version": env!("CARGO_PKG_VERSION")}
@@ -78,6 +79,7 @@ pub fn run_lsp() {
                 "textDocument/rename" => rename(params, &docs),
                 "textDocument/references" => references(params, &docs),
                 "textDocument/signatureHelp" => signature_help(params, &docs),
+                "textDocument/codeLens" => code_lens(params, &docs),
                 _ => None,
             };
 
@@ -376,6 +378,36 @@ fn signature_help(params: &Value, docs: &HashMap<String, Doc>) -> Option<Value> 
         "activeSignature": 0,
         "activeParameter": before[open+1..].matches(',').count() as u32,
     }))
+}
+
+/// Code lens — "N tests · fitness F" above every `grow fn` in the doc.
+/// Loads the garden once per request (cheap, single JSON read).
+fn code_lens(params: &Value, docs: &HashMap<String, Doc>) -> Option<Value> {
+    let doc = doc_of(params, docs)?;
+    let mut veldt = crate::veldt::Veldt::new();
+    if veldt.load().is_err() { return Some(json!([])); }
+    let mut out = Vec::new();
+    for (line, text) in doc.text.lines().enumerate() {
+        let t = text.trim_start();
+        if !t.starts_with("grow fn ") && !t.starts_with("fn ") { continue; }
+        let name = t.trim_start_matches("grow fn ").trim_start_matches("fn ")
+            .split(|c: char| c == '(' || c == '<' || c.is_whitespace())
+            .next().unwrap_or("");
+        if name.is_empty() { continue; }
+        let title = if let Some(vs) = veldt.functions.get(name) {
+            let top = vs.iter().map(|e| e.fitness).fold(f64::NEG_INFINITY, f64::max);
+            let tests = veldt.probes.get(name).map(|p| p.len()).unwrap_or(0);
+            format!("{} tests · fitness {:.2} · {} variants", tests, top, vs.len())
+        } else {
+            "no garden lineage yet".to_string()
+        };
+        out.push(json!({
+            "range": {"start": {"line": line as u32, "character": 0},
+                      "end": {"line": line as u32, "character": text.len() as u32}},
+            "command": {"title": title, "command": ""},
+        }));
+    }
+    Some(Value::Array(out))
 }
 
 fn hover(params: &Value, docs: &HashMap<String, Doc>) -> Option<Value> {
