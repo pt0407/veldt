@@ -566,6 +566,20 @@ fn main() {
                 }
                 println!("=== The Veldt (fitness >= {}) ===", min);
                 filtered.print_garden(sick_only, healthy_only);
+            } else if args.iter().any(|a| a == "--underused_count") {
+                // --underused_count — families with at least 1 underused variant
+                let mut filtered = veldt::Veldt::new();
+                filtered.probes = veldt.probes.clone();
+                filtered.obituaries = veldt.obituaries.clone();
+                filtered.run_count = veldt.run_count;
+                filtered.garden_path = veldt.garden_path.clone();
+                for (name, vs) in &veldt.functions {
+                    if vs.iter().any(|e| (e.usage_count as f64) < e.lifespan) {
+                        filtered.functions.insert(name.clone(), vs.clone());
+                    }
+                }
+                println!("=== The Veldt (families with underused) ===");
+                filtered.print_garden(sick_only, healthy_only);
             } else if args.iter().any(|a| a == "--overworked_count") {
                 // --overworked_count — families with at least 1 overworked variant
                 let mut filtered = veldt::Veldt::new();
