@@ -1044,3 +1044,6 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 - [Devin] Lint batch 43 (HEAD post-binop-alias): ~74 strict
   checks. New: let a = b where b is bound to a binop —
   the let copies a computed expression.
+- [Devin] Lint batch 44 (HEAD post-match-binop-pattern): ~75
+  strict checks. New: match Var pattern bound to a binop —
+  the pattern is a computed expr, could inline.
