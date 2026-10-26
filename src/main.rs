@@ -1089,7 +1089,7 @@ fn print_stats(veldt: &veldt::Veldt) {
     // obituary staleness — runs since last use before death
     if !veldt.obituaries.is_empty() {
         let stale: Vec<u64> = veldt.obituaries.iter()
-            .map(|o| o.timestamp.saturating_sub(o.last_used)).collect();
+            .map(|o| veldt.run_count.saturating_sub(o.last_used)).collect();
         let avg = stale.iter().sum::<u64>() / stale.len() as u64;
         let max = stale.iter().max().unwrap_or(&0);
         let stale_10 = stale.iter().filter(|s| **s >= 10).count();
