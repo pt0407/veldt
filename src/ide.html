@@ -483,6 +483,7 @@
   <div class="topbar-right">
     <button class="btn" id="saveBtn">Save</button>
     <button class="btn amber" id="evolveBtn">Evolve</button>
+    <button class="btn" id="fuzzBtn" title="boundary-corpus sweep vs every variant">Fuzz</button>
     <button class="btn danger" id="clearBtn">Clear Garden</button>
     <button class="btn primary" id="runBtn">▶ Run</button>
     <label style="font-size:11px;opacity:.7;margin-left:6px"><input type="checkbox" id="sandboxChk"> sandbox</label>
@@ -1143,6 +1144,16 @@ document.getElementById('agentInput').addEventListener('keydown', e => {
 });
 document.getElementById('runBtn').addEventListener('click', runProgram);
 document.getElementById('evolveBtn').addEventListener('click', evolve);
+document.getElementById('fuzzBtn').addEventListener('click', async () => {
+  const name = prompt('Fuzz which family?', lastFamily || 'fib');
+  if (!name) return;
+  const res = await fetch(API + '/api/fuzz', { method: 'POST',
+    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+  const d = await res.json();
+  document.getElementById('output').innerHTML =
+    '<pre style="color:#aef;margin:0">' + (d.report || 'no report') + '</pre>';
+  renderGarden();
+});
 document.getElementById('clearBtn').addEventListener('click', clearGarden);
 document.getElementById('saveBtn').addEventListener('click', saveFile);
 document.getElementById('fileSelector').addEventListener('change', e => openFile(e.target.value));

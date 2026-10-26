@@ -29,6 +29,7 @@ pub async fn start_server(port: u16) {
     let app = Router::new()
         .route("/", get(serve_ide))
         .route("/api/garden", get(get_garden))
+        .route("/api/fuzz", post(fuzz_family))
         .route("/api/run", post(run_program))
         .route("/api/evolve", post(evolve))
         .route("/api/clear", post(clear_veldt))
@@ -46,6 +47,21 @@ pub async fn start_server(port: u16) {
 }
 
 // --- API Handlers ---
+
+#[derive(Deserialize)]
+struct FuzzRequest { name: String }
+
+async fn fuzz_family(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<FuzzRequest>,
+) -> Json<serde_json::Value> {
+    let mut veldt = { state.veldt.lock().unwrap().clone() };
+    let words = vec!["fuzz", req.name.as_str()];
+    let resp = agent::fuzz_intent(&words, &mut veldt);
+    let report = resp.reply;
+    { let mut v = state.veldt.lock().unwrap(); *v = veldt; }
+    Json(serde_json::json!({ "report": report }))
+}
 
 async fn get_garden(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
     let veldt = state.veldt.lock().unwrap();

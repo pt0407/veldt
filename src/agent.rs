@@ -269,7 +269,7 @@ pub fn respond(task: &str, editor_source: &str, veldt: &mut Veldt) -> AgentRespo
     help_intent()
 }
 
-fn fuzz_intent(words: &[&str], veldt: &mut Veldt) -> AgentResponse {
+pub fn fuzz_intent(words: &[&str], veldt: &mut Veldt) -> AgentResponse {
     // "fuzz <name>" — boundary corpus vs every variant, divergence report
     let name = words.iter().find(|w| !["fuzz","the","family","it","them","all"].contains(w)
         && veldt.functions.contains_key(**w)).copied();
