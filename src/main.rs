@@ -2188,6 +2188,30 @@ fn print_stats(veldt: &veldt::Veldt) {
                     let max = sizes.iter().max().unwrap();
                     println!("  size: avg {:.0} chars (peak {})", avg, max);
                 }
+                // builtin usage — which builtins the family's variants call
+                let mut builtins: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+                for e in vs.iter() {
+                    let src = crate::fmt::format_program(&e.body);
+                    for b in ["turn", "canvas", "grid_", "ui_", "bt_", "balance", "astar",
+                              "bfs", "los", "fov", "rand", "roll", "dice", "choice", "weighted",
+                              "noise", "fbm", "perlin", "poisson", "voronoi", "delaunay", "wfc",
+                              "maze", "flood", "neighbor", "lerp", "clamp", "dist", "aabb",
+                              "smoothstep", "bezier", "point_in_poly", "convex", "ease", "bounce",
+                              "line_points", "fsm", "book", "svc_", "robot", "edge", "game_loop",
+                              "dist_stats", "minimax", "book", "score", "winner", "heuristic"].iter() {
+                        if src.contains(b) {
+                            *builtins.entry(b.to_string()).or_insert(0) += 1;
+                        }
+                    }
+                }
+                if !builtins.is_empty() {
+                    println!("  builtins:");
+                    let mut sorted: Vec<_> = builtins.iter().collect();
+                    sorted.sort_by(|a, b| b.1.cmp(&a.1));
+                    for (b, count) in sorted.iter().take(8) {
+                        println!("    {:<20} {} variants", b, count);
+                    }
+                }
             }
         }
         if veldt.fitness_history.len() >= 2 {
