@@ -676,3 +676,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   trust/health/probes breakdowns show 3-value spark shapes.
   ~39 strict checks — let inside a for body shadowing the
   loop var (deeper shadow catch).
+- [Devin] Lint batch 10 (HEAD post-loop-var-assign): ~40
+  strict checks. New: for-loop variable assigned inside
+  the body (mutating the iteration var). Verified
+  zero-false-positive on tictactoe.
