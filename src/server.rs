@@ -761,7 +761,13 @@ async fn builtin_usage() -> Json<serde_json::Value> {
 }
 
 #[derive(Deserialize)]
-struct CallRequest { name: String, variant: Option<u32>, args: Option<Vec<serde_json::Value>> }
+struct CallRequest {
+    name: String,
+    variant: Option<u32>,
+    args: Option<Vec<serde_json::Value>>,
+    #[serde(default)]
+    vm: bool,
+}
 
 async fn call_fn(
     State(state): State<Arc<AppState>>,
@@ -773,6 +779,15 @@ async fn call_fn(
     veldt.load_into_interpreter(&mut interp);
     let args: Vec<crate::interpreter::Value> = (req.args.unwrap_or_default())
         .iter().filter_map(|a| serde_json::from_value(a.clone()).ok()).collect();
+    if req.vm {
+        // fast-engine call — jit_call dispatches natively when compiled
+        let mut v = crate::vm::Vm::new();
+        let _ = v.load_garden(&veldt);
+        match v.jit_call(&req.name, req.variant, args) {
+            Ok(val) => return Json(serde_json::json!({"ok": true, "result": serde_json::to_value(&val).unwrap_or(serde_json::Value::Null)})),
+            Err(e) => return Json(serde_json::json!({"ok": false, "error": e})),
+        }
+    }
     match interp.call_function(&req.name, req.variant, args) {
         Ok(v) => Json(serde_json::json!({"ok": true, "result": serde_json::to_value(&v).unwrap_or(serde_json::Value::Null)})),
         Err(e) => Json(serde_json::json!({"ok": false, "error": e})),
