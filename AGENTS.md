@@ -1258,3 +1258,6 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 - [Devin] triage covers lint: 'what needs attention' flags
   defect-carrying variants (healthy-by-trial but buggy-by-
   inspection) alongside sick/dying/weakest.
+- [Devin] check --suppress <substr> (repeatable): drop
+  warnings containing the substring — works on file/stdin/
+  watch/--json. Escape hatch without a rule-ID refactor.
