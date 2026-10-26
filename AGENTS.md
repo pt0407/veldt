@@ -785,3 +785,6 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 - [Devin] Lint batch 26 (HEAD post-binding-copy): ~56 strict
   checks. New: let x = <param/for-var> — copies a binding
   that could just be used directly.
+- [Devin] Lint batch 27 (HEAD post-const-alias): ~57 strict
+  checks. New: let a = b where b is let-bound to a literal
+  — the let propagates a constant through an alias.
