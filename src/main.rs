@@ -1299,6 +1299,25 @@ fn print_stats(veldt: &veldt::Veldt) {
             .map(|(n, a)| format!("{}:{:.0}", n, a)).collect();
         println!("avg lifespan/family: {}", line.join(" "));
     }
+    // avg usage per niche — per-niche call pressure
+    let mut niche_use: std::collections::HashMap<String, (u64, usize)> =
+        std::collections::HashMap::new();
+    for vs in veldt.functions.values() {
+        for e in vs {
+            for (n, _) in &e.niche_scores {
+                let ent = niche_use.entry(n.clone()).or_default();
+                ent.0 += e.usage_count; ent.1 += 1;
+            }
+        }
+    }
+    let mut niche_use_list: Vec<(String, f64)> = niche_use.into_iter()
+        .map(|(n, (u, c))| (n, u as f64 / c.max(1) as f64)).collect();
+    niche_use_list.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    if !niche_use_list.is_empty() {
+        let line: Vec<String> = niche_use_list.iter().take(8)
+            .map(|(n, a)| format!("{}:{:.0}", n, a)).collect();
+        println!("avg usage/niche: {}", line.join(" "));
+    }
     // fitness trend — peak per run, is the garden improving?
     if veldt.fitness_history.len() >= 2 {
         let trend: Vec<String> = veldt.fitness_history.iter()
