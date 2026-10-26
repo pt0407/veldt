@@ -701,6 +701,16 @@ async function fetchGarden() {
   renderGarden();
 }
 
+async function testFamily(name) {
+  const res = await fetch(API + '/api/agent', { method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ task: `test ${name}`, source: editor.getValue() }) });
+  const d = await res.json();
+  document.getElementById('output').innerHTML =
+    '<pre style="color:#fda;margin:0">' + (d.reply || 'no report') + '</pre>';
+  renderGarden();
+}
+
 async function whyVariant(name, id) {
   const res = await fetch(API + '/api/agent', { method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -892,6 +902,7 @@ function renderGarden() {
         <span class="icon">fn</span>
         <span class="name">${lineage.name}</span>
         <span class="meta">${lineage.variants.length}v${probeStr}</span>
+        <span class="play" onclick="event.stopPropagation();testFamily('${lineage.name}')" title="re-trial all variants">⟳</span>
       </div>`;
 
       // Build tree: roots = no parents in-family; children attach to first parent
