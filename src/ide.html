@@ -701,6 +701,15 @@ async function fetchGarden() {
   renderGarden();
 }
 
+async function whyVariant(name, id) {
+  const res = await fetch(API + '/api/agent', { method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ task: `why ${name}#${id}`, source: editor.getValue() }) });
+  const d = await res.json();
+  document.getElementById('output').innerHTML =
+    '<pre style="color:#fda;margin:0">' + (d.reply || 'no report') + '</pre>';
+}
+
 async function runVariant(name, id) {
   const raw = prompt(`args for ${name}#${id} (JSON list)`, '[5]');
   if (raw === null) return;
@@ -905,6 +914,7 @@ function renderGarden() {
           ${isChamp ? '<span class="niche-badge">niche</span>' : ''}
           <span style="float:right;color:var(--text-dim)">${v.fitness}%</span>
           <span class="play" onclick="event.stopPropagation();runVariant('${lineage.name}',${v.id})" title="run this variant">▶</span>
+          <span class="play" onclick="event.stopPropagation();whyVariant('${lineage.name}',${v.id})" title="diagnose this variant">?</span>
           ${v.origin && v.origin !== 'seed' ? `<div class="origin-tag">${v.origin}</div>` : ''}
         </div>`;
         if (kids.length) {
