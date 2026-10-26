@@ -66,6 +66,7 @@ pub async fn start_server(port: u16) {
         .route("/api/last_used", get(last_used))
         .route("/api/niche_scores", get(niche_scores))
         .route("/api/origins", get(origins))
+        .route("/api/deaths", get(deaths))
         .route("/api/run", post(run_program))
         .route("/api/evolve", post(evolve))
         .route("/api/clear", post(clear_veldt))
@@ -544,6 +545,23 @@ async fn origins() -> Json<serde_json::Value> {
         })).collect::<Vec<_>>())
         .collect();
     Json(serde_json::json!({"origins": origin_data}))
+}
+
+async fn deaths() -> Json<serde_json::Value> {
+    let mut veldt = veldt::Veldt::new();
+    if veldt.load().is_err() {
+        return Json(serde_json::json!({"error": "garden load failed"}));
+    }
+    let mut cause_count: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    for o in &veldt.obituaries {
+        *cause_count.entry(o.cause_of_death.clone()).or_default() += 1;
+    }
+    let mut causes: Vec<(String, usize)> = cause_count.into_iter().collect();
+    causes.sort_by(|a, b| b.1.cmp(&a.1));
+    Json(serde_json::json!({"causes": causes.iter()
+        .map(|(c, n)| serde_json::json!({"cause": c, "count": n}))
+        .collect::<Vec<_>>()}))
 }
 
 #[derive(Deserialize)]
