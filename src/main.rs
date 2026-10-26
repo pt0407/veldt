@@ -566,6 +566,22 @@ fn main() {
                 }
                 println!("=== The Veldt (fitness >= {}) ===", min);
                 filtered.print_garden(sick_only, healthy_only);
+            } else if let Some(max_age) = args.iter().position(|a| a == "--max_age")
+                .and_then(|p| args.get(p + 1)).and_then(|s| s.parse::<u64>().ok()) {
+                // --max_age <n> — variants younger than n runs
+                let mut filtered = veldt::Veldt::new();
+                filtered.probes = veldt.probes.clone();
+                filtered.obituaries = veldt.obituaries.clone();
+                filtered.run_count = veldt.run_count;
+                filtered.garden_path = veldt.garden_path.clone();
+                for (name, vs) in &veldt.functions {
+                    let keep: Vec<_> = vs.iter()
+                        .filter(|e| e.age <= max_age)
+                        .cloned().collect();
+                    if !keep.is_empty() { filtered.functions.insert(name.clone(), keep); }
+                }
+                println!("=== The Veldt (age <= {}) ===", max_age);
+                filtered.print_garden(sick_only, healthy_only);
             } else if let Some(min_age) = args.iter().position(|a| a == "--min_age")
                 .and_then(|p| args.get(p + 1)).and_then(|s| s.parse::<u64>().ok()) {
                 // --min_age <n> — variants older than n runs
