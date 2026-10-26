@@ -49,6 +49,12 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] JIT UPDATE 12: duplicate-define fix — a fn
+  already compiled under name#id$v got re-declared+re-defined
+  when compile_variant ran again (bare-key miss), cranelift
+  'Duplicate definition of identifier'. Now all three mode keys
+  checked. garden --jit shows per-fn sig mode
+  (native/float/boxed). 37/37 native again.
 - [Devin/main-side] JIT UPDATE 11: veldt run --vm --trace
   (per-step instr dump — interp.trace was dead/write-only),
   veldt stats --verified (bounded-check census on ONE shared
