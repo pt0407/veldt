@@ -1010,6 +1010,13 @@ impl JitEngine {
                                     .unwrap_or_else(|| b.ins().iconst(types::I64, 0));
                                 b.ins().jump(mb, &[cranelift_codegen::ir::BlockArg::Value(bv)]);
                                 res // placeholder — fv binding
+                            } else if matches!(chunk.code[pc], Instr::Mod) {
+                                // no cranelift frem — helper from inside ffb
+                                let hv2 = ecall!(rt.binop, rtv, o, l, r)
+                                    .unwrap_or_else(|| b.ins().iconst(types::I64, 0));
+                                catch_check!(hv2);
+                                b.ins().jump(mb, &[cranelift_codegen::ir::BlockArg::Value(hv2)]);
+                                hv2
                             } else {
                                 let res = match chunk.code[pc] {
                                     Instr::Add => b.ins().fadd(fa, fc2),
