@@ -2503,6 +2503,14 @@ fn print_stats(veldt: &veldt::Veldt) {
                 let risky = vs.iter().filter(|e| matches!(e.health, Health::Sick(_))
                     && matches!(e.trust, veldt::Trust::Seedling)).count();
                 println!("  proven: {} · risky: {}", proven, risky);
+                // healing success — how many healing attempts produced healthy variants
+                let healed_ok = vs.iter().filter(|e| !e.healing_attempts.is_empty()
+                    && matches!(e.health, Health::Healthy)).count();
+                let healed_total = vs.iter().filter(|e| !e.healing_attempts.is_empty()).count();
+                if healed_total > 0 {
+                    println!("  healing success: {}/{} ({}%)", healed_ok, healed_total,
+                        (healed_ok * 100) / healed_total);
+                }
             }
         }
         if veldt.fitness_history.len() >= 2 {
