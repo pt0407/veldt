@@ -1047,3 +1047,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 - [Devin] Lint batch 44 (HEAD post-match-binop-pattern): ~75
   strict checks. New: match Var pattern bound to a binop —
   the pattern is a computed expr, could inline.
+- [Devin] Lint batch 45 (HEAD post-match-container): ~76
+  strict checks. New: match on a container-bound var —
+  the scrutinee is a list/struct literal, could match
+  the literal directly.
