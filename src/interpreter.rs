@@ -362,25 +362,7 @@ impl Interpreter {
                 }
             }
             Stmt::Import(path, alias) => {
-                // Search order: path as-given → VELDTPATH dirs → shipped stdlib
-                let stdlib: &[(&str, &str)] = &[
-                    ("str", include_str!("../stdlib/str.veldt")),
-                    ("str.veldt", include_str!("../stdlib/str.veldt")),
-                    ("math", include_str!("../stdlib/math.veldt")),
-                    ("math.veldt", include_str!("../stdlib/math.veldt")),
-                ];
-                let content = std::fs::read_to_string(&path)
-                    .or_else(|_| {
-                        std::env::var("VELDTPATH").unwrap_or_default()
-                            .split(if cfg!(windows) { ';' } else { ':' })
-                            .filter(|d| !d.is_empty())
-                            .find_map(|d| std::fs::read_to_string(format!("{}/{}", d, path)).ok())
-                            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "nf"))
-                    })
-                    .or_else(|_| stdlib.iter().find(|(n, _)| *n == path)
-                        .map(|(_, src)| src.to_string())
-                        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "nf")))
-                    .map_err(|e| format!("Cannot import '{}': {}", path, e))?;
+                let content = resolve_import_source(&path)?;
                 if self.importing.iter().any(|p| p == path) {
                     return Err(format!("Circular import: {}", path));
                 }
@@ -2854,4 +2836,28 @@ mod tests {
         assert_eq!(variants[0].id, 1);
         assert_eq!(variants[1].id, 2);
     }
+}
+
+/// Shared module resolution — path as-given, then VELDTPATH dirs, then
+/// the shipped stdlib. Used by both the interpreter and the VM so import
+/// semantics stay in one place.
+pub(crate) fn resolve_import_source(path: &str) -> Result<String, String> {
+    let stdlib: &[(&str, &str)] = &[
+        ("str", include_str!("../stdlib/str.veldt")),
+        ("str.veldt", include_str!("../stdlib/str.veldt")),
+        ("math", include_str!("../stdlib/math.veldt")),
+        ("math.veldt", include_str!("../stdlib/math.veldt")),
+    ];
+    std::fs::read_to_string(path)
+        .or_else(|_| {
+            std::env::var("VELDTPATH").unwrap_or_default()
+                .split(if cfg!(windows) { ';' } else { ':' })
+                .filter(|d| !d.is_empty())
+                .find_map(|d| std::fs::read_to_string(format!("{}/{}", d, path)).ok())
+                .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "nf"))
+        })
+        .or_else(|_| stdlib.iter().find(|(n, _)| *n == path)
+            .map(|(_, src)| src.to_string())
+            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "nf")))
+        .map_err(|e| format!("Cannot import '{}': {}", path, e))
 }

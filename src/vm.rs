@@ -11,7 +11,7 @@
 use crate::ast::*;
 use crate::interpreter::{Interpreter, Value};
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 #[derive(Debug, Clone, Copy)]
@@ -84,6 +84,7 @@ struct Compiler {
     consts: Vec<Value>,
     names: Vec<String>,
     slot_names: Vec<String>,   // slot idx -> name, for closure capture
+    known_fns: HashSet<String>, // for `alias::method` resolution
     // loop stack: (start_pc, [pending break patch positions])
     loops: Vec<(usize, Vec<usize>)>,
     // var name -> local slot (allocated lazily; env Vec grows to fit)
@@ -278,6 +279,19 @@ impl Compiler {
                 }
             }
             Expr::MethodCall(obj, m, args) => {
+                // `lib.f(...)`: receiver is a bare name that's an import
+                // alias — mangle to `lib::f` and emit a plain Call.
+                if let Expr::Var(n) = obj.as_ref() {
+                    if !self.slots.contains_key(n) {
+                        let mangled = format!("{}::{}", n, m);
+                        if self.known_fns.contains(&mangled) {
+                            for a in args { self.compile_expr(a)?; }
+                            let ni = self.name_idx(&mangled);
+                            self.emit(Instr::Call(ni, args.len() as u32));
+                            return Ok(());
+                        }
+                    }
+                }
                 // Var receiver: delegate then write the (possibly mutated)
                 // receiver back into the slot — mutating methods like
                 // append/insert must land on OUR env, not the helper's.
@@ -373,6 +387,13 @@ impl Vm {
     /// planted via load_garden() if call sites reference them.
     pub fn run(&mut self, stmts: &[Stmt], max_steps: u64) -> Result<(), String> {
         self.max_steps = max_steps;
+        // Import pass: compile module fns into self.fns (alias::name +
+        // bare-name registration, matching the interpreter's v1).
+        for s in stmts {
+            if let Stmt::Import(path, alias) = s {
+                self.import_module(path, alias.as_deref())?;
+            }
+        }
         // First pass: register fn defs (compiled).
         for s in stmts {
             match s {
@@ -430,6 +451,56 @@ impl Vm {
         Ok(())
     }
 
+    /// Compile a module's functions into the VM — `import "x" as lib`
+    /// registers `lib::name` (and the bare name so the module's internal
+    /// calls resolve). Module top-level non-fn stmts are not executed in
+    /// the VM subset.
+    fn import_module(&mut self, path: &str, alias: Option<&str>)
+        -> Result<(), String> {
+        let src = crate::interpreter::resolve_import_source(path)?;
+        let mut lx = crate::lexer::Lexer::new(&src);
+        let toks = lx.tokenize()
+            .map_err(|e| format!("import '{}' lex: {}", path, e))?;
+        let mut p = crate::parser::Parser::new_with_lines(toks, lx.token_lines.clone());
+        let stmts = p.parse_program()
+            .map_err(|e| format!("import '{}' parse: {}", path, e))?;
+        // nested imports first
+        for st in &stmts {
+            if let Stmt::Import(p2, a2) = st {
+                self.import_module(p2, a2.as_deref())?;
+            }
+        }
+        for st in &stmts {
+            if let Stmt::FnDef(name, params, body) = st {
+                let pnames: Vec<String> =
+                    params.iter().map(|p| p.name.clone()).collect();
+                let code = self.compile_fn(&pnames, body)
+                    .map_err(|e| format!("import '{}': {}: {}", path, name, e))?;
+                let entry = CompiledFn {
+                    id: 1, fitness: 1.0,
+                    params: pnames, code: std::rc::Rc::new(code),
+                };
+                if let Some(a) = alias {
+                    self.fns.entry(format!("{}::{}", a, name))
+                        .or_default().push(CompiledFn {
+                            id: 1, fitness: 1.0,
+                            params: entry.params.clone(),
+                            code: entry.code.clone(),
+                        });
+                    self.fns.entry(name.clone())
+                        .or_insert_with(|| vec![CompiledFn {
+                            id: 1, fitness: 1.0,
+                            params: entry.params.clone(),
+                            code: entry.code.clone(),
+                        }]);
+                } else {
+                    self.fns.entry(name.clone()).or_default().push(entry);
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn compile_body(&self, stmts: &[Stmt]) -> Result<Chunk, String> {
         self.compile_fn(&[], stmts)
     }
@@ -439,6 +510,7 @@ impl Vm {
         let mut c = Compiler {
             code: Vec::new(), consts: Vec::new(), names: Vec::new(),
             slot_names: Vec::new(),
+            known_fns: self.fns.keys().cloned().collect(),
             loops: Vec::new(), slots: HashMap::new(), next_slot: 0,
         };
         // params occupy slots 0..n — the frame binds args by position
