@@ -2213,7 +2213,7 @@ fn print_stats(veldt: &veldt::Veldt) {
         seed, estab, canon);
     println!("probes: {} across {} families | deaths: {} | runs: {}",
         probe_count, veldt.probes.len(), veldt.obituaries.len(), veldt.run_count);
-    if std::env::args().any(|a| a == "--top") {
+    if std::env::args().any(|a| a == "--top" || a == "--detail") {
         let mut fam: Vec<(&String, f64)> = veldt.functions.iter()
             .map(|(n, vs)| (n, vs.iter().map(|e| e.fitness)
                 .fold(f64::NEG_INFINITY, f64::max))).collect();
