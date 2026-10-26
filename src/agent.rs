@@ -298,6 +298,11 @@ pub fn respond(task: &str, editor_source: &str, veldt: &mut Veldt) -> AgentRespo
     if has(&["biggest", "smallest", "largest", "size", "how big", "compact", "bloated"]) {
         return size_intent(&words, veldt);
     }
+    if has(&["siblings", "cousins", "related", "same parents", "brothers", "sisters"]) {
+        if words.iter().any(|w| w.contains('#')) {
+            return siblings_intent(&words, veldt);
+        }
+    }
     if has(&["garden", "status", "alive", "what's growing", "what is growing", "what have you", "ecosystem"]) {
         return status_intent(veldt);
     }
@@ -1279,6 +1284,41 @@ fn size_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
     for (n, e) in all.iter().take(8) {
         text.push_str(&format!("  {}#{} — {} chars (fit {:.2})\n",
             n, e.id, size_of(e), e.fitness));
+    }
+    plain(&text)
+}
+
+/// Siblings — "fib#216 siblings" — variants sharing a parent.
+fn siblings_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
+    let (name, id) = match parse_variant_ref(words) {
+        Some((n, Some(i))) => (n, i),
+        _ => return plain("Whose siblings? e.g. \"fib#216 siblings\"."),
+    };
+    let vs = match veldt.functions.get(&name) {
+        Some(v) => v,
+        None => return plain(&format!("No lineage called '{}'.", name)),
+    };
+    let e = match vs.iter().find(|e| e.id == id) {
+        Some(e) => e,
+        None => return plain(&format!("{}#{} isn't in the garden.", name, id)),
+    };
+    if e.parents.is_empty() {
+        return plain(&format!("{}#{} is a seed — no parents, no siblings.", name, id));
+    }
+    let sibs: Vec<&FunctionEntry> = vs.iter()
+        .filter(|v| v.id != e.id
+            && v.parents.iter().any(|p| e.parents.contains(p)))
+        .collect();
+    let mut text = format!("{}#{} — parents {:?}\n", name, id, e.parents);
+    if sibs.is_empty() {
+        text.push_str("  no siblings — only child");
+    } else {
+        for s in &sibs {
+            let shared: Vec<u32> = s.parents.iter()
+                .filter(|p| e.parents.contains(p)).copied().collect();
+            text.push_str(&format!("  #{} (fit {:.2}) — shared parents {:?}\n",
+                s.id, s.fitness, shared));
+        }
     }
     plain(&text)
 }
