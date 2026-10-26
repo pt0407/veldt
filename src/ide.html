@@ -556,6 +556,7 @@
 <script>
 const API = '';
 let gardenData = null;
+let lintData = null;
 let lastAgentCode = null;
 let selectedVariant = null;
 let editor = null;
@@ -700,8 +701,10 @@ grow fn double(x: int) test double(3) == 6 {
 // --- API calls ---
 
 async function fetchGarden() {
-  const res = await fetch(API + '/api/garden');
-  gardenData = await res.json();
+  const [gres, lres] = await Promise.all([
+    fetch(API + '/api/garden'), fetch(API + '/api/lint').catch(() => null)]);
+  gardenData = await gres.json();
+  lintData = lres && lres.ok ? await lres.json() : null;
   renderGarden();
 }
 
@@ -926,6 +929,14 @@ function renderGarden() {
     html += `<div style="font-size:11px;opacity:.75;padding:4px 0;border-bottom:1px solid #333;margin-bottom:6px">` +
       `trust ladder: <b style="color:#8ef">${seed}</b> seedling → <b style="color:#fd0">${estab}</b> established → <b style="color:#6f4">${canon}</b> canonical` +
       ` &nbsp;·&nbsp; ${seed + estab + canon} variants · ${probes} probes</div>`;
+  }
+  if (lintData) {
+    const dc = lintData.defects || 0, w = lintData.warnings || 0;
+    const color = dc > 0 ? '#f66' : (w > 0 ? '#fd0' : '#6f4');
+    const label = dc > 0 ? `${dc} defect${dc === 1 ? '' : 's'} · ${w} warnings`
+      : `${w} warnings · lint-clean`;
+    html += `<div style="font-size:11px;opacity:.75;padding:2px 0;border-bottom:1px solid #333;margin-bottom:6px">` +
+      `lint: <b style="color:${color}">${label}</b></div>`;
   }
 
   // Functions — rendered as lineage trees using parent edges
