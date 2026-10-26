@@ -477,3 +477,9 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   `veldt bench --json/--save F/--compare F/--filter E` = species
   suite + regression baselines + species summary line.
   `garden --family` got a compact summary footer.
+- [Devin] --json sweep complete (HEAD post-173efb1): every
+  inspection + state-changing command now has machine-readable
+  output — stats, garden, lineage, evolve (JSONL events), fuzz,
+  diff, absorb, test, verify, adopt, tournament, prune, check.
+  The IDE can drive the whole garden through JSON, no text
+  parsing anywhere on the read/write surface.
