@@ -576,3 +576,10 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   if empty-then + non-empty-else, empty try, redundant return
   at end-of-block, for-var shadowing outer let. ~23 lint
   checks — structural, semantic, and loop-quality coverage.
+- [Devin] Sparkline coverage batch (HEAD post-5f16fba):
+  spark() reused across the stats --family detail panel —
+  birth/death/usage timelines (events-per-run) + fitness/
+  size/age/usage/efficiency/trial_score/lifespan/args
+  distribution sparks (sorted values → the shape of the
+  spread). Every numeric distribution in the dashboard now
+  shows its shape at a glance, not just min/avg/peak.
