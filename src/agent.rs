@@ -397,6 +397,11 @@ fn help_intent() -> AgentResponse {
          • \"what needs attention\" — triage sick/dying/weakest\n\
          • \"compare fib#1 fib#2\" — differing lines\n\
          • \"coverage for fib\" · \"what's tested\" — probe coverage\n\
+         • \"fib#145 parents\" · \"fib lineage\" — genealogy\n\
+         • \"most used fib\" · \"hot functions\" — workload leaders\n\
+         • \"fastest fib\" · \"most efficient\" — speed ranking\n\
+         • \"fib trust\" · \"what's canonical\" — trust levels\n\
+         • \"newest fib\" · \"oldest\" — age-sorted variants\n\
          • \"surprise me\" — plant a random new species\n\
          • \"run this\" · \"evolve 5\" · \"tend\" · \"prune x#N\" · \"what's alive?\"\n\
          Known species: fib, factorial, prime, count primes, nth prime, gcd, lcm, power, sort, quicksort, reverse, palindrome, sum, mean, max, min, fizzbuzz, collatz, evens, doubles, vowels, digits, leapyear, clamp, words, dedupe, anagram, sqrt, parallel."
