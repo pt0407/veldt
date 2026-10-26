@@ -283,6 +283,9 @@ pub fn respond(task: &str, editor_source: &str, veldt: &mut Veldt) -> AgentRespo
     if has(&["turnover", "churn", "birth rate", "death rate", "mortality"]) {
         return turnover_intent(&words, veldt);
     }
+    if has(&["pressure", "rivals", "competition", "who competes", "selection"]) {
+        return pressure_intent(&words, veldt);
+    }
     if has(&["garden", "status", "alive", "what's growing", "what is growing", "what have you", "ecosystem"]) {
         return status_intent(veldt);
     }
@@ -1098,6 +1101,43 @@ fn turnover_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
     for (n, alive, dead) in rows.iter().take(8) {
         let rate = if alive + dead > 0 { *dead as f64 / (alive + dead) as f64 } else { 0.0 };
         text.push_str(&format!("  {} — {} | {} | {:.0}%\n", n, alive, dead, rate * 100.0));
+    }
+    plain(&text)
+}
+
+/// Pressure — fitness spread + rivals per family ("selection pressure").
+fn pressure_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
+    let pressure_of = |vs: &[FunctionEntry]| -> (f64, usize) {
+        if vs.len() < 2 { return (0.0, 0); }
+        let mean = vs.iter().map(|e| e.fitness).sum::<f64>() / vs.len() as f64;
+        let sd = (vs.iter().map(|e| (e.fitness - mean).powi(2)).sum::<f64>()
+            / vs.len() as f64).sqrt();
+        (sd, vs.len() - 1)
+    };
+    if let Some(name) = find_lineage(words, veldt) {
+        let vs = match veldt.functions.get(&name) {
+            Some(v) => v,
+            None => return plain(&format!("No lineage called '{}'.", name)),
+        };
+        let (sd, rivals) = pressure_of(vs);
+        let peak = vs.iter().map(|e| e.fitness).fold(f64::NEG_INFINITY, f64::max);
+        let label = if sd < 0.01 { "tight" } else if sd < 0.1 { "moderate" } else { "loose" };
+        let mut text = format!("{} — {} rivals, σ {:.4} ({} pressure, peak {:.2})\n",
+            name, rivals, sd, label, peak);
+        let mut sorted: Vec<&FunctionEntry> = vs.iter().collect();
+        sorted.sort_by(|a, b| b.fitness.partial_cmp(&a.fitness)
+            .unwrap_or(std::cmp::Ordering::Equal));
+        for e in sorted.iter().take(5) {
+            text.push_str(&format!("  #{} — {:.2}\n", e.id, e.fitness));
+        }
+        return plain(&text);
+    }
+    let mut rows: Vec<(&String, f64, usize)> = veldt.functions.iter()
+        .map(|(n, vs)| { let (sd, r) = pressure_of(vs); (n, sd, r) }).collect();
+    rows.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+    let mut text = String::from("Selection pressure (tightest first):\n");
+    for (n, sd, r) in rows.iter().take(8) {
+        text.push_str(&format!("  {} — σ {:.4} ({} rivals)\n", n, sd, r));
     }
     plain(&text)
 }
