@@ -49,6 +49,16 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin] FULL SURFACE now on main — CLI: find/diff/--unified/check/
+  --strict/--json/import --merge/evolve --until/--until-fam/--family/
+  --dry/test --all/watch --sandbox/stats/garden --sick/--healthy/--trust/
+  --fit/--games/--json/--obituaries/lineage/fuzz/absorb/swarm/play.
+  IDE: sandbox/fuzz/absorb/tournament/swarm/play/stats/game buttons +
+  per-variant ▶?★ + per-family ⟳⇌ + trust-ladder header + census.
+  /api/stats returns all histograms (builtin_usage/fitness_by_source/
+  mutation_success/avg_niche_scores/probe_coverage). /api/game +
+  /api/play run ad-hoc + bundled game programs. veldt play <demo>
+  = dungeon/robot/snake/tictactoe/self_heal.
 - [Devin] ALL vision pillars now covered on main — game (canvas/ui/bt/
   balance/procgen/grid ~60 builtins + 4 demos), swarm (gossip), fintech
   (LOB matching), robotics (sim-robot), microservice (svc_* health),

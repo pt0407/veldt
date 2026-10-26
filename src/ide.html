@@ -490,6 +490,8 @@
     <button class="btn" id="tourBtn" title="pull a remote pool, trial, push winners back">Tournament</button>
     <button class="btn" id="swarmBtn" title="bidirectional genome gossip with a peer">Swarm</button>
     <button class="btn" id="playBtn" title="run a bundled game demo">Play</button>
+    <button class="btn" id="statsBtn" title="garden census + histograms">Stats</button>
+    <button class="btn" id="gameBtn" title="run the editor as a game program">Game</button>
     <button class="btn danger" id="clearBtn">Clear Garden</button>
     <button class="btn primary" id="runBtn">▶ Run</button>
     <label style="font-size:11px;opacity:.7;margin-left:6px"><input type="checkbox" id="sandboxChk"> sandbox</label>
@@ -1227,6 +1229,28 @@ document.getElementById('fuzzBtn').addEventListener('click', async () => {
   document.getElementById('output').innerHTML =
     '<pre style="color:#aef;margin:0">' + (d.report || 'no report') + '</pre>';
   renderGarden();
+});
+document.getElementById('gameBtn').addEventListener('click', async () => {
+  const source = document.getElementById('editor').value;
+  const ticks = parseInt(prompt('Ticks', '10') || '10');
+  const res = await fetch(API + '/api/game', { method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ source, ticks }) });
+  const d = await res.json();
+  document.getElementById('output').innerHTML =
+    '<pre style="color:#8ef;margin:0">' + (d.ok ? d.output : d.error) + '</pre>';
+});
+document.getElementById('statsBtn').addEventListener('click', async () => {
+  const res = await fetch(API + '/api/stats');
+  const d = await res.json();
+  const fmt = (arr) => arr.map(o => Object.entries(o).map(([k,v]) => `${k}×${typeof v === 'number' ? v.toFixed(2) : v}`).join(' ')).join('  ');
+  document.getElementById('output').innerHTML = '<pre style="color:#8ef;margin:0">' +
+    `lineages ${d.lineages}  variants ${d.variants}  (${d.healthy}h ${d.sick}s ${d.dying}d)\n` +
+    `trust ${d.seedling}s→${d.established}e→${d.canonical}c  probes ${d.probes}  deaths ${d.deaths}\n` +
+    `builtin usage: ${fmt(d.builtin_usage)}\n` +
+    `fitness by source: ${fmt(d.fitness_by_source)}\n` +
+    `mutation success: ${fmt(d.mutation_success)}\n` +
+    `probe coverage: ${fmt(d.probe_coverage)}` + '</pre>';
 });
 document.getElementById('playBtn').addEventListener('click', async () => {
   const demo = prompt('Demo', 'dungeon');
