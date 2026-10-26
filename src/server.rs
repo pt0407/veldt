@@ -56,6 +56,7 @@ pub async fn start_server(port: u16) {
         .route("/api/bare", get(bare))
         .route("/api/immigrants", get(immigrants))
         .route("/api/mutation", get(mutation))
+        .route("/api/families", get(families))
         .route("/api/run", post(run_program))
         .route("/api/evolve", post(evolve))
         .route("/api/clear", post(clear_veldt))
@@ -385,6 +386,19 @@ async fn mutation() -> Json<serde_json::Value> {
     Json(serde_json::json!({"sources": src.iter()
         .map(|(s, c)| serde_json::json!({"source": s, "count": c}))
         .collect::<Vec<_>>()}))
+}
+
+async fn families() -> Json<serde_json::Value> {
+    let mut veldt = veldt::Veldt::new();
+    if veldt.load().is_err() {
+        return Json(serde_json::json!({"error": "garden load failed"}));
+    }
+    let fams: Vec<serde_json::Value> = veldt.functions.iter()
+        .map(|(n, vs)| serde_json::json!({
+            "name": n, "variants": vs.len(),
+            "probes": veldt.probes.get(n).map(|p| p.len()).unwrap_or(0),
+        })).collect();
+    Json(serde_json::json!({"families": fams}))
 }
 
 #[derive(Deserialize)]
