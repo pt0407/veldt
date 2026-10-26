@@ -1505,6 +1505,21 @@ fn print_stats(veldt: &veldt::Veldt) {
             .map(|(n, a)| format!("{}:{:.0}", n, a)).collect();
         println!("probes/family: {}", line.join(" "));
     }
+    // avg probes per niche — per-niche selection pressure depth
+    let mut niche_probe: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    for probes in veldt.probes.values() {
+        for p in probes {
+            *niche_probe.entry(p.niche.clone()).or_default() += 1;
+        }
+    }
+    let mut niche_probe_list: Vec<(String, usize)> = niche_probe.into_iter().collect();
+    niche_probe_list.sort_by(|a, b| b.1.cmp(&a.1));
+    if !niche_probe_list.is_empty() {
+        let line: Vec<String> = niche_probe_list.iter().take(8)
+            .map(|(n, c)| format!("{}:{}", n, c)).collect();
+        println!("probes/niche: {}", line.join(" "));
+    }
     // fitness trend — peak per run, is the garden improving?
     if veldt.fitness_history.len() >= 2 {
         let trend: Vec<String> = veldt.fitness_history.iter()
