@@ -566,6 +566,22 @@ fn main() {
                 }
                 println!("=== The Veldt (fitness >= {}) ===", min);
                 filtered.print_garden(sick_only, healthy_only);
+            } else if let Some(min_nc) = args.iter().position(|a| a == "--min_niche")
+                .and_then(|p| args.get(p + 1)).and_then(|s| s.parse::<usize>().ok()) {
+                // --min_niche <n> — variants with >= n niche scores (broad coverage)
+                let mut filtered = veldt::Veldt::new();
+                filtered.probes = veldt.probes.clone();
+                filtered.obituaries = veldt.obituaries.clone();
+                filtered.run_count = veldt.run_count;
+                filtered.garden_path = veldt.garden_path.clone();
+                for (name, vs) in &veldt.functions {
+                    let keep: Vec<_> = vs.iter()
+                        .filter(|e| e.niche_scores.len() >= min_nc)
+                        .cloned().collect();
+                    if !keep.is_empty() { filtered.functions.insert(name.clone(), keep); }
+                }
+                println!("=== The Veldt (niches >= {}) ===", min_nc);
+                filtered.print_garden(sick_only, healthy_only);
             } else if let Some(max_a) = args.iter().position(|a| a == "--max_args")
                 .and_then(|p| args.get(p + 1)).and_then(|s| s.parse::<usize>().ok()) {
                 // --max_args <n> — variants with <= n params (simple signatures)
