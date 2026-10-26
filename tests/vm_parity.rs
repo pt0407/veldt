@@ -163,11 +163,18 @@ fn jit_loop_variant_matches_vm() {
 fn vm_all_examples_run() {
     let veldt = env!("CARGO_BIN_EXE_veldt");
     let mut failures = Vec::new();
-    for entry in std::fs::read_dir("examples").unwrap() {
-        let p = entry.unwrap().path();
-        if p.extension().and_then(|e| e.to_str()) != Some("veldt") {
-            continue;
-        }
+    // Providers (examples that `grow` garden functions/structs) run
+    // first — consumers like ecosystem/use_fib depend on them.
+    let mut paths: Vec<_> = std::fs::read_dir("examples").unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.extension().and_then(|e| e.to_str())
+            == Some("veldt"))
+        .collect();
+    paths.sort_by_key(|p| {
+        let src = std::fs::read_to_string(p).unwrap_or_default();
+        !src.contains("grow ")
+    });
+    for p in paths {
         // skip examples that need stdin/args/serve-loop
         let name = p.file_name().unwrap().to_str().unwrap();
         if matches!(name, "web_server.veldt") { continue; }

@@ -4021,7 +4021,11 @@ fn run_program_vm(path: &str, evolve_after: bool) {
     }
     let mut v = vm::Vm::new();
     let mut garden = veldt::Veldt::new();
-    if garden.load().is_ok() {
+    // Track load success — NEVER save an unloaded garden over the
+    // real file (a parse error or read race would wipe every family).
+    let garden_file = garden.garden_path.join("veldt.json");
+    let garden_loaded = garden.load().is_ok();
+    if garden_loaded {
         if let Err(e) = v.load_garden(&garden) {
             eprintln!("VM note: {}", e);
         }
@@ -4033,15 +4037,51 @@ fn run_program_vm(path: &str, evolve_after: bool) {
     if std::env::var("VELDT_JIT_STATS").is_ok() {
         v.jit_stats();
     }
+    // Persist grow statements — same planting as the tree-walk path:
+    // grow_function + birth health-check + [BIRTH] line.
+    for s in &stmts {
+        if let ast::Stmt::Grow(item) = s {
+            match item {
+                ast::GrowItem::Fn(name, params, body, tests) => {
+                    let source = format!("fn {}(...) {{ ... }}", name);
+                    let id = garden.grow_function(
+                        name, params.clone(), body.clone(),
+                        tests.clone(), &source);
+                    if let Some(mut entry) = garden.functions[name]
+                        .iter().find(|e| e.id == id).cloned() {
+                        health::HealthChecker::check_at_birth(
+                            &mut entry, &garden);
+                        if let Some(vs) = garden.functions.get_mut(name) {
+                            for e in vs.iter_mut() {
+                                if e.id == id { *e = entry.clone(); }
+                            }
+                        }
+                        eprintln!("[BIRTH] {}#{} — {:?} (trial score: {:.2})",
+                                  name, id, entry.health, entry.trial_score);
+                    }
+                }
+                ast::GrowItem::Struct(name, fields) => {
+                    garden.grow_struct(name, fields.clone());
+                    eprintln!("[GROW] struct {} — immortal struct planted",
+                              name);
+                }
+                _ => {}  // grow-let stays interpreter-path for now
+            }
+        }
+    }
     // --evolve — same as the tree-walk path: mutate, trial, save.
-    if evolve_after {
+    if evolve_after && garden_loaded {
         let mut evolver = evolve::Evolver::new();
         for event in evolver.evolve(&mut garden, 1) {
             eprintln!("{}", event.format());
         }
     }
-    if let Err(e) = garden.save() {
-        eprintln!("Error saving veldt: {}", e);
+    if garden_loaded || !garden_file.exists() {
+        if let Err(e) = garden.save() {
+            eprintln!("Error saving veldt: {}", e);
+        }
+    } else {
+        eprintln!("garden load failed — skipping save (would wipe it)");
     }
 }
 
