@@ -303,6 +303,9 @@ pub fn respond(task: &str, editor_source: &str, veldt: &mut Veldt) -> AgentRespo
             return siblings_intent(&words, veldt);
         }
     }
+    if has(&["stale", "forgotten", "dormant", "unused", "not called", "idle"]) {
+        return stale_intent(veldt);
+    }
     if has(&["garden", "status", "alive", "what's growing", "what is growing", "what have you", "ecosystem"]) {
         return status_intent(veldt);
     }
@@ -1320,6 +1323,25 @@ fn siblings_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
                 s.id, s.fitness, shared));
         }
     }
+    plain(&text)
+}
+
+/// Stale — "forgotten" / "dormant" — variants by runs-since-last-call.
+fn stale_intent(veldt: &Veldt) -> AgentResponse {
+    let mut rows: Vec<(&String, &FunctionEntry, u64)> = veldt.functions.iter()
+        .flat_map(|(n, vs)| vs.iter().map(move |e|
+            (n, e, veldt.run_count.saturating_sub(e.last_used)))).collect();
+    rows.sort_by(|a, b| b.2.cmp(&a.2));
+    let active = rows.iter().take(10).filter(|(_, _, s)| *s == 0).count();
+    if rows.iter().all(|(_, _, s)| *s == 0) {
+        return plain("Nothing is stale — every variant was called this run.");
+    }
+    let mut text = String::from("Stalest variants (runs since last call):\n");
+    for (n, e, stale) in rows.iter().take(8) {
+        text.push_str(&format!("  {}#{} — {} runs stale (fit {:.2})\n",
+            n, e.id, stale, e.fitness));
+    }
+    text.push_str(&format!("({}/{} variants called this run)", active, rows.len()));
     plain(&text)
 }
 
