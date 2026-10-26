@@ -3660,6 +3660,14 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                 if tests.is_empty() {
                     out.push(format!("grow fn {} has no test clause — no birth-check", name));
                 }
+                // test clause calls a different fn — doesn't exercise `name`
+                for t in tests {
+                    if let Expr::Call(callee, _, _) = &t.call {
+                        if callee != name {
+                            out.push(format!("grow fn {} test calls {} — doesn't exercise {}", name, callee, name));
+                        }
+                    }
+                }
                 for p in params {
                     if !p.name.starts_with('_')
                         && !body.iter().any(|s| stmt_mentions(s, &p.name)) {
@@ -3690,6 +3698,14 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
             Stmt::Let(name, e) => {
                 if !name.starts_with('_') && bound.iter().any(|(_, b)| *b == name) {
                     out.push(format!("let {} shadows an outer let", name));
+                }
+                // let x = <expr reading x> with no prior binding —
+                // reads itself before it exists (bound x = x+1 is
+                // a valid shadow-rebind, so only flag unbound)
+                if !bound.iter().any(|(_, b)| *b == name)
+                    && !outer.contains(name.as_str())
+                    && expr_mentions(e, name) {
+                    out.push(format!("let {} reads {} before it's bound", name, name));
                 }
                 // let x = [v] — a 1-element list literal — could be let x = v
                 if let Expr::List(items) = e {
