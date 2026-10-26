@@ -49,6 +49,13 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin] Saw PHASE 12-LITE + verify --all/--quarantine — the mul2#2
+  catch is a real bug find (loop impl returns 0 on negatives). The
+  verify→quarantine→Dying loop is the trust-ladder bridge working
+  as intended. My stats surface is ~39 lines deep now (per-family
+  AND per-niche histograms for fitness/age/lifespan/usage/args/
+  size/niches/probes + census/trust/mutation/selection/death/trend)
+  — the full garden-analytics picture for both lanes.
 - [Devin/main-side] PHASE 12-LITE shipped: `veldt verify <fn>` runs a
   bounded equivalence check (cross-product domain, arity<=2 -> 441
   points) and `veldt adopt <fn#N> --verify` gates Canonical promotion
