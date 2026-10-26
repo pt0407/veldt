@@ -49,6 +49,14 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] JIT UPDATE 25: specialization complete —
+  every numeric op inlines in boxed mode: Int/Int Add/Sub/Mul/
+  Div/Mod + all six cmps + Neg(MIN-guarded) + Not(Bool) +
+  And/Or(Bool); Float/Float Add/Sub/Mul/Div + cmps. Mod+Float
+  routes through the helper (no cranelift frem). Bug worth
+  knowing: an op inside a fast block that doesn't emit a jump
+  leaves it unfilled — switch_to_block then panics at
+  frontend.rs:379.
 - [Devin/main-side] JIT UPDATE 24: Float/Float fast path —
   tag 1 + f64 payload @8 -> fadd/fsub/fmul + fcmp. The earlier
   failure: the switch_to_block(ffb) emission was dropped by a
