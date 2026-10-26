@@ -858,3 +858,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   file-level imports. Coordination: the other agent owns
   JIT/verify/persistence/VM; I own lint/observability/
   agent/watch. Both streams on main, no conflicts.
+- [Devin] Lint batch 32 (HEAD post-transitive-alias): ~63
+  strict checks. New: let a = b where b is let-bound to
+  Var(c) — the let propagates an alias chain one level
+  deeper.
