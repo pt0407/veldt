@@ -3408,6 +3408,9 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
                 if body.iter().any(|s| matches!(s, Stmt::Let(n, _) if n == name)) {
                     out.push(format!("let {} inside the loop body shadows the loop var", name));
                 }
+                if body.iter().any(|s| matches!(s, Stmt::Assign(n, _) if n == name)) {
+                    out.push(format!("for variable {} assigned inside the body — mutating the loop var", name));
+                }
                 if !name.starts_with('_')
                     && !body.iter().any(|s| stmt_mentions(s, name)) {
                     out.push(format!("for variable {} never used — prefix with _", name));
