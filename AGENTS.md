@@ -868,3 +868,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 - [Devin] Lint batch 34 (HEAD post-call-alias): ~65 strict
   checks. New: let a = b where b is bound to a call —
   the let copies a call result that could be inlined.
+- [Devin] Lint batch 35 (HEAD post-match-call-alias): ~66
+  strict checks. New: match on a call-bound alias — the
+  scrutinee is a call result that could be matched
+  directly.
