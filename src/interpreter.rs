@@ -3336,6 +3336,73 @@ impl Interpreter {
                 d2.insert("cells".to_string(), Value::List(rows2));
                 Ok(Some(Value::Dict(d2)))
             }
+            // === std:microservice — service registry + health check ===
+            "svc_register" => {
+                // svc_register(registry, name, fn) — register a service impl
+                let (reg, name, f) = match (args.get(0), args.get(1), args.get(2)) {
+                    (Some(Value::Dict(r)), Some(Value::Str(n)), Some(f @ Value::Closure(_, _, _)))
+                        => (r.clone(), n.clone(), f.clone()),
+                    _ => return Err("svc_register(reg, name, fn) expects dict + str + closure".into()),
+                };
+                let mut d = reg.clone();
+                let mut meta = im::HashMap::new();
+                meta.insert("impl".to_string(), f);
+                meta.insert("calls".to_string(), Value::Int(0));
+                meta.insert("fails".to_string(), Value::Int(0));
+                d.insert(name.to_string(), Value::Dict(meta));
+                Ok(Some(Value::Dict(d)))
+            }
+            "svc_call" => {
+                // svc_call(registry, name, args) — dispatch to the impl, track
+                // calls + failures. Returns {ok, result, calls, fails}.
+                let (reg, name, call_args) = match (args.get(0), args.get(1), args.get(2)) {
+                    (Some(Value::Dict(r)), Some(Value::Str(n)), Some(Value::List(a)))
+                        => (r, n.clone(), a.iter().cloned().collect::<Vec<Value>>()),
+                    _ => return Err("svc_call(reg, name, args) expects dict + str + list".into()),
+                };
+                let Some(Value::Dict(meta)) = reg.get(name.as_ref()) else {
+                    return Err(format!("service '{}' not registered", name));
+                };
+                let Some(f) = meta.get("impl") else { return Err("service: no impl".into()) };
+                let calls = meta.get("calls").and_then(|v| if let Value::Int(i) = v { Some(*i) } else { None }).unwrap_or(0);
+                let fails = meta.get("fails").and_then(|v| if let Value::Int(i) = v { Some(*i) } else { None }).unwrap_or(0);
+                let mut out = im::HashMap::new();
+                let mut reg2 = reg.clone();
+                let mut meta2 = meta.clone();
+                match self.call_closure_value(f, call_args) {
+                    Ok(v) => {
+                        out.insert("ok".to_string(), Value::Bool(true));
+                        out.insert("result".to_string(), v);
+                        meta2.insert("calls".to_string(), Value::Int(calls + 1));
+                    }
+                    Err(e) => {
+                        out.insert("ok".to_string(), Value::Bool(false));
+                        out.insert("error".to_string(), Value::Str(e.into()));
+                        meta2.insert("calls".to_string(), Value::Int(calls + 1));
+                        meta2.insert("fails".to_string(), Value::Int(fails + 1));
+                    }
+                }
+                reg2.insert(name.to_string(), Value::Dict(meta2));
+                out.insert("registry".to_string(), Value::Dict(reg2));
+                Ok(Some(Value::Dict(out)))
+            }
+            "svc_health" => {
+                // svc_health(registry) — per-service call/fail counts
+                let Some(Value::Dict(reg)) = args.get(0) else { return Err("svc_health(reg) expects a registry".into()) };
+                let mut out = im::HashMap::new();
+                for (name, meta) in reg {
+                    if let Value::Dict(m) = meta {
+                        let calls = m.get("calls").and_then(|v| if let Value::Int(i) = v { Some(*i) } else { None }).unwrap_or(0);
+                        let fails = m.get("fails").and_then(|v| if let Value::Int(i) = v { Some(*i) } else { None }).unwrap_or(0);
+                        let mut h = im::HashMap::new();
+                        h.insert("calls".to_string(), Value::Int(calls));
+                        h.insert("fails".to_string(), Value::Int(fails));
+                        h.insert("healthy".to_string(), Value::Bool(fails == 0 || calls > fails * 5));
+                        out.insert(name.clone(), Value::Dict(h));
+                    }
+                }
+                Ok(Some(Value::Dict(out)))
+            }
             "dist_stats" => {
                 // dist_stats(fn, trials) — mean/stddev/min/max over n samples
                 let (f, trials) = match (args.get(0), args.get(1)) {
