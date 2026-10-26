@@ -3413,9 +3413,170 @@ fn fmt_check(path: &str) {
 pub fn lint(stmts: &[ast::Stmt]) -> Vec<String> {
     use ast::*;
     let mut out = Vec::new();
+    // call-arity pass — calls to locally-defined fns with the
+    // wrong arg count are real bugs, not just style
+    let mut fns = std::collections::HashMap::new();
+    collect_fns(stmts, &mut fns);
+    if fns.values().any(|a| a.is_some()) {
+        arity_block(stmts, &fns, None, &mut out);
+    }
     let mut outer = std::collections::HashSet::new();
     lint_block(stmts, &mut out, &mut outer);
     out
+}
+
+/// collect name -> param count for locally defined fns; a name
+/// defined twice with different arities is ambiguous — skipped.
+fn collect_fns(stmts: &[ast::Stmt],
+               fns: &mut std::collections::HashMap<String, Option<usize>>) {
+    use ast::*;
+    fn record(fns: &mut std::collections::HashMap<String, Option<usize>>,
+              name: &str, arity: usize) {
+        match fns.get(name) {
+            None => { fns.insert(name.to_string(), Some(arity)); }
+            Some(Some(a)) if *a != arity => { fns.insert(name.to_string(), None); }
+            _ => {}
+        }
+    }
+    for s in stmts {
+        match s {
+            Stmt::FnDef(name, params, body) => {
+                record(fns, name, params.len());
+                collect_fns(body, fns);
+            }
+            Stmt::Grow(GrowItem::Fn(name, params, body, _)) => {
+                record(fns, name, params.len());
+                collect_fns(body, fns);
+            }
+            Stmt::If(_, a, b) => {
+                collect_fns(a, fns);
+                if let Some(b) = b { collect_fns(b, fns); }
+            }
+            Stmt::While(_, b) | Stmt::For(_, _, b) => collect_fns(b, fns),
+            Stmt::Try(a, _, c) => { collect_fns(a, fns); collect_fns(c, fns); }
+            Stmt::Match(_, arms, els) => {
+                for (_, b) in arms { collect_fns(b, fns); }
+                if let Some(b) = els { collect_fns(b, fns); }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// walk a block flagging calls to locally-defined fns whose arg
+/// count doesn't match the definition. ctx = enclosing fn name.
+fn arity_block(stmts: &[ast::Stmt],
+               fns: &std::collections::HashMap<String, Option<usize>>,
+               ctx: Option<&str>, out: &mut Vec<String>) {
+    use ast::*;
+    for s in stmts {
+        match s {
+            Stmt::Let(_, e) | Stmt::Assign(_, e) | Stmt::Print(e)
+            | Stmt::ExprStmt(e) | Stmt::LetDestructure(_, e) => {
+                arity_expr(e, fns, ctx, out);
+            }
+            Stmt::FieldAssign(o, _, v) => {
+                arity_expr(o, fns, ctx, out);
+                arity_expr(v, fns, ctx, out);
+            }
+            Stmt::IndexAssign(o, i, v) => {
+                arity_expr(o, fns, ctx, out);
+                arity_expr(i, fns, ctx, out);
+                arity_expr(v, fns, ctx, out);
+            }
+            Stmt::If(c, a, b) => {
+                arity_expr(c, fns, ctx, out);
+                arity_block(a, fns, ctx, out);
+                if let Some(b) = b { arity_block(b, fns, ctx, out); }
+            }
+            Stmt::While(c, b) => {
+                arity_expr(c, fns, ctx, out);
+                arity_block(b, fns, ctx, out);
+            }
+            Stmt::For(_, it, b) => {
+                arity_expr(it, fns, ctx, out);
+                arity_block(b, fns, ctx, out);
+            }
+            Stmt::Return(Some(e)) => arity_expr(e, fns, ctx, out),
+            Stmt::Try(a, _, c) => {
+                arity_block(a, fns, ctx, out);
+                arity_block(c, fns, ctx, out);
+            }
+            Stmt::Match(scrut, arms, els) => {
+                arity_expr(scrut, fns, ctx, out);
+                for (p, b) in arms {
+                    arity_expr(p, fns, ctx, out);
+                    arity_block(b, fns, ctx, out);
+                }
+                if let Some(b) = els { arity_block(b, fns, ctx, out); }
+            }
+            Stmt::FnDef(n, _, b) => arity_block(b, fns, Some(n), out),
+            Stmt::Grow(GrowItem::Fn(n, _, b, tests)) => {
+                arity_block(b, fns, Some(n), out);
+                for t in tests {
+                    arity_expr(&t.call, fns, Some(n), out);
+                    if let Some(e) = &t.expected { arity_expr(e, fns, Some(n), out); }
+                }
+            }
+            Stmt::Grow(GrowItem::Let(_, e)) => arity_expr(e, fns, ctx, out),
+            _ => {}
+        }
+    }
+}
+
+/// recurse an expr flagging Call nodes whose callee is a locally
+/// defined fn and whose arg count doesn't match its arity.
+fn arity_expr(e: &ast::Expr,
+              fns: &std::collections::HashMap<String, Option<usize>>,
+              ctx: Option<&str>, out: &mut Vec<String>) {
+    use ast::*;
+    match e {
+        Expr::Call(name, _, args) => {
+            if let Some(Some(want)) = fns.get(name) {
+                if args.len() != *want {
+                    let msg = format!("{}() wants {} args, got {}", name, want, args.len());
+                    out.push(match ctx {
+                        Some(f) => format!("{}: {}", f, msg),
+                        None => msg,
+                    });
+                }
+            }
+            for a in args { arity_expr(a, fns, ctx, out); }
+        }
+        Expr::MethodCall(o, _, args) => {
+            arity_expr(o, fns, ctx, out);
+            for a in args { arity_expr(a, fns, ctx, out); }
+        }
+        Expr::BinOp(a, _, b) | Expr::Index(a, b) => {
+            arity_expr(a, fns, ctx, out);
+            arity_expr(b, fns, ctx, out);
+        }
+        Expr::UnaryOp(_, a) | Expr::FieldAccess(a, _) => arity_expr(a, fns, ctx, out),
+        Expr::List(items) | Expr::Interp(items) => {
+            for i in items { arity_expr(i, fns, ctx, out); }
+        }
+        Expr::StructLit(_, fields) => {
+            for (_, v) in fields { arity_expr(v, fns, ctx, out); }
+        }
+        Expr::Slice(o, lo, hi) => {
+            arity_expr(o, fns, ctx, out);
+            if let Some(e) = lo { arity_expr(e, fns, ctx, out); }
+            if let Some(e) = hi { arity_expr(e, fns, ctx, out); }
+        }
+        Expr::SafeGet(o, _, args) => {
+            arity_expr(o, fns, ctx, out);
+            if let Some(args) = args {
+                for a in args { arity_expr(a, fns, ctx, out); }
+            }
+        }
+        Expr::Lambda(_, body) => arity_block(body, fns, ctx, out),
+        Expr::ListComp(x, _, it, cond) => {
+            arity_expr(x, fns, ctx, out);
+            arity_expr(it, fns, ctx, out);
+            if let Some(c) = cond { arity_expr(c, fns, ctx, out); }
+        }
+        _ => {}
+    }
 }
 
 fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
@@ -3469,7 +3630,7 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                     }
                     if items.is_empty() {
                         let assigned = stmts.iter().skip(i + 1)
-                            .any(|s| stmt_assigns(s, name) || matches!(s, Stmt::ExprStmt(Expr::MethodCall(o, m, _)) if matches!(o.as_ref(), Expr::Var(v) if v == name) && m == "push"));
+                            .any(|s| stmt_grows(s, name));
                         if !assigned {
                             out.push(format!("let {} = [] — an empty list that never grows", name));
                         }
@@ -4185,6 +4346,60 @@ fn stmt_assigns(s: &ast::Stmt, name: &str) -> bool {
             || b.iter().any(|s| stmt_assigns(s, name)),
         Stmt::Match(_, arms, els) => arms.iter().any(|(_, b)| b.iter().any(|s| stmt_assigns(s, name)))
             || els.as_ref().map(|v| v.iter().any(|s| stmt_assigns(s, name))).unwrap_or(false),
+        _ => false,
+    }
+}
+
+// does this statement grow `name` — assign to it, index/field-set it,
+// or call a mutating method (append/push/insert/extend) on it,
+// anywhere including nested bodies
+fn stmt_grows(s: &ast::Stmt, name: &str) -> bool {
+    use ast::*;
+    if stmt_assigns(s, name) { return true; }
+    match s {
+        Stmt::ExprStmt(e) | Stmt::Print(e) | Stmt::Let(_, e)
+        | Stmt::Assign(_, e) | Stmt::Return(Some(e)) => expr_grows(e, name),
+        Stmt::FieldAssign(o, _, v) | Stmt::IndexAssign(o, _, v) =>
+            expr_grows(o, name) || expr_grows(v, name),
+        Stmt::If(c, a, b) => expr_grows(c, name)
+            || a.iter().any(|s| stmt_grows(s, name))
+            || b.as_ref().map(|v| v.iter().any(|s| stmt_grows(s, name))).unwrap_or(false),
+        Stmt::While(c, b) => expr_grows(c, name)
+            || b.iter().any(|s| stmt_grows(s, name)),
+        Stmt::For(_, it, b) => expr_grows(it, name)
+            || b.iter().any(|s| stmt_grows(s, name)),
+        Stmt::Try(a, _, c) => a.iter().any(|s| stmt_grows(s, name))
+            || c.iter().any(|s| stmt_grows(s, name)),
+        Stmt::Match(scrut, arms, els) => expr_grows(scrut, name)
+            || arms.iter().any(|(_, b)| b.iter().any(|s| stmt_grows(s, name)))
+            || els.as_ref().map(|v| v.iter().any(|s| stmt_grows(s, name))).unwrap_or(false),
+        _ => false,
+    }
+}
+
+fn expr_grows(e: &ast::Expr, name: &str) -> bool {
+    use ast::*;
+    match e {
+        Expr::MethodCall(o, m, args) =>
+            (matches!(o.as_ref(), Expr::Var(v) if v == name)
+                && matches!(m.as_str(), "append" | "push" | "insert" | "extend"))
+            || expr_grows(o, name)
+            || args.iter().any(|a| expr_grows(a, name)),
+        Expr::BinOp(a, _, b) | Expr::Index(a, b) =>
+            expr_grows(a, name) || expr_grows(b, name),
+        Expr::UnaryOp(_, a) | Expr::FieldAccess(a, _) => expr_grows(a, name),
+        Expr::Call(_, _, args) => args.iter().any(|a| expr_grows(a, name)),
+        Expr::List(items) | Expr::Interp(items) =>
+            items.iter().any(|i| expr_grows(i, name)),
+        Expr::StructLit(_, fs) => fs.iter().any(|(_, v)| expr_grows(v, name)),
+        Expr::Slice(o, lo, hi) => expr_grows(o, name)
+            || lo.as_ref().map(|e| expr_grows(e, name)).unwrap_or(false)
+            || hi.as_ref().map(|e| expr_grows(e, name)).unwrap_or(false),
+        Expr::SafeGet(o, _, args) => expr_grows(o, name)
+            || args.as_ref().map(|a| a.iter().any(|e| expr_grows(e, name))).unwrap_or(false),
+        Expr::Lambda(_, b) => b.iter().any(|s| stmt_grows(s, name)),
+        Expr::ListComp(x, _, it, c) => expr_grows(x, name) || expr_grows(it, name)
+            || c.as_ref().map(|e| expr_grows(e, name)).unwrap_or(false),
         _ => false,
     }
 }
