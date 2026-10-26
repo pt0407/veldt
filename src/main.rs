@@ -5398,6 +5398,48 @@ fn verify_family(name: &str, args: &[String]) {
             Ok(Some((id, cex))) => {
                 println!("{}#{}: PROVABLY DIVERGENT — counterexample: {}",
                          name, id, cex.join(", "));
+                // the counterexample is a real failing input — plant it
+                // as a probe so the divergence is caught on every
+                // future variant, not just reported once
+                let mut veldt = veldt::Veldt::new();
+                if veldt.load().is_err() { return; }
+                let mut interp = interpreter::Interpreter::new();
+                veldt.load_into_interpreter(&mut interp);
+                let arg_vals: Vec<interpreter::Value> = cex.iter()
+                    .filter_map(|s| s.parse::<i64>().ok())
+                    .map(interpreter::Value::Int).collect();
+                if arg_vals.len() == cex.len() {
+                    if let Some(fittest) = veldt.get_fittest_variant(name) {
+                        let f_id = fittest.id;
+                        if let Ok(expected) =
+                            interp.call_function(name, Some(f_id), arg_vals.clone())
+                        {
+                            let pool = veldt.probes.entry(name.to_string())
+                                .or_insert_with(Vec::new);
+                            let arg_strs: Vec<String> = arg_vals.iter()
+                                .map(|v| serde_json::to_string(v).unwrap_or_default())
+                                .collect();
+                            let already = pool.iter().any(|p| p.args == arg_strs);
+                            if !already {
+                                pool.push(veldt::Probe {
+                                    args: arg_strs,
+                                    expected: serde_json::to_string(&expected)
+                                        .unwrap_or_default(),
+                                    niche: format!("smt:cex{}", id),
+                                    born: std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .map(|d| d.as_secs()).unwrap_or(0),
+                                    scale: 0,
+                                });
+                                let _ = veldt.save();
+                                println!("  → probe planted: f({}) = {}",
+                                         cex.join(", "),
+                                         serde_json::to_string(&expected)
+                                            .unwrap_or_default());
+                            }
+                        }
+                    }
+                }
             }
             Ok(None) => {
                 println!("{}: PROVABLY EQUIVALENT — all variants agree", name);
