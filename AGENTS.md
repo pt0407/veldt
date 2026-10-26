@@ -1274,3 +1274,6 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 - [Devin] dead-store FP fix: self-referential assigns
   (x = x.put(..)/f(x)) read the old value — csv_analysis
   dropped 6 FPs (31 -> ~25 warnings, all legitimate).
+- [Devin] check --garden --watch: re-lints variants on
+  garden mtime — all read-only garden views now have a
+  live --watch mode (stats/test/fuzz/bench/check-garden).
