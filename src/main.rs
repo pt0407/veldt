@@ -1246,6 +1246,33 @@ fn print_stats(veldt: &veldt::Veldt) {
             .map(|(n, a)| format!("{}:{:.0}", n, a)).collect();
         println!("avg age/family: {}", line.join(" "));
     }
+    // avg usage per family — per-lineage call pressure
+    let mut fam_use: Vec<(&String, f64)> = veldt.functions.iter()
+        .map(|(n, vs)| {
+            let avg = vs.iter().map(|e| e.usage_count as f64).sum::<f64>()
+                / vs.len().max(1) as f64;
+            (n, avg)
+        }).collect();
+    fam_use.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    if !fam_use.is_empty() {
+        let line: Vec<String> = fam_use.iter().take(8)
+            .map(|(n, a)| format!("{}:{:.0}", n, a)).collect();
+        println!("avg usage/family: {}", line.join(" "));
+    }
+    // avg body size per family — per-lineage code size (compact vs bloated)
+    let mut fam_size: Vec<(&String, usize)> = veldt.functions.iter()
+        .map(|(n, vs)| {
+            let avg = vs.iter()
+                .map(|e| crate::fmt::format_program(&e.body).len())
+                .sum::<usize>() / vs.len().max(1);
+            (n, avg)
+        }).collect();
+    fam_size.sort_by(|a, b| b.1.cmp(&a.1));
+    if !fam_size.is_empty() {
+        let line: Vec<String> = fam_size.iter().take(8)
+            .map(|(n, a)| format!("{}:{}", n, a)).collect();
+        println!("avg size/family: {}", line.join(" "));
+    }
     // fitness trend — peak per run, is the garden improving?
     if veldt.fitness_history.len() >= 2 {
         let trend: Vec<String> = veldt.fitness_history.iter()
