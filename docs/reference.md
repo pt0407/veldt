@@ -166,10 +166,14 @@ one line each; `--json` emits machine-readable objects for tooling.
 | `veldt check - --strict` | same, reading the program from stdin |
 | `veldt check <file> --watch` | re-lint on file save |
 | `veldt check --garden [family]` | strict-lint every variant body (synthetic `grow fn` wrap) |
+| `veldt check --garden --bugs` | defect-class warnings only — the real-bug subset |
 | `veldt check --garden --fix` | mechanically repair dead code in variant bodies, then re-lint |
+| `veldt check --garden --fix --verify` | also re-trial every repaired variant, write health back |
+| `veldt check --suppress <s>` | drop warnings containing `<s>` (repeatable; works with --json) |
 | `veldt fix <file>` | same repairs applied to a source file, in-place + reformatted |
 | `veldt fix <file> --check` | dry-run gate — exits 1 if repairable dead code exists |
-| `veldt stats --lint` | garden-wide warning census, worst families first |
+| `veldt stats --lint` | garden-wide warning census: defect-class split + top warning kinds |
+| `veldt evolve --tend` | self-maintaining cycles — heal sick + clean dead code each cycle |
 | `veldt adopt <name#N> --lint` | refuse to promote a variant carrying defect-class warnings |
 | `veldt tend [family]` | heal sick variants on demand (mechanical repair, then healer-merge) |
 
