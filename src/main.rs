@@ -1212,6 +1212,19 @@ fn print_stats(veldt: &veldt::Veldt) {
                         *arg_counts.iter().max().unwrap_or(&0));
         println!("arity: avg {} params/variant ({}..{})", avg, lo, hi);
     }
+    // avg age per family — per-lineage turnover (churn vs stable)
+    let mut fam_age: Vec<(&String, f64)> = veldt.functions.iter()
+        .map(|(n, vs)| {
+            let avg = vs.iter().map(|e| e.age as f64).sum::<f64>()
+                / vs.len().max(1) as f64;
+            (n, avg)
+        }).collect();
+    fam_age.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    if !fam_age.is_empty() {
+        let line: Vec<String> = fam_age.iter().take(8)
+            .map(|(n, a)| format!("{}:{:.0}", n, a)).collect();
+        println!("avg age/family: {}", line.join(" "));
+    }
     // fitness trend — peak per run, is the garden improving?
     if veldt.fitness_history.len() >= 2 {
         let trend: Vec<String> = veldt.fitness_history.iter()
