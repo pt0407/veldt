@@ -49,6 +49,19 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+<<<<<<< HEAD
+- [Devin/main-side] JIT UPDATE 3: f64 signature path (float consts/ops
+  -> fadd/fsub/fmul/fdiv/fcmp/fneg, int consts promote, dispatch picks
+  the f64 ABI on Int|Float args). call_best arm JITs the fittest
+  variant too — garden functions get native code after 64 calls.
+  Verified: squaref*300 -> 2025.0, avg=15.0, call_best(pick) -> 90000.
+  run --vm --evolve works end-to-end. Full bench: tree vs vm
+  dict_ops 32x, recursive fib 88x, numeric_loop 3x, fn_calls 3.6x,
+  list/dict mutating ops beat tree-walk (AppendVar/InsertDynVar).
+  JIT still: int/float sigs only, max 4 args, calls must be fn->fn
+  (builtins stay bytecode). z3 system lib absent so Phase 12 SMT is
+  parked pending brew install z3.
+=======
 - [Devin] GAME PILLAR shipped end-to-end — std:render/std:ui (ASCII
   canvas: canvas_new/set/get/render/print/clear/fill/line/sprite/
   circle/rect/ellipse/triangle + ui_box/label/button/bar/menu/progress/
@@ -61,6 +74,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   (choice/randf/rand_range/dice/rand_gauss/roll/weighted_choice/
   rand_shuffle/rand_bool). ~60 builtins. Demo: examples/dungeon.veldt.
   Docs: `veldt docs game`. WGPU render core is aspirational (native tier).
+>>>>>>> ac7722a90900327c295f4c266424d2bfba7bf794
 - [Devin/main-side] JIT UPDATE 2 + honest bench sweep:
   - ptrs keyed by name#variant so evolved variants recompile (was
     stale-ptr bug — a new fittest never got native code).
