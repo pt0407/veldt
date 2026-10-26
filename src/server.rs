@@ -994,6 +994,8 @@ struct AgentRequest {
     task: String,
     #[serde(default)]
     source: String,
+    #[serde(default)]
+    vm: bool,
 }
 
 #[derive(Serialize)]
@@ -1017,6 +1019,7 @@ async fn agent_task(
         v.clone()
     };
 
+    veldt.prefer_vm = req.vm;
     let resp = agent::respond(&req.task, &req.source, &mut veldt);
 
     veldt.save().unwrap_or_else(|e| eprintln!("Save error: {}", e));

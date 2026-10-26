@@ -51,7 +51,7 @@ pub fn execute_source(source: &str, veldt: &mut Veldt) -> ExecResult {
 /// execute_source with capability control — sandboxed callers get a
 /// Stage-0 interpreter (fs/net/proc all denied).
 pub fn execute_source_opts(source: &str, veldt: &mut Veldt, caps: crate::interpreter::Caps) -> ExecResult {
-    execute_source_opts_full(source, veldt, caps, false)
+    execute_source_opts_full(source, veldt, caps, veldt.prefer_vm)
 }
 
 /// Shared run pipeline — `use_vm` routes execution through the

@@ -116,6 +116,9 @@ pub struct Veldt {
     pub fitness_history: Vec<f64>,
     pub run_count: u64,
     pub garden_path: PathBuf,
+    /// Runtime preference: run through the bytecode VM + JIT.
+    /// Not serialized — garden persistence uses a separate save struct.
+    pub prefer_vm: bool,
 }
 
 fn now_ts() -> u64 {
@@ -136,6 +139,7 @@ impl Veldt {
             fitness_history: Vec::new(),
             run_count: 0,
             garden_path,
+            prefer_vm: false,
         }
     }
 
@@ -150,6 +154,7 @@ impl Veldt {
             fitness_history: Vec::new(),
             run_count: 0,
             garden_path: path,
+            prefer_vm: false,
         }
     }
 
