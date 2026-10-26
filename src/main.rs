@@ -742,6 +742,70 @@ fn main() {
                 }
                 println!("=== The Veldt (filter: {}) ===", expr);
                 filtered.print_garden(sick_only, healthy_only);
+            } else if let Some(field) = args.iter().position(|a| a == "--sort")
+                .and_then(|p| args.get(p + 1)).cloned() {
+                // --sort <field> — sort variants within each family by a field
+                // fields: fitness age usage size args lifespan last_used niches
+                //         fit_rate usage_rate size_rate efficiency niche_score id
+                //         origin health trust (desc for numerics, asc for strings)
+                let mut sorted = veldt::Veldt::new();
+                sorted.probes = veldt.probes.clone();
+                sorted.obituaries = veldt.obituaries.clone();
+                sorted.run_count = veldt.run_count;
+                sorted.garden_path = veldt.garden_path.clone();
+                for (name, vs) in &veldt.functions {
+                    let mut vs = vs.clone();
+                    vs.sort_by(|a, b| {
+                        let ord = match field.as_str() {
+                            "fitness" => b.fitness.partial_cmp(&a.fitness),
+                            "age" => b.age.cmp(&a.age),
+                            "usage" => b.usage_count.cmp(&a.usage_count),
+                            "size" => crate::fmt::format_program(&b.body).len()
+                                .cmp(&crate::fmt::format_program(&a.body).len()),
+                            "args" => b.params.len().cmp(&a.params.len()),
+                            "lifespan" => b.lifespan.partial_cmp(&a.lifespan),
+                            "last_used" => b.last_used.cmp(&a.last_used),
+                            "niches" => b.niche_scores.len().cmp(&a.niche_scores.len()),
+                            "fit_rate" => (b.fitness / (b.age as f64 + 1.0))
+                                .partial_cmp(&(a.fitness / (a.age as f64 + 1.0))),
+                            "usage_rate" => (b.usage_count as f64 / (b.age as f64 + 1.0))
+                                .partial_cmp(&(a.usage_count as f64 / (a.age as f64 + 1.0))),
+                            "size_rate" => (crate::fmt::format_program(&b.body).len() as f64 / (b.age as f64 + 1.0))
+                                .partial_cmp(&(crate::fmt::format_program(&a.body).len() as f64 / (a.age as f64 + 1.0))),
+                            "efficiency" => (b.fitness / (crate::fmt::format_program(&b.body).len() as f64 + 1.0))
+                                .partial_cmp(&(a.fitness / (crate::fmt::format_program(&a.body).len() as f64 + 1.0))),
+                            "niche_score" => {
+                                let ascore = a.niche_scores.values().sum::<f64>() / a.niche_scores.len().max(1) as f64;
+                                let bscore = b.niche_scores.values().sum::<f64>() / b.niche_scores.len().max(1) as f64;
+                                bscore.partial_cmp(&ascore)
+                            }
+                            "id" => a.id.cmp(&b.id),
+                            "origin" => a.origin.cmp(&b.origin),
+                            "health" => {
+                                let h = |e: &veldt::FunctionEntry| match &e.health {
+                                    veldt::Health::Healthy => 0,
+                                    veldt::Health::Sick(_) => 1,
+                                    veldt::Health::Dying => 2,
+                                };
+                                h(a).cmp(&h(b))
+                            }
+                            "trust" => {
+                                let t = |e: &veldt::FunctionEntry| match e.trust {
+                                    veldt::Trust::Canonical => 0,
+                                    veldt::Trust::Established => 1,
+                                    veldt::Trust::Seedling => 2,
+                                    _ => 3,
+                                };
+                                t(a).cmp(&t(b))
+                            }
+                            _ => return std::cmp::Ordering::Equal,
+                        };
+                        ord.unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                    sorted.functions.insert(name.clone(), vs);
+                }
+                println!("=== The Veldt (sort: {}) ===", field);
+                sorted.print_garden(sick_only, healthy_only);
             } else if let Some(spec) = args.iter().position(|a| a == "--max_niche_fam")
                 .and_then(|p| args.get(p + 1)).cloned() {
                 // --max_niche_fam <name:max> — variants in this family with <= max niches
