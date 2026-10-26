@@ -3506,8 +3506,9 @@ fn print_stats(veldt: &veldt::Veldt) {
     let mut dying = 0usize;
     // (name, peak, count, avg_age, usage, avg_size, probes, deaths, traces,
     //  immigrants, sick, healthy, canonical, established, seedling,
-    //  avg_niches, avg_args, avg_lifespan, max_last_used)
-    let mut best: Vec<(String, f64, usize, f64, u64, f64, usize, usize, usize, usize, usize, usize, usize, usize, usize, f64, f64, f64, u64)> = Vec::new();
+    //  avg_niches, avg_args, avg_lifespan, max_last_used,
+    //  avg_fit_rate, avg_usage_rate, avg_efficiency, avg_niche_score)
+    let mut best: Vec<(String, f64, usize, f64, u64, f64, usize, usize, usize, usize, usize, usize, usize, usize, usize, f64, f64, f64, u64, f64, f64, f64, f64)> = Vec::new();
     for (name, variants) in &veldt.functions {
         let top = variants.iter().map(|e| e.fitness)
             .fold(f64::NEG_INFINITY, f64::max);
@@ -3530,10 +3531,17 @@ fn print_stats(veldt: &veldt::Veldt) {
         let avg_args = variants.iter().map(|e| e.params.len() as f64).sum::<f64>() / n;
         let avg_lifespan = variants.iter().map(|e| e.lifespan).sum::<f64>() / n;
         let max_lu = variants.iter().map(|e| e.last_used).max().unwrap_or(0);
+        let fit_rate = variants.iter().map(|e| e.fitness / (e.age as f64 + 1.0)).sum::<f64>() / n;
+        let usage_rate = variants.iter().map(|e| e.usage_count as f64 / (e.age as f64 + 1.0)).sum::<f64>() / n;
+        let efficiency = variants.iter().map(|e|
+            e.fitness / (crate::fmt::format_program(&e.body).len() as f64 + 1.0)).sum::<f64>() / n;
+        let niche_score = variants.iter().map(|e|
+            e.niche_scores.values().sum::<f64>() / e.niche_scores.len().max(1) as f64).sum::<f64>() / n;
         best.push((name.clone(), if variants.is_empty() { 0.0 } else { top },
             variants.len(), avg_age, usage, avg_size, probes, deaths, traces,
             immigrants, sick_n, healthy_n, canon_n, estab_n, seed_n,
-            avg_niches, avg_args, avg_lifespan, max_lu));
+            avg_niches, avg_args, avg_lifespan, max_lu,
+            fit_rate, usage_rate, efficiency, niche_score));
         for e in variants {
             total += 1;
             match e.health {
@@ -3567,6 +3575,10 @@ fn print_stats(veldt: &veldt::Veldt) {
         "args" => best.sort_by(|a, b| b.16.partial_cmp(&a.16).unwrap_or(std::cmp::Ordering::Equal)),
         "lifespan" => best.sort_by(|a, b| b.17.partial_cmp(&a.17).unwrap_or(std::cmp::Ordering::Equal)),
         "last_used" => best.sort_by(|a, b| b.18.cmp(&a.18)),
+        "fit_rate" => best.sort_by(|a, b| b.19.partial_cmp(&a.19).unwrap_or(std::cmp::Ordering::Equal)),
+        "usage_rate" => best.sort_by(|a, b| b.20.partial_cmp(&a.20).unwrap_or(std::cmp::Ordering::Equal)),
+        "efficiency" => best.sort_by(|a, b| b.21.partial_cmp(&a.21).unwrap_or(std::cmp::Ordering::Equal)),
+        "niche_score" => best.sort_by(|a, b| b.22.partial_cmp(&a.22).unwrap_or(std::cmp::Ordering::Equal)),
         _ => best.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)),
     }
     let probe_count: usize = veldt.probes.values().map(|v| v.len()).sum();
