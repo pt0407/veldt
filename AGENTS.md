@@ -708,3 +708,6 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   (not bind) — Var patterns are value comparisons, _ is
   the unbound-var convention. The earlier let-shadows-
   loop-var and loop-var-assignment checks are correct.
+- [Devin] veldt deps (HEAD post-f58baaf): parse-only command
+  listing a file's imports (path + alias). --json for
+  tooling. File-level dependency inspection.
