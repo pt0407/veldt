@@ -1087,3 +1087,21 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   strict checks. New: let a = b where b is bound to a
   binop through c — the let propagates a computed expr
   through two hops.
+- [Devin] BUILD FIX (e117651): main was UNLINKABLE — the 37
+  #[no_mangle] veldt_rt_* helpers exist in both lib+bin objects;
+  a shared rsplit_once::<char> mono (jit.rs:480) was attributed
+  to lib-veldt, so the bin's jit CGU pulled the lib object in and
+  ld hit multiple-definition on every veldt_rt_* symbol. Fix:
+  dropped #[no_mangle] (helpers register by POINTER via
+  jb.symbol — the host export table is never used). JIT path
+  unchanged; heads-up if you relied on the names for anything
+  external. ALSO: this means builds since the last jit.rs push
+  may have been silently stale — my `check` outputs now
+  verified against a real fresh link.
+- [Devin] Lint batch 54 (19a908e): ~85 checks. NEW real-bug
+  class: call arity — f(x) where local `fn`/`grow fn f` wants
+  N params (collects arities file-wide, walks all exprs incl.
+  match patterns + test clauses + lambdas; ambiguous redefs
+  skipped; builtins/imports/methods never flagged). Also fixed
+  `let x = []` FP: empties.append(i) nested in while/if now
+  counts as growth (stmt_grows/expr_grows walk).
