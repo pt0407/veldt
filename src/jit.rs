@@ -93,6 +93,18 @@ impl JitEngine {
             .max_by(|a, b| a.fitness.partial_cmp(&b.fitness)
                 .unwrap_or(std::cmp::Ordering::Equal))?;
         let key = format!("{}#{}", name, chosen.id);
+        self.compile_variant(key, chosen, fns)
+    }
+
+    /// Compile a pinned `name#id` variant (explicit `name#N` calls).
+    fn compile_pinned(&mut self, name: &str, id: u32, fns: &Fns)
+        -> Option<JitFn> {
+        let chosen = fns.get(name)?.iter().find(|v| v.id == id)?;
+        self.compile_variant(format!("{}#{}", name, id), chosen, fns)
+    }
+
+    fn compile_variant(&mut self, key: String, chosen: &CompiledFn,
+                       fns: &Fns) -> Option<JitFn> {
         if let Some(&(p, fl)) = self.ptrs.get(&key) {
             return Some(JitFn { code_ptr: p, is_float: fl });
         }
@@ -421,6 +433,76 @@ impl JitEngine {
                             match stack.pop() {
                                 Some(v) => cargs.push(v),
                                 None => { fail_pc = pc; ok = false; break; }
+                            }
+                        }
+                        if !ok { break; }
+                        cargs.reverse();
+                        let call = b.ins().call(fref, &cargs);
+                        stack.push(b.inst_results(call)[0]);
+                    }
+                    Instr::Pop => { stack.pop(); }
+                    Instr::Not => {
+                        let Some(v) = stack.pop() else {
+                            fail_pc = pc; ok = false; break; };
+                        if float {
+                            let z = b.ins().f64const(0.0);
+                            let c = b.ins().fcmp(
+                                cranelift_codegen::ir::condcodes
+                                    ::FloatCC::Equal, v, z);
+                            let i = b.ins().uextend(types::I64, c);
+                            stack.push(
+                                b.ins().fcvt_from_sint(types::F64, i));
+                        } else {
+                            let z = b.ins().iconst(types::I64, 0);
+                            let c = b.ins().icmp(IntCC::Equal, v, z);
+                            stack.push(b.ins().uextend(types::I64, c));
+                        }
+                    }
+                    Instr::AndOp | Instr::OrOp => {
+                        let (Some(r), Some(l)) = (stack.pop(), stack.pop())
+                            else { fail_pc = pc; ok = false; break; };
+                        let and = matches!(chunk.code[pc], Instr::AndOp);
+                        if float {
+                            let z = b.ins().f64const(0.0);
+                            let cl = b.ins().fcmp(
+                                cranelift_codegen::ir::condcodes
+                                    ::FloatCC::NotEqual, l, z);
+                            let cr = b.ins().fcmp(
+                                cranelift_codegen::ir::condcodes
+                                    ::FloatCC::NotEqual, r, z);
+                            let c = if and { b.ins().band(cl, cr) }
+                                    else { b.ins().bor(cl, cr) };
+                            let i = b.ins().uextend(types::I64, c);
+                            stack.push(
+                                b.ins().fcvt_from_sint(types::F64, i));
+                        } else {
+                            let z = b.ins().iconst(types::I64, 0);
+                            let cl = b.ins().icmp(IntCC::NotEqual, l, z);
+                            let cr = b.ins().icmp(IntCC::NotEqual, r, z);
+                            let c = if and { b.ins().band(cl, cr) }
+                                    else { b.ins().bor(cl, cr) };
+                            stack.push(b.ins().uextend(types::I64, c));
+                        }
+                    }
+                    Instr::CallId(ni, vid, argc) => {
+                        if float { fail_pc = pc; ok = false; break; }
+                        let cn = chunk.names[ni as usize].clone();
+                        let ckey = format!("{}#{}", cn, vid);
+                        if self.compile_pinned(&cn, vid, fns).is_none() {
+                            fail_pc = pc; ok = false; break;
+                        }
+                        let cfid = match self.ids.get(&ckey) {
+                            Some(&f) => f,
+                            None => { fail_pc = pc; ok = false; break; }
+                        };
+                        let fref = self.module.declare_func_in_func(
+                            cfid, b.func);
+                        let mut cargs = Vec::new();
+                        for _ in 0..argc {
+                            match stack.pop() {
+                                Some(v) => cargs.push(v),
+                                None => { fail_pc = pc; ok = false;
+                                          break; }
                             }
                         }
                         if !ok { break; }
