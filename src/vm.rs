@@ -1614,31 +1614,33 @@ pub(crate) fn obj_tag(v: &Value) -> &'static str {
 pub(crate) fn binop(l: &Value, op: &BinOp, r: &Value) -> Result<Value, String> {
     use Value::*;
     Ok(match (l, op, r) {
-        (Int(a), BinOp::Add, Int(b)) => Int(a + b),
+        (Int(a), BinOp::Add, Int(b)) => Int(a.wrapping_add(*b)),
         (Float(a), BinOp::Add, Float(b)) => Float(a + b),
         (Int(a), BinOp::Add, Float(b)) => Float((*a as f64) + b),
         (Float(a), BinOp::Add, Int(b)) => Float(a + (*b as f64)),
         (Str(a), BinOp::Add, Str(b)) => Str(format!("{}{}", a, b).into()),
         (Str(a), BinOp::Add, other) => Str(format!("{}{}", a, other).into()),
         (other, BinOp::Add, Str(b)) => Str(format!("{}{}", other, b).into()),
-        (Int(a), BinOp::Sub, Int(b)) => Int(a - b),
+        (Int(a), BinOp::Sub, Int(b)) => Int(a.wrapping_sub(*b)),
         (Float(a), BinOp::Sub, Float(b)) => Float(a - b),
         (Int(a), BinOp::Sub, Float(b)) => Float((*a as f64) - b),
         (Float(a), BinOp::Sub, Int(b)) => Float(a - (*b as f64)),
-        (Int(a), BinOp::Mul, Int(b)) => Int(a * b),
+        (Int(a), BinOp::Mul, Int(b)) => Int(a.wrapping_mul(*b)),
         (Float(a), BinOp::Mul, Float(b)) => Float(a * b),
         (Int(a), BinOp::Mul, Float(b)) => Float((*a as f64) * b),
         (Float(a), BinOp::Mul, Int(b)) => Float(a * (*b as f64)),
         (Int(a), BinOp::Div, Int(b)) => {
             if *b == 0 { return Err("division by zero".into()); }
-            Int(a / b)
+            Int(a.wrapping_div(*b))
         },
+        (Float(_), BinOp::Div, Float(b)) if *b == 0.0 =>
+            return Err("division by zero".into()),
         (Float(a), BinOp::Div, Float(b)) => Float(a / b),
         (Int(a), BinOp::Div, Float(b)) => Float((*a as f64) / b),
         (Float(a), BinOp::Div, Int(b)) => Float(a / (*b as f64)),
         (Int(a), BinOp::Mod, Int(b)) => {
             if *b == 0 { return Err("modulo by zero".into()); }
-            Int(a % b)
+            Int(a.wrapping_rem(*b))
         },
         (Float(a), BinOp::Mod, Float(b)) => Float(a % b),
         (Int(a), BinOp::Mod, Float(b)) => Float((*a as f64) % b),
