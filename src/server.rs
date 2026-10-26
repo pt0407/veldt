@@ -60,6 +60,7 @@ pub async fn start_server(port: u16) {
         .route("/api/variant", get(variant))
         .route("/api/heal", get(heal))
         .route("/api/ages", get(ages))
+        .route("/api/census", get(census))
         .route("/api/run", post(run_program))
         .route("/api/evolve", post(evolve))
         .route("/api/clear", post(clear_veldt))
@@ -455,6 +456,20 @@ async fn ages() -> Json<serde_json::Value> {
         })).collect::<Vec<_>>())
         .collect();
     Json(serde_json::json!({"ages": age_data}))
+}
+
+async fn census() -> Json<serde_json::Value> {
+    let mut veldt = veldt::Veldt::new();
+    if veldt.load().is_err() {
+        return Json(serde_json::json!({"error": "garden load failed"}));
+    }
+    let total: usize = veldt.functions.values().map(|vs| vs.len()).sum();
+    Json(serde_json::json!({
+        "lineages": veldt.functions.len(), "variants": total,
+        "probes": veldt.probes.values().map(|v| v.len()).sum::<usize>(),
+        "deaths": veldt.obituaries.len(), "runs": veldt.run_count,
+        "structs": veldt.structs.len(), "variables": veldt.variables.len(),
+    }))
 }
 
 #[derive(Deserialize)]
