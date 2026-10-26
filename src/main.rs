@@ -2288,6 +2288,12 @@ fn print_stats(veldt: &veldt::Veldt) {
                 let unique_niches: std::collections::HashSet<_> = vs.iter()
                     .flat_map(|e| e.niche_scores.keys().map(|s| s.as_str())).collect();
                 println!("  diversity: {} origins · {} niches", unique_origins.len(), unique_niches.len());
+                // immigrants — the family's foreign-garden influence
+                let immigrants = vs.iter().filter(|e| e.origin.contains("immigrant")).count();
+                let seeds = vs.iter().filter(|e| e.origin.starts_with("seed")).count();
+                let llms = vs.iter().filter(|e| e.origin.contains("llm")).count();
+                println!("  population: {} immigrant · {} seed · {} LLM · {} bred",
+                    immigrants, seeds, llms, vs.len() - immigrants - seeds - llms);
             }
         }
         if veldt.fitness_history.len() >= 2 {
