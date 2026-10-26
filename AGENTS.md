@@ -524,3 +524,15 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   evolve --dry-run alias for --dry. IDE: Σ button on the garden
   row → /api/family dashboard (endpoint existed, UI never
   called it before). help_intent documents all of it.
+- [Devin] Agent inspection-intent batch 4 (HEAD post-33b2126):
+  `veldt agent` gained — niche ("fib niche gaps"/"uncovered" →
+  per-niche avg + coverage count + gap/partial flags), history
+  ("what changed"/"mutations" → recent births + deaths),
+  turnover ("fib turnover"/"churn" → alive vs died + causes),
+  pressure ("fib pressure"/"selection" → rivals + fitness σ),
+  healing ("who's healing" → recovery log w/ attempt counts),
+  sources ("where did fib come from" → origin histogram +
+  per-source avg fitness), lifecycle ("who's growing"/"aging"
+  → age vs lifespan split), size ("smallest fib"/"biggest" →
+  code-size ranking). All scoped-or-global via find_lineage +
+  parse_variant_ref; documented in help_intent.
