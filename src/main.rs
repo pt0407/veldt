@@ -3497,6 +3497,11 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                                 out.push(format!("let {} = {} — {} is bound to a call, could inline", name, v, v));
                                 break;
                             }
+                            // let a = b where b was let-bound to a list/struct — the let copies a container
+                            if n == v && matches!(pe, Expr::List(_) | Expr::StructLit(..)) {
+                                out.push(format!("let {} = {} — {} is bound to a container, could reuse", name, v, v));
+                                break;
+                            }
                         }
                     }
                 }
@@ -3766,6 +3771,16 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                                 // Var pattern bound to a call — the pattern is a call result
                                 if n == v && matches!(pe, Expr::Call(..) | Expr::MethodCall(..)) {
                                     out.push(format!("match pattern {} is bound to a call — inline it", v));
+                                    break;
+                                }
+                                // Var pattern bound to another var — the pattern is an alias
+                                if n == v && matches!(pe, Expr::Var(_)) {
+                                    out.push(format!("match pattern {} is bound to an alias — inline it", v));
+                                    break;
+                                }
+                                // Var pattern bound to a container — the pattern is a list/struct
+                                if n == v && matches!(pe, Expr::List(_) | Expr::StructLit(..)) {
+                                    out.push(format!("match pattern {} is bound to a container — inline it", v));
                                     break;
                                 }
                             }

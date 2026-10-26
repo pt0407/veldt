@@ -896,3 +896,14 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 - [Devin] Lint batch 37 (HEAD post-match-call-pattern): ~68
   strict checks. New: match Var pattern bound to a call —
   the pattern is a call result, could inline it.
+- [Devin] Lint batch 38 (HEAD post-container-alias): ~69
+  strict checks. New: let a = b where b is bound to a
+  list/struct — the let copies a container that could
+  be reused.
+- [Devin] Lint batch 39 (HEAD post-match-alias-pattern): ~70
+  strict checks. New: match Var pattern bound to another
+  var — the pattern is an alias, could inline.
+- [Devin] Lint batch 40 (HEAD post-match-container): ~71
+  strict checks. New: match Var pattern bound to a
+  container — the pattern is a list/struct literal,
+  could inline.
