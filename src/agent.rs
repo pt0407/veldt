@@ -257,6 +257,11 @@ pub fn respond(task: &str, editor_source: &str, veldt: &mut Veldt) -> AgentRespo
     if has(&["coverage", "covered", "tested", "probes", "test suite", "test coverage"]) {
         return coverage_intent(&words, veldt);
     }
+    if has(&["lineage", "parents", "children", "ancestry", "descended", "born from", "family tree"]) {
+        if words.iter().any(|w| w.contains('#') || veldt.functions.contains_key(w.split('#').next().unwrap_or(w))) {
+            return lineage_intent(&words, veldt);
+        }
+    }
     if has(&["garden", "status", "alive", "what's growing", "what is growing", "what have you", "ecosystem"]) {
         return status_intent(veldt);
     }
@@ -776,6 +781,50 @@ fn coverage_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
         text.push_str(&format!("  {} — {}\n", n, c));
     }
     plain(&text)
+}
+
+/// Lineage — "who are fib#145's parents" or "fib lineage" (the breeding map).
+fn lineage_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
+    if let Some((name, Some(id))) = parse_variant_ref(words) {
+        // one variant — parents + children
+        let vs = match veldt.functions.get(&name) {
+            Some(v) => v,
+            None => return plain(&format!("No lineage called '{}'.", name)),
+        };
+        let e = match vs.iter().find(|e| e.id == id) {
+            Some(e) => e,
+            None => return plain(&format!("{}#{} isn't in the garden.", name, id)),
+        };
+        let mut text = format!("{}#{} — {}\n", name, id, e.origin);
+        text.push_str(&format!("  parents: {}\n",
+            if e.parents.is_empty() { "none (seed)".into() }
+            else { e.parents.iter().map(|p| format!("#{}", p))
+                .collect::<Vec<_>>().join(", ") }));
+        let children: Vec<u32> = vs.iter()
+            .filter(|v| v.parents.contains(&e.id)).map(|v| v.id).collect();
+        text.push_str(&format!("  children: {}",
+            if children.is_empty() { "none".into() }
+            else { children.iter().map(|c| format!("#{}", c))
+                .collect::<Vec<_>>().join(", ") }));
+        return plain(&text);
+    }
+    if let Some(name) = find_lineage(words, veldt) {
+        // family — the breeding map (parents → children)
+        let vs = match veldt.functions.get(&name) {
+            Some(v) => v,
+            None => return plain(&format!("No lineage called '{}'.", name)),
+        };
+        let mut text = format!("{} lineage — {} variants\n", name, vs.len());
+        for e in vs {
+            text.push_str(&format!("  #{} ← {} ({})\n", e.id,
+                if e.parents.is_empty() { "seed".into() }
+                else { e.parents.iter().map(|p| format!("#{}", p))
+                    .collect::<Vec<_>>().join(", ") },
+                e.origin));
+        }
+        return plain(&text);
+    }
+    plain("Whose lineage? e.g. \"fib#145 parents\" or \"fib lineage\".")
 }
 
 /// Parse a bare word that looks like a function name (optionally name#N).
