@@ -1252,6 +1252,37 @@ fn diff_variants(a: &str, b: &str) {
     let eb = vs.iter().find(|e| e.id == bid).unwrap_or_else(|| { eprintln!("no {}#{}", bn, bid); process::exit(1); });
     let sa = crate::fmt::format_program(&ea.body);
     let sb = crate::fmt::format_program(&eb.body);
+    if std::env::args().any(|a| a == "--unified") {
+        // single interleaved diff — common context once, changes -/+
+        let mut out: Vec<(char, String)> = Vec::new();
+        for l in sa.lines() { out.push(('-', l.to_string())); }
+        for l in sb.lines() { out.push(('+', l.to_string())); }
+        let pa: Vec<&str> = sa.lines().collect();
+        let pb: Vec<&str> = sb.lines().collect();
+        // LCS-based alignment for a readable unified view
+        let n = pa.len(); let m = pb.len();
+        let mut dp = vec![vec![0usize; m + 1]; n + 1];
+        for i in (0..n).rev() {
+            for j in (0..m).rev() {
+                dp[i][j] = if pa[i] == pb[j] { dp[i+1][j] + 1 }
+                    else { dp[i+1][j].max(dp[i][j+1]) };
+            }
+        }
+        println!("--- {}#{} (fitness {:.2})  +++ {}#{} (fitness {:.2})", an, aid, ea.fitness, bn, bid, eb.fitness);
+        let (mut i, mut j) = (0usize, 0usize);
+        while i < n && j < m {
+            if pa[i] == pb[j] {
+                println!(" {}", pa[i]); i += 1; j += 1;
+            } else if dp[i+1][j] >= dp[i][j+1] {
+                println!("-{}", pa[i]); i += 1;
+            } else {
+                println!("+{}", pb[j]); j += 1;
+            }
+        }
+        while i < n { println!("-{}", pa[i]); i += 1; }
+        while j < m { println!("+{}", pb[j]); j += 1; }
+        return;
+    }
     let la: std::collections::HashSet<&str> = sa.lines().map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
     let lb: std::collections::HashSet<&str> = sb.lines().map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
     println!("--- {}#{} (fitness {:.2})", an, aid, ea.fitness);
