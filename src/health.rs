@@ -473,9 +473,61 @@ impl HealthChecker {
     // === Healing ===
 
     /// Attempt to heal a sick function. Returns true if healed.
+    /// Truncate statements after the first `return` in every block
+    /// (recursively), and drop a trailing bare `return` — the dead
+    /// code mutations splice in. Returns true if anything changed.
+    fn repair_dead_tail(stmts: &mut Vec<Stmt>) -> bool {
+        let mut changed = false;
+        for s in stmts.iter_mut() {
+            changed |= Self::repair_in_stmt(s);
+        }
+        if let Some(pos) = stmts.iter().position(|s| matches!(s, Stmt::Return(_))) {
+            if pos + 1 < stmts.len() {
+                stmts.truncate(pos + 1);
+                changed = true;
+            }
+        }
+        if matches!(stmts.last(), Some(Stmt::Return(None))) && stmts.len() > 1 {
+            stmts.pop();
+            changed = true;
+        }
+        changed
+    }
+
+    fn repair_in_stmt(s: &mut Stmt) -> bool {
+        match s {
+            Stmt::If(_, a, b) => {
+                let mut c = Self::repair_dead_tail(a);
+                if let Some(b) = b { c |= Self::repair_dead_tail(b); }
+                c
+            }
+            Stmt::While(_, b) | Stmt::For(_, _, b) => Self::repair_dead_tail(b),
+            Stmt::Try(a, _, c) =>
+                Self::repair_dead_tail(a) | Self::repair_dead_tail(c),
+            Stmt::Match(_, arms, els) => {
+                let mut c = false;
+                for (_, b) in arms.iter_mut() { c |= Self::repair_dead_tail(b); }
+                if let Some(b) = els { c |= Self::repair_dead_tail(b); }
+                c
+            }
+            _ => false,
+        }
+    }
+
     pub fn heal(entry: &mut FunctionEntry, veldt: &Veldt) -> bool {
         let attempt = format!("Healing attempt for {}#{}", entry.name, entry.id);
         entry.healing_attempts.push(attempt);
+
+        // Mechanical repair first — truncate dead code: statements
+        // after a top-level/nested return, and a trailing bare
+        // `return`. These are the defect shapes mutations splice
+        // in and the linter flags as unreachable.
+        if Self::repair_dead_tail(&mut entry.body) {
+            entry.healing_attempts.push(format!(
+                "mechanical repair: truncated dead code in {}#{}",
+                entry.name, entry.id));
+            return true;
+        }
 
         // Find a healthy healer in the same lineage (same-purpose)
         let same_purpose_healer = Self::find_same_purpose_healer(entry, veldt);
@@ -600,6 +652,44 @@ mod tests {
         let mut entry = veldt.functions.get(name).unwrap()[0].clone();
         HealthChecker::check_at_birth(&mut entry, veldt);
         veldt.functions.get_mut(name).unwrap()[0] = entry;
+    }
+
+    #[test]
+    fn repair_dead_tail_truncates_after_return() {
+        // top-level: stmts after first return are cut
+        let mut body = vec![
+            Stmt::Return(Some(Expr::Int(1))),
+            Stmt::Print(Expr::Int(2)),
+            Stmt::Assign("x".into(), Expr::Int(3)),
+        ];
+        assert!(HealthChecker::repair_dead_tail(&mut body));
+        assert_eq!(body.len(), 1);
+
+        // nested: unreachable code inside an if body is cut too
+        let mut body = vec![
+            Stmt::If(Expr::Bool(true), vec![
+                Stmt::Return(Some(Expr::Int(1))),
+                Stmt::Print(Expr::Int(2)),
+            ], None),
+            Stmt::Print(Expr::Int(9)),
+        ];
+        assert!(HealthChecker::repair_dead_tail(&mut body));
+        if let Stmt::If(_, then, _) = &body[0] { assert_eq!(then.len(), 1); }
+
+        // trailing bare `return` gets dropped
+        let mut body = vec![
+            Stmt::Print(Expr::Int(1)),
+            Stmt::Return(None),
+        ];
+        assert!(HealthChecker::repair_dead_tail(&mut body));
+        assert_eq!(body.len(), 1);
+
+        // clean body — nothing to repair
+        let mut body = vec![
+            Stmt::Print(Expr::Int(1)),
+            Stmt::Return(Some(Expr::Int(2))),
+        ];
+        assert!(!HealthChecker::repair_dead_tail(&mut body));
     }
 
     #[test]
