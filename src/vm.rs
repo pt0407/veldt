@@ -587,6 +587,19 @@ impl Vm {
                         jit_tried: std::cell::Cell::new(false),
                         jit: std::cell::RefCell::new(None),
                     });
+                    // Mirror into the helper's table — lambdas delegate
+                    // to it via call_closure_value, so garden/user fns
+                    // called from inside a closure must exist there too.
+                    self.helper.functions.entry(name.clone())
+                        .or_default()
+                        .push(crate::interpreter::FunctionVariant {
+                            id,
+                            def: crate::interpreter::FunctionDef {
+                                params: params.clone(),
+                                body: Rc::new(body.clone()),
+                            },
+                            fitness: 1.0,
+                        });
                 }
                 _ => {}
             }
