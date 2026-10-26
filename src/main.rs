@@ -420,6 +420,27 @@ fn main() {
                         process::exit(1);
                     }
                 }
+            } else if args.iter().any(|a| a == "--watch") {
+                // --watch — re-fuzz when the garden file changes
+                let mut v = veldt::Veldt::new();
+                let garden_path = if v.load().is_ok() {
+                    v.garden_path.join("veldt.json")
+                } else {
+                    std::path::PathBuf::from(".veldt/garden/veldt.json")
+                };
+                let mut last_mtime = None;
+                loop {
+                    if let Ok(meta) = std::fs::metadata(&garden_path) {
+                        if let Ok(mtime) = meta.modified() {
+                            if last_mtime != Some(mtime) {
+                                last_mtime = Some(mtime);
+                                print!("\x1b[2J\x1b[H");
+                                fuzz_family(&args[2], args.iter().any(|a| a == "--json"));
+                            }
+                        }
+                    }
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                }
             } else {
                 fuzz_family(&args[2], args.iter().any(|a| a == "--json"));
             }
@@ -1997,6 +2018,26 @@ fn main() {
                 }
                 veldt.functions = filtered;
                 println!("[bench --filter {}]", expr);
+            }
+            // --watch — re-run the garden benchmark on garden-file change
+            if args.iter().any(|a| a == "--watch") {
+                let garden_path = veldt.garden_path.join("veldt.json");
+                let mut last_mtime = None;
+                loop {
+                    if let Ok(meta) = std::fs::metadata(&garden_path) {
+                        if let Ok(mtime) = meta.modified() {
+                            if last_mtime != Some(mtime) {
+                                last_mtime = Some(mtime);
+                                let mut v2 = veldt::Veldt::new();
+                                if v2.load().is_err() { break; }
+                                let (r, _) = agent::bench_report(&v2);
+                                print!("\x1b[2J\x1b[H");
+                                println!("{}", r);
+                            }
+                        }
+                    }
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                }
             }
             let (report, rows) = agent::bench_report(&veldt);
             // --save <file> — persist the run as a regression baseline

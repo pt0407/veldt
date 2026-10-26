@@ -827,3 +827,14 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   on garden-file mtime change — a live test view while
   evolving. check --watch (file-level) + test --watch
   (garden-level) both exist now.
+- [Devin] Coordination + watch sweep (HEAD post-186e869):
+  the other agent shipped JIT boxed-Value ABI (97% garden
+  coverage, was ~42%) — a major JIT breakthrough. I'm on
+  lint/observability/watch — no overlap. --watch sweep:
+  stats/garden/lineage + check (file) + test + fuzz
+  (garden) all live-re-render.
+- [Devin] veldt bench --watch (HEAD post-e658b45): re-runs
+  bench_report on garden-file change — live performance
+  regression detection while evolving. --watch sweep:
+  stats/garden/lineage + check (file) + test + fuzz +
+  bench (garden) all live-re-render.
