@@ -2393,7 +2393,8 @@ fn print_stats(veldt: &veldt::Veldt) {
     if !src_fit.is_empty() {
         let line: Vec<String> = src_fit.iter().take(8)
             .map(|(s, f, n)| format!("{}→{:.2}({})", s, f, n)).collect();
-        println!("fitness by mutation source: {}", line.join(" "));
+        let fits: Vec<f64> = src_fit.iter().take(8).map(|(_, f, _)| *f).collect();
+        println!("fitness by mutation source: {}  {}", line.join(" "), spark(&fits));
     }
     // probe coverage per family — selection-pressure depth
     let mut cov: Vec<(&String, usize)> = veldt.probes.iter()
