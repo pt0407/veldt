@@ -274,6 +274,9 @@ pub fn respond(task: &str, editor_source: &str, veldt: &mut Veldt) -> AgentRespo
     if has(&["oldest", "newest", "youngest", "eldest", "age of", "how old"]) {
         return age_intent(&words, veldt);
     }
+    if has(&["niche", "niches", "gap", "gaps", "uncovered", "not tested", "missing coverage"]) {
+        return niche_intent(&words, veldt);
+    }
     if has(&["garden", "status", "alive", "what's growing", "what is growing", "what have you", "ecosystem"]) {
         return status_intent(veldt);
     }
@@ -966,6 +969,62 @@ fn age_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
     let mut text = format!("{} variants:\n", label);
     for (n, e) in all.iter().take(8) {
         text.push_str(&format!("  {}#{} — {} runs\n", n, e.id, e.age));
+    }
+    plain(&text)
+}
+
+/// Niches — "niche gaps" / "uncovered" — coverage map per family or global.
+fn niche_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
+    if let Some(name) = find_lineage(words, veldt) {
+        let vs = match veldt.functions.get(&name) {
+            Some(v) => v,
+            None => return plain(&format!("No lineage called '{}'.", name)),
+        };
+        // niche -> (avg score, how many variants cover it)
+        let mut map: std::collections::HashMap<&str, (f64, usize)> =
+            std::collections::HashMap::new();
+        for e in vs {
+            for (n, s) in &e.niche_scores {
+                let ent = map.entry(n.as_str()).or_insert((0.0, 0));
+                ent.0 += s; ent.1 += 1;
+            }
+        }
+        let mut text = format!("{} — {} niches\n", name, map.len());
+        let mut sorted: Vec<(&str, (f64, usize))> = map.iter()
+            .map(|(n, (s, c))| (*n, (*s, *c))).collect();
+        sorted.sort_by(|a, b| (a.1.0 / a.1.1.max(1) as f64)
+            .partial_cmp(&(b.1.0 / b.1.1.max(1) as f64))
+            .unwrap_or(std::cmp::Ordering::Equal));
+        for (n, (sum, count)) in &sorted {
+            let avg = sum / (*count).max(1) as f64;
+            let flag = if avg < 1.0 { " ← gap" }
+                       else if *count < vs.len() { " ← partial" }
+                       else { "" };
+            text.push_str(&format!("  {} — avg {:.2} ({}/{} vars){}\n",
+                n, avg, count, vs.len(), flag));
+        }
+        return plain(&text);
+    }
+    // global — niche coverage across the garden
+    let mut all: std::collections::HashMap<String, (f64, usize)> =
+        std::collections::HashMap::new();
+    for vs in veldt.functions.values() {
+        for e in vs {
+            for (n, s) in &e.niche_scores {
+                let ent = all.entry(n.clone()).or_insert((0.0, 0));
+                ent.0 += s; ent.1 += 1;
+            }
+        }
+    }
+    let mut text = format!("{} niches across the garden\n", all.len());
+    let mut sorted: Vec<(&String, (f64, usize))> = all.iter()
+        .map(|(n, (s, c))| (n, (*s, *c))).collect();
+    sorted.sort_by(|a, b| (a.1.0 / a.1.1.max(1) as f64)
+        .partial_cmp(&(b.1.0 / b.1.1.max(1) as f64))
+        .unwrap_or(std::cmp::Ordering::Equal));
+    for (n, (sum, count)) in sorted.iter().take(10) {
+        text.push_str(&format!("  {} — avg {:.2} ({} entries)\n",
+            n, sum / (*count).max(1) as f64, count));
     }
     plain(&text)
 }
