@@ -1244,3 +1244,6 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 - [Devin] check --garden --bugs: defect-class-only filter —
   same set as the birth/adopt gates. Currently 0 warnings:
   the garden is defect-free.
+- [Devin] IDE: Lint toolbar button (/api/lint census in the
+  output pane) + 'code health'/'lint fib' Gardener chips.
+  Full diagnostics surface reachable in-studio now.
