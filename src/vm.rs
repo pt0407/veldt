@@ -80,7 +80,7 @@ struct Frame {
 
 pub struct Vm {
     fns: HashMap<String, Vec<CompiledFn>>,
-    globals: HashMap<String, Value>,
+    pub globals: HashMap<String, Value>,
     helper: Interpreter,                // delegation for builtins/methods
     pub steps: u64,
     max_steps: u64,
@@ -710,6 +710,7 @@ impl Vm {
                 code = frames.last().unwrap().code.clone();
                 continue;
             }
+            if frames.is_empty() { return Ok(()); }  // last frame returned
         }
     }
 
@@ -1049,12 +1050,31 @@ impl Vm {
                     let v = stack.pop().unwrap_or(Value::Null);
                     let f = frames.pop().unwrap();
                     stack.truncate(f.base);
-                    if frames.is_empty() { return Ok(()); }
+                    if frames.is_empty() {
+                        // program end: export main-frame slots to globals
+                        // by name so callers/tests can inspect results
+                        for (i, val) in f.env.iter().enumerate() {
+                            if let (Some(vv), Some(n)) =
+                                (val, f.code.slot_names.get(i)) {
+                                self.globals.insert(n.clone(), vv.clone());
+                            }
+                        }
+                        return Ok(());
+                    }
                     *code = frames.last().unwrap().code.clone();
                     stack.push(v);
                 }
                 Instr::Halt => {
-                    if frames.len() == 1 { return Ok(()); }
+                    if frames.len() == 1 {
+                        let f = frames.pop().unwrap();
+                        for (i, val) in f.env.iter().enumerate() {
+                            if let (Some(vv), Some(n)) =
+                                (val, f.code.slot_names.get(i)) {
+                                self.globals.insert(n.clone(), vv.clone());
+                            }
+                        }
+                        return Ok(());
+                    }
                     let f = frames.pop().unwrap();
                     stack.truncate(f.base);
                     *code = frames.last().unwrap().code.clone();
