@@ -419,6 +419,9 @@ fn help_intent() -> AgentResponse {
          • \"newest fib\" · \"oldest\" — age-sorted variants\n\
          • \"fib niche gaps\" · \"uncovered\" — niche coverage\n\
          • \"what changed\" · \"mutations\" — recent births + deaths\n\
+         • \"fib turnover\" · \"churn\" — birth/death rate + causes\n\
+         • \"fib pressure\" · \"selection\" — rivalry + σ spread\n\
+         • \"who's healing\" — the recovery log\n\
          • \"surprise me\" — plant a random new species\n\
          • \"run this\" · \"evolve 5\" · \"tend\" · \"prune x#N\" · \"what's alive?\"\n\
          Known species: fib, factorial, prime, count primes, nth prime, gcd, lcm, power, sort, quicksort, reverse, palindrome, sum, mean, max, min, fizzbuzz, collatz, evens, doubles, vowels, digits, leapyear, clamp, words, dedupe, anagram, sqrt, parallel."
