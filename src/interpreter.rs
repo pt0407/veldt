@@ -3403,6 +3403,79 @@ impl Interpreter {
                 }
                 Ok(Some(Value::Dict(out)))
             }
+            // === std:edge — edge-node cluster sim ===
+            "edge_deploy" => {
+                // edge_deploy(cluster, node, fn) — register an fn on an edge node
+                let (c, node, f) = match (args.get(0), args.get(1), args.get(2)) {
+                    (Some(Value::Dict(c)), Some(Value::Str(n)), Some(f @ Value::Closure(_, _, _)))
+                        => (c.clone(), n.clone(), f.clone()),
+                    _ => return Err("edge_deploy(cluster, node, fn) expects dict + str + closure".into()),
+                };
+                let mut d = c.clone();
+                let mut meta = im::HashMap::new();
+                meta.insert("impl".to_string(), f);
+                meta.insert("calls".to_string(), Value::Int(0));
+                meta.insert("fails".to_string(), Value::Int(0));
+                d.insert(node.to_string(), Value::Dict(meta));
+                Ok(Some(Value::Dict(d)))
+            }
+            "edge_call" => {
+                // edge_call(cluster, node, args) — run the node's impl, track
+                // calls + fails. Returns {ok, result, cluster}.
+                let (c, node, call_args) = match (args.get(0), args.get(1), args.get(2)) {
+                    (Some(Value::Dict(c)), Some(Value::Str(n)), Some(Value::List(a)))
+                        => (c, n.clone(), a.iter().cloned().collect::<Vec<Value>>()),
+                    _ => return Err("edge_call(cluster, node, args) expects dict + str + list".into()),
+                };
+                let Some(Value::Dict(meta)) = c.get(node.as_ref()) else {
+                    return Err(format!("edge node '{}' not deployed", node));
+                };
+                let Some(f) = meta.get("impl") else { return Err("edge: no impl".into()) };
+                let calls = meta.get("calls").and_then(|v| if let Value::Int(i) = v { Some(*i) } else { None }).unwrap_or(0);
+                let fails = meta.get("fails").and_then(|v| if let Value::Int(i) = v { Some(*i) } else { None }).unwrap_or(0);
+                let mut out = im::HashMap::new();
+                let mut c2 = c.clone();
+                let mut meta2 = meta.clone();
+                match self.call_closure_value(f, call_args) {
+                    Ok(v) => {
+                        out.insert("ok".to_string(), Value::Bool(true));
+                        out.insert("result".to_string(), v);
+                        meta2.insert("calls".to_string(), Value::Int(calls + 1));
+                    }
+                    Err(e) => {
+                        out.insert("ok".to_string(), Value::Bool(false));
+                        out.insert("error".to_string(), Value::Str(e.into()));
+                        meta2.insert("calls".to_string(), Value::Int(calls + 1));
+                        meta2.insert("fails".to_string(), Value::Int(fails + 1));
+                    }
+                }
+                c2.insert(node.to_string(), Value::Dict(meta2));
+                out.insert("cluster".to_string(), Value::Dict(c2));
+                Ok(Some(Value::Dict(out)))
+            }
+            "edge_health" => {
+                // edge_health(cluster) — per-node call/fail + healthy flag
+                let Some(Value::Dict(c)) = args.get(0) else { return Err("edge_health(cluster) expects a cluster".into()) };
+                let mut out = im::HashMap::new();
+                for (node, meta) in c {
+                    if let Value::Dict(m) = meta {
+                        let calls = m.get("calls").and_then(|v| if let Value::Int(i) = v { Some(*i) } else { None }).unwrap_or(0);
+                        let fails = m.get("fails").and_then(|v| if let Value::Int(i) = v { Some(*i) } else { None }).unwrap_or(0);
+                        let mut h = im::HashMap::new();
+                        h.insert("calls".to_string(), Value::Int(calls));
+                        h.insert("fails".to_string(), Value::Int(fails));
+                        h.insert("healthy".to_string(), Value::Bool(fails == 0 || calls > fails * 5));
+                        out.insert(node.clone(), Value::Dict(h));
+                    }
+                }
+                Ok(Some(Value::Dict(out)))
+            }
+            "edge_nodes" => {
+                // edge_nodes(cluster) — list of deployed node names
+                let Some(Value::Dict(c)) = args.get(0) else { return Err("edge_nodes(cluster) expects a cluster".into()) };
+                let out: Vec<Value> = c.keys().map(|k| Value::Str(k.clone().into())).collect();
+                Ok(Some(Value::List(out.into_iter().collect())))
+            }
             "dist_stats" => {
                 // dist_stats(fn, trials) — mean/stddev/min/max over n samples
                 let (f, trials) = match (args.get(0), args.get(1)) {
