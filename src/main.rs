@@ -258,7 +258,24 @@ fn main() {
                 eprintln!("Error loading veldt: {}", e);
                 process::exit(1);
             }
-            veldt.print_lineage(&args[2]);
+            if args.iter().any(|a| a == "--json") {
+                let vs = veldt.functions.get(&args[2]);
+                match vs {
+                    Some(list) => println!("{}", serde_json::json!({
+                        "name": args[2],
+                        "variants": list.iter().map(|e| serde_json::json!({
+                            "id": e.id, "fitness": e.fitness,
+                            "health": format!("{:?}", e.health),
+                            "trust": format!("{:?}", e.trust),
+                            "origin": e.origin,
+                            "probes": veldt.probes.get(&args[2]).map(|p| p.len()).unwrap_or(0),
+                        })).collect::<Vec<_>>(),
+                    })),
+                    None => println!("{{\"error\":\"no lineage '{}'\"}}", args[2]),
+                }
+            } else {
+                veldt.print_lineage(&args[2]);
+            }
         }
         "prune" => {
             if args.len() < 3 {
