@@ -1761,6 +1761,81 @@ print(@N@(6))
 print(@N@([1, 2, 3, 4, 5], fn(x) { return x % 2 == 0 }))
 "#,
         },
+        Template {
+            keywords: &["intersperse", "join with sep", "insert between"],
+            canonical: "intersperse",
+            desc: "insert a separator between every element",
+            needs: &[],
+            make: r#"grow fn @N@(xs: list, sep: int) test @N@([1,2,3], 0) == [1,0,2,0,3], @N@([], 0) == [] {
+    let out = []
+    let i = 0
+    for x in xs {
+        if i > 0 { out.append(sep) }
+        out.append(x)
+        i = i + 1
+    }
+    return out
+}
+
+print(@N@([1, 2, 3], 0))
+"#,
+        },
+        Template {
+            keywords: &["zip with", "zip_with", "map2", "combine lists"],
+            canonical: "zip_with",
+            desc: "combine two lists element-wise with a fn",
+            needs: &[],
+            make: r#"grow fn @N@(a: list, b: list, f: fn) test @N@([1,2],[3,4], fn(x,y) { return x + y }) == [4,6], @N@([],[], fn(x,y) { return 0 }) == [] {
+    let out = []
+    let i = 0
+    let n = a.len()
+    if b.len() < n { n = b.len() }
+    while i < n {
+        out.append(f(a[i], b[i]))
+        i = i + 1
+    }
+    return out
+}
+
+print(@N@([1, 2, 3], [10, 20, 30], fn(x,y) { return x * y }))
+"#,
+        },
+        Template {
+            keywords: &["scan", "accumulate", "prefix sums", "running"],
+            canonical: "scan",
+            desc: "running accumulator — prefix results of f",
+            needs: &[],
+            make: r#"grow fn @N@(xs: list, acc: int, f: fn) test @N@([1,2,3], 0, fn(a,x) { return a + x }) == [0,1,3,6] {
+    let out = [acc]
+    let cur = acc
+    for x in xs {
+        cur = f(cur, x)
+        out.append(cur)
+    }
+    return out
+}
+
+print(@N@([1, 2, 3, 4], 0, fn(a,x) { return a + x }))
+"#,
+        },
+        Template {
+            keywords: &["window", "sliding", "pairs", "adjacent"],
+            canonical: "window",
+            desc: "sliding window pairs over a list",
+            needs: &[],
+            make: r#"grow fn @N@(xs: list) test @N@([1,2,3,4]).len() == 3 {
+    let out = []
+    let i = 1
+    while i < xs.len() {
+        out.append([xs[i - 1], xs[i]])
+        i = i + 1
+    }
+    return out
+}
+
+print(@N@([1, 2, 3, 4]))
+"#,
+        },
     ]
 }
 
