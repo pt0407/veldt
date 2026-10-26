@@ -3415,8 +3415,12 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                         out.push("if condition repeats the same operand — x && x / x || x".into());
                     }
                 }
-                if a.len() == 1 && matches!(a[0], Stmt::ExprStmt(_))
-                    && b.as_ref().map(|e| e.len() == 1 && matches!(e[0], Stmt::ExprStmt(_))).unwrap_or(true) {
+                // pure bare expression — no side effects, definitely dead
+                fn is_pure(e: &Expr) -> bool {
+                    !matches!(e, Expr::Call(..) | Expr::MethodCall(..))
+                }
+                if a.len() == 1 && matches!(&a[0], Stmt::ExprStmt(e) if is_pure(e))
+                    && b.as_ref().map(|e| e.len() == 1 && matches!(&e[0], Stmt::ExprStmt(x) if is_pure(x))).unwrap_or(true) {
                     out.push("if body is a bare expression — computed and discarded".into());
                 }
                 if b.is_none() && a.len() == 1 {
