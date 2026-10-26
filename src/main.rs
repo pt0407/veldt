@@ -2311,6 +2311,23 @@ fn print_stats(veldt: &veldt::Veldt) {
                 let over = vs.iter().filter(|e| e.usage_count as f64 > e.lifespan).count();
                 let under = vs.iter().filter(|e| e.usage_count as f64 < e.lifespan).count();
                 println!("  workload: {} overworked · {} underused", over, under);
+                // source success — which mutation sources produced healthy variants
+                let mut src_healthy: std::collections::HashMap<String, (usize, usize)> = std::collections::HashMap::new();
+                for e in vs.iter() {
+                    let src = e.origin.split(' ').next().unwrap_or("?").to_string();
+                    let entry = src_healthy.entry(src).or_insert((0, 0));
+                    entry.1 += 1;
+                    if matches!(e.health, Health::Healthy) { entry.0 += 1; }
+                }
+                if !src_healthy.is_empty() {
+                    println!("  source success:");
+                    let mut sorted: Vec<_> = src_healthy.iter().collect();
+                    sorted.sort_by(|a, b| (b.1.0 as f64 / b.1.1.max(1) as f64)
+                        .partial_cmp(&(a.1.0 as f64 / a.1.1.max(1) as f64)).unwrap_or(std::cmp::Ordering::Equal));
+                    for (src, (h, t)) in sorted.iter().take(6) {
+                        println!("    {:<20} {}/{} healthy", src, h, t);
+                    }
+                }
             }
         }
         if veldt.fitness_history.len() >= 2 {
