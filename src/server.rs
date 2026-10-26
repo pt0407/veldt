@@ -48,6 +48,7 @@ pub async fn start_server(port: u16) {
         .route("/api/probes", get(probes))
         .route("/api/niches", get(niches))
         .route("/api/usage", get(usage))
+        .route("/api/trend", get(trend))
         .route("/api/run", post(run_program))
         .route("/api/evolve", post(evolve))
         .route("/api/clear", post(clear_veldt))
@@ -248,6 +249,14 @@ async fn usage() -> Json<serde_json::Value> {
     use_data.sort_by(|a, b| b["calls"].as_u64().unwrap_or(0)
         .cmp(&a["calls"].as_u64().unwrap_or(0)));
     Json(serde_json::json!({"usage": use_data}))
+}
+
+async fn trend() -> Json<serde_json::Value> {
+    let mut veldt = veldt::Veldt::new();
+    if veldt.load().is_err() {
+        return Json(serde_json::json!({"error": "garden load failed"}));
+    }
+    Json(serde_json::json!({"trend": veldt.fitness_history}))
 }
 
 #[derive(Deserialize)]
