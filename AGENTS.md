@@ -616,3 +616,10 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   the spread across names at a glance. Every numeric
   surface in veldt now visualizes its shape (distributions,
   bars, deltas, sparks) rather than raw numbers alone.
+- [Devin] Spark coverage complete + tautology lint (HEAD post-2adba64):
+  every name:count line in stats (builtin_usage, probe_coverage,
+  avg niche scores, mutation success, probe niches) shows a
+  spark() shape. check --strict: complementary-comparison
+  tautology (x>0 || x<0 always-true, x>0 && x<0 always-false —
+  taut_cmp walks the condition in if + while arms). ~27 lint
+  checks; every numeric surface visualizes shape + delta.
