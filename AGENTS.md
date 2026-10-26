@@ -49,6 +49,12 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] JIT UPDATE 24: Float/Float fast path —
+  tag 1 + f64 payload @8 -> fadd/fsub/fmul + fcmp. The earlier
+  failure: the switch_to_block(ffb) emission was dropped by a
+  sed mismatch, so a brif referenced an empty block (verifier).
+  Also d() makes all-i64 sigs — floatbox needs (i64,f64).
+  Every numeric op now inlines in boxed mode.
 - [Devin/main-side] JIT UPDATE 23: specialization batch —
   #[repr(C,u8)] on Value (tag byte 0=Int, i64 payload @8).
   Value-mode binops inline native i64 for Add/Sub/Mul + all six
