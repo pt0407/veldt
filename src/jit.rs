@@ -25,14 +25,22 @@ pub type NativeFn1 = unsafe extern "C" fn(i64) -> i64;
 pub type NativeFn2 = unsafe extern "C" fn(i64, i64) -> i64;
 pub type NativeFn3 = unsafe extern "C" fn(i64, i64, i64) -> i64;
 pub type NativeFn4 = unsafe extern "C" fn(i64, i64, i64, i64) -> i64;
+pub type NativeF0 = unsafe extern "C" fn() -> f64;
+pub type NativeF1 = unsafe extern "C" fn(f64) -> f64;
+pub type NativeF2 = unsafe extern "C" fn(f64, f64) -> f64;
+pub type NativeF3 = unsafe extern "C" fn(f64, f64, f64) -> f64;
+pub type NativeF4 = unsafe extern "C" fn(f64, f64, f64, f64) -> f64;
 
-pub struct JitFn { pub code_ptr: *const u8 }
+pub struct JitFn {
+    pub code_ptr: *const u8,
+    pub is_float: bool,   // signature is fn(f64...) -> f64
+}
 
 pub struct JitEngine {
     module: JITModule,
     fe_cfg: TargetFrontendConfig,
     ids: HashMap<String, FuncId>,
-    pub ptrs: HashMap<String, *const u8>,
+    ptrs: HashMap<String, (*const u8, bool)>,
     compiling: HashSet<String>,
 }
 
@@ -56,11 +64,13 @@ impl JitEngine {
     /// Declare (or fetch) the FuncId for `name` with `arity` i64 params.
     /// Declared before the body is built so recursive/forward calls
     /// resolve to a real reference.
-    fn declare(&mut self, name: &str, arity: usize) -> Option<FuncId> {
+    fn declare(&mut self, name: &str, arity: usize, float: bool)
+        -> Option<FuncId> {
         if let Some(&f) = self.ids.get(name) { return Some(f); }
+        let t = if float { types::F64 } else { types::I64 };
         let sig = Signature {
-            params: vec![AbiParam::new(types::I64); arity],
-            returns: vec![AbiParam::new(types::I64)],
+            params: vec![AbiParam::new(t); arity],
+            returns: vec![AbiParam::new(t)],
             call_conv: CallConv::SystemV,
         };
         let f = self.module
@@ -73,32 +83,47 @@ impl JitEngine {
     /// the engine. Keys ptrs by `name#id` — a newly-fittest variant
     /// after evolution compiles fresh instead of running stale code.
     pub fn compile_fn(&mut self, name: &str, fns: &Fns)
-        -> Option<*const u8> {
+        -> Option<JitFn> {
         let f = fns.get(name)?;
         let chosen = f.iter()
             .max_by(|a, b| a.fitness.partial_cmp(&b.fitness)
                 .unwrap_or(std::cmp::Ordering::Equal))?;
         let key = format!("{}#{}", name, chosen.id);
-        if let Some(&p) = self.ptrs.get(&key) { return Some(p); }
+        if let Some(&(p, fl)) = self.ptrs.get(&key) {
+            return Some(JitFn { code_ptr: p, is_float: fl });
+        }
         if self.compiling.contains(&key) {
             return None;   // in-progress cycle on this variant
         }
         let arity = chosen.params.len();
-        let fid = self.declare(&key, arity)?;
+        let fid = self.declare(&key, arity, false)?;
         self.compiling.insert(key.clone());
-        let ok = self.define(fid, &key, &chosen.code, arity, fns);
+        let ok = self.define(fid, &key, &chosen.code, arity, fns, false);
+        self.compiling.remove(&key);
+        if ok {
+            if self.module.finalize_definitions().is_err() { return None; }
+            let p = self.module.get_finalized_function(fid);
+            self.ptrs.insert(key.clone(), (p, false));
+            return Some(JitFn { code_ptr: p, is_float: false });
+        }
+        // int-subset failed — try the float signature
+        let key = format!("{}$f", key);
+        let fid = self.declare(&key, arity, true)?;
+        self.compiling.insert(key.clone());
+        let ok = self.define(fid, &key, &chosen.code, arity, fns, true);
         self.compiling.remove(&key);
         if !ok { return None; }
         if self.module.finalize_definitions().is_err() { return None; }
         let p = self.module.get_finalized_function(fid);
-        self.ptrs.insert(key, p);
-        Some(p)
+        self.ptrs.insert(key.clone(), (p, true));
+        Some(JitFn { code_ptr: p, is_float: true })
     }
 
     /// Build the IR for one function body. Calls resolve eagerly —
     /// the callee is compiled first so its FuncId exists.
     fn define(&mut self, fid: FuncId, own_name: &str,
-              chunk: &Chunk, arity: usize, fns: &Fns) -> bool {
+              chunk: &Chunk, arity: usize, fns: &Fns, float: bool)
+        -> bool {
         // leaders: every jump/brif target + brif fallthrough
         let mut leaders: HashSet<usize> = HashSet::from([0]);
         for (i, instr) in chunk.code.iter().enumerate() {
@@ -128,9 +153,10 @@ impl JitEngine {
                 }
             }
         }
+        let t = if float { types::F64 } else { types::I64 };
         let mut ctx = Context::new();
         ctx.func = Function::with_name_signature(
-            UserFuncName::user(0, fid.as_u32()), self.fn_sig(arity));
+            UserFuncName::user(0, fid.as_u32()), self.fn_sig(arity, float));
         {
             let mut fb_ctx = FunctionBuilderContext::new();
             let mut b = FunctionBuilder::new(&mut ctx.func, &mut fb_ctx);
@@ -139,7 +165,7 @@ impl JitEngine {
             b.switch_to_block(entry);
             let nslots = chunk.slot_names.len().max(arity).max(1);
             let vars: Vec<Variable> = (0..nslots)
-                .map(|_| b.declare_var(types::I64)).collect();
+                .map(|_| b.declare_var(t)).collect();
             for i in 0..arity.min(nslots) {
                 let v = b.block_params(entry)[i];
                 b.def_var(vars[i], v);
@@ -166,7 +192,16 @@ impl JitEngine {
                 }
                 match chunk.code[pc] {
                     Instr::Const(k) => match &chunk.consts[k as usize] {
-                        Value::Int(n) => { stack.push(b.ins().iconst(types::I64, *n)); }
+                        Value::Int(n) => {
+                            if float {
+                                stack.push(b.ins().f64const(*n as f64));
+                            } else {
+                                stack.push(b.ins().iconst(types::I64, *n));
+                            }
+                        }
+                        Value::Float(fv) if float => {
+                            stack.push(b.ins().f64const(*fv));
+                        }
                         _ => { ok = false; break; }
                     },
                     Instr::Load(sl) => {
@@ -182,13 +217,17 @@ impl JitEngine {
                         let (Some(r), Some(l)) = (stack.pop(), stack.pop()) else {
                             ok = false; break;
                         };
-                        let v = match chunk.code[pc] {
-                            Instr::Add => b.ins().iadd(l, r),
-                            Instr::Sub => b.ins().isub(l, r),
-                            Instr::Mul => b.ins().imul(l, r),
-                            Instr::Div => b.ins().sdiv(l, r),
-                            Instr::Mod => b.ins().srem(l, r),
-                            _ => unreachable!(),
+                        let v = match (chunk.code[pc], float) {
+                            (Instr::Add, false) => b.ins().iadd(l, r),
+                            (Instr::Sub, false) => b.ins().isub(l, r),
+                            (Instr::Mul, false) => b.ins().imul(l, r),
+                            (Instr::Div, false) => b.ins().sdiv(l, r),
+                            (Instr::Mod, false) => b.ins().srem(l, r),
+                            (Instr::Add, true) => b.ins().fadd(l, r),
+                            (Instr::Sub, true) => b.ins().fsub(l, r),
+                            (Instr::Mul, true) => b.ins().fmul(l, r),
+                            (Instr::Div, true) => b.ins().fdiv(l, r),
+                            _ => { ok = false; break; }
                         };
                         stack.push(v);
                     }
@@ -196,24 +235,45 @@ impl JitEngine {
                         let (Some(r), Some(l)) = (stack.pop(), stack.pop()) else {
                             ok = false; break;
                         };
-                        let cc = match chunk.code[pc] {
-                            Instr::Eq => IntCC::Equal,
-                            Instr::Neq => IntCC::NotEqual,
-                            Instr::Lt => IntCC::SignedLessThan,
-                            Instr::Gt => IntCC::SignedGreaterThan,
-                            Instr::Le => IntCC::SignedLessThanOrEqual,
-                            Instr::Ge => IntCC::SignedGreaterThanOrEqual,
-                            _ => unreachable!(),
-                        };
-                        let c = b.ins().icmp(cc, l, r);
-                        stack.push(b.ins().uextend(types::I64, c));
+                        if float {
+                            use cranelift_codegen::ir::condcodes::FloatCC;
+                            let cc = match chunk.code[pc] {
+                                Instr::Eq => FloatCC::Equal,
+                                Instr::Neq => FloatCC::NotEqual,
+                                Instr::Lt => FloatCC::LessThan,
+                                Instr::Gt => FloatCC::GreaterThan,
+                                Instr::Le => FloatCC::LessThanOrEqual,
+                                Instr::Ge => FloatCC::GreaterThanOrEqual,
+                                _ => unreachable!(),
+                            };
+                            let c = b.ins().fcmp(cc, l, r);
+                            let i = b.ins().uextend(types::I64, c);
+                            stack.push(b.ins().fcvt_from_sint(types::F64, i));
+                        } else {
+                            let cc = match chunk.code[pc] {
+                                Instr::Eq => IntCC::Equal,
+                                Instr::Neq => IntCC::NotEqual,
+                                Instr::Lt => IntCC::SignedLessThan,
+                                Instr::Gt => IntCC::SignedGreaterThan,
+                                Instr::Le => IntCC::SignedLessThanOrEqual,
+                                Instr::Ge => IntCC::SignedGreaterThanOrEqual,
+                                _ => unreachable!(),
+                            };
+                            let c = b.ins().icmp(cc, l, r);
+                            stack.push(b.ins().uextend(types::I64, c));
+                        }
                     }
                     Instr::Neg => {
                         let Some(v) = stack.pop() else { ok = false; break; };
-                        let z = b.ins().iconst(types::I64, 0);
-                        stack.push(b.ins().isub(z, v));
+                        if float {
+                            stack.push(b.ins().fneg(v));
+                        } else {
+                            let z = b.ins().iconst(types::I64, 0);
+                            stack.push(b.ins().isub(z, v));
+                        }
                     }
                     Instr::Call(ni, argc) => {
+                        if float { ok = false; break; }
                         let cn = chunk.names[ni as usize].clone();
                         // self-recursion: own_name is `name#id`
                         if cn != own_name.rsplit_once('#')
@@ -275,16 +335,25 @@ impl JitEngine {
                     }
                     Instr::JumpIfFalse(t) => {
                         let Some(c) = stack.pop() else { ok = false; break; };
-                        let z = b.ins().iconst(types::I64, 0);
-                        let is_false = b.ins().icmp(IntCC::Equal, c, z);
+                        let is_false = if float {
+                            let z = b.ins().f64const(0.0);
+                            b.ins().fcmp(
+                                cranelift_codegen::ir::condcodes::FloatCC::Equal,
+                                c, z)
+                        } else {
+                            let z = b.ins().iconst(types::I64, 0);
+                            b.ins().icmp(IntCC::Equal, c, z)
+                        };
                         let tb = get_block(&mut b, &mut block_for, t as usize);
                         let fb = get_block(&mut b, &mut block_for, pc + 1);
                         b.ins().brif(is_false, tb, &[], fb, &[]);
                         terminated = true;
                     }
                     Instr::Return | Instr::Halt => {
-                        let v = stack.pop()
-                            .unwrap_or_else(|| b.ins().iconst(types::I64, 0));
+                        let v = stack.pop().unwrap_or_else(|| {
+                            if float { b.ins().f64const(0.0) }
+                            else { b.ins().iconst(types::I64, 0) }
+                        });
                         b.ins().return_(&[v]);
                         terminated = true;
                     }
@@ -313,10 +382,11 @@ impl JitEngine {
         true
     }
 
-    fn fn_sig(&self, arity: usize) -> Signature {
+    fn fn_sig(&self, arity: usize, float: bool) -> Signature {
+        let t = if float { types::F64 } else { types::I64 };
         Signature {
-            params: vec![AbiParam::new(types::I64); arity],
-            returns: vec![AbiParam::new(types::I64)],
+            params: vec![AbiParam::new(t); arity],
+            returns: vec![AbiParam::new(t)],
             call_conv: CallConv::SystemV,
         }
     }
