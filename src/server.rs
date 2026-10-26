@@ -31,6 +31,7 @@ pub async fn start_server(port: u16) {
         .route("/api/garden", get(get_garden))
         .route("/api/fuzz", post(fuzz_family))
         .route("/api/absorb", post(absorb))
+        .route("/api/stats", get(stats))
         .route("/api/run", post(run_program))
         .route("/api/evolve", post(evolve))
         .route("/api/clear", post(clear_veldt))
@@ -62,6 +63,35 @@ async fn fuzz_family(
     let report = resp.reply;
     { let mut v = state.veldt.lock().unwrap(); *v = veldt; }
     Json(serde_json::json!({ "report": report }))
+}
+
+async fn stats(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
+    let v = { state.veldt.lock().unwrap().clone() };
+    let (mut healthy, mut sick, mut dying) = (0usize, 0usize, 0usize);
+    let (mut seed, mut estab, mut canon) = (0usize, 0usize, 0usize);
+    let mut total = 0usize;
+    for vs in v.functions.values() {
+        for e in vs {
+            total += 1;
+            match e.health {
+                crate::veldt::Health::Healthy => healthy += 1,
+                crate::veldt::Health::Sick(_) => sick += 1,
+                crate::veldt::Health::Dying => dying += 1,
+            }
+            match e.trust {
+                crate::veldt::Trust::Seedling => seed += 1,
+                crate::veldt::Trust::Established => estab += 1,
+                crate::veldt::Trust::Canonical => canon += 1,
+            }
+        }
+    }
+    Json(serde_json::json!({
+        "lineages": v.functions.len(), "variants": total,
+        "healthy": healthy, "sick": sick, "dying": dying,
+        "seedling": seed, "established": estab, "canonical": canon,
+        "probes": v.probes.values().map(|p| p.len()).sum::<usize>(),
+        "deaths": v.obituaries.len(), "runs": v.run_count,
+    }))
 }
 
 async fn absorb(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
