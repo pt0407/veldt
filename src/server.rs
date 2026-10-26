@@ -83,6 +83,7 @@ pub async fn start_server(port: u16) {
         .route("/api/trace", get(trace_family))
         .route("/api/probe", get(probe_family))
         .route("/api/family", get(family_detail))
+        .route("/api/sick", get(sick))
         .route("/api/run", post(run_program))
         .route("/api/evolve", post(evolve))
         .route("/api/clear", post(clear_veldt))
@@ -1390,6 +1391,31 @@ async fn family_detail(
         "probes": veldt.probes.get(&req.name).map(|p| p.len()).unwrap_or(0),
         "peak_fitness": peak, "avg_fitness": avg,
     }))
+}
+
+async fn sick() -> Json<serde_json::Value> {
+    let mut veldt = veldt::Veldt::new();
+    if veldt.load().is_err() {
+        return Json(serde_json::json!({"error": "garden load failed"}));
+    }
+    let sick_list: Vec<serde_json::Value> = veldt.functions.iter()
+        .flat_map(|(n, vs)| vs.iter()
+            .filter(|e| matches!(e.health, crate::veldt::Health::Sick(_)))
+            .map(|e| {
+                let fails = if let crate::veldt::Health::Sick(f) = &e.health {
+                    f.iter().map(|(input, got, want)| serde_json::json!({
+                        "input": format!("{:?}", input),
+                        "got": format!("{:?}", got),
+                        "want": format!("{:?}", want),
+                    })).collect::<Vec<_>>()
+                } else { Vec::new() };
+                serde_json::json!({
+                    "variant": format!("{}#{}", n, e.id), "fitness": e.fitness,
+                    "fails": fails,
+                })
+            }).collect::<Vec<_>>())
+        .collect();
+    Json(serde_json::json!({"sick": sick_list}))
 }
 
 // --- IDE HTML ---
