@@ -1154,3 +1154,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   event, same slot as CloneRejected. Fired on first run:
   culled a fib child assigning undeclared `a`. Lint is now
   selection pressure, not just reporting.
+- [Devin] adopt --lint: promotion gate mirroring the evolve
+  birth-gate — variants with defect-class warnings refused
+  (verified on score#159). The loop is closed: lint blocks
+  bugs at birth AND at promotion.
