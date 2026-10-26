@@ -79,7 +79,7 @@ impl Evolver {
                     variants.iter()
                         .filter(|e| matches!(e.health, Health::Healthy) && !e.tests.is_empty()
                             && (or_groups.is_empty() || or_groups.iter().any(|g|
-                                g.iter().all(|c| crate::veldt::variant_matches(e, c)))))
+                                g.iter().all(|c| crate::veldt::variant_matches_in(e, name, c)))))
                         .map(|e| (name.clone(), e.id))
                         .collect::<Vec<_>>()
                 })

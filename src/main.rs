@@ -160,9 +160,9 @@ fn main() {
                     .map(|g| g.split("&&").map(|s| s.trim()).collect())
                     .collect();
                 let names: Vec<String> = veldt.functions.iter()
-                    .filter(|(_, vs)| vs.iter().any(|e|
+                    .filter(|(name, vs)| vs.iter().any(|e|
                         or_groups.iter().any(|g|
-                            g.iter().all(|c| veldt::variant_matches(e, c)))))
+                            g.iter().all(|c| veldt::variant_matches_in(e, name, c)))))
                     .map(|(n, _)| n.clone())
                     .collect();
                 println!("[test --filter {} — {} families]", expr, names.len());
@@ -189,7 +189,7 @@ fn main() {
                 let best = veldt.functions.iter()
                     .flat_map(|(name, vs)| vs.iter()
                         .filter(|e| or_groups.iter().any(|g|
-                            g.iter().all(|c| veldt::variant_matches(e, c))))
+                            g.iter().all(|c| veldt::variant_matches_in(e, name, c))))
                         .map(|e| (name.clone(), e.id, e.fitness)))
                     .fold(None::<(String, u32, f64)>, |acc, c| {
                         if acc.map(|a| c.2 > a.2).unwrap_or(true) { Some(c) } else { acc }
@@ -222,7 +222,7 @@ fn main() {
                 .filter(|(_, vs)| vs.len() >= 2
                     && or_groups.as_ref().map(|gs| vs.iter().any(|e|
                         gs.iter().any(|g|
-                            g.iter().all(|c| veldt::variant_matches(e, c)))))
+                            g.iter().all(|c| veldt::variant_matches_in(e, name, c)))))
                     .unwrap_or(true))
                 .map(|(n, _)| n.clone()).collect();
             if names.is_empty() {
@@ -348,9 +348,9 @@ fn main() {
                     .map(|g| g.split("&&").map(|s| s.trim()).collect())
                     .collect();
                 let names: Vec<String> = veldt.functions.iter()
-                    .filter(|(_, vs)| vs.iter().any(|e|
+                    .filter(|(name, vs)| vs.iter().any(|e|
                         or_groups.iter().any(|g|
-                            g.iter().all(|c| veldt::variant_matches(e, c)))))
+                            g.iter().all(|c| veldt::variant_matches_in(e, name, c)))))
                     .map(|(n, _)| n.clone())
                     .collect();
                 println!("[tournament --filter {} — {} families]", expr, names.len());
@@ -375,9 +375,9 @@ fn main() {
                     .map(|g| g.split("&&").map(|s| s.trim()).collect())
                     .collect();
                 let names: Vec<String> = veldt.functions.iter()
-                    .filter(|(_, vs)| vs.iter().any(|e|
+                    .filter(|(name, vs)| vs.iter().any(|e|
                         or_groups.iter().any(|g|
-                            g.iter().all(|c| veldt::variant_matches(e, c)))))
+                            g.iter().all(|c| veldt::variant_matches_in(e, name, c)))))
                     .map(|(n, _)| n.clone())
                     .collect();
                 println!("[fuzz --filter {} — {} families]", expr, names.len());
@@ -464,7 +464,7 @@ fn main() {
                     Some(vs) => {
                         let mut matching: Vec<_> = vs.iter()
                             .filter(|e| or_groups.iter().any(|g|
-                                g.iter().all(|c| veldt::variant_matches(e, c))))
+                                g.iter().all(|c| veldt::variant_matches_in(e, name, c))))
                             .collect();
                         matching.sort_by(|a, b| b.fitness.partial_cmp(&a.fitness)
                             .unwrap_or(std::cmp::Ordering::Equal));
@@ -493,9 +493,9 @@ fn main() {
                     .map(|g| g.split("&&").map(|s| s.trim()).collect())
                     .collect();
                 let names: Vec<String> = veldt.functions.iter()
-                    .filter(|(_, vs)| vs.iter().any(|e|
+                    .filter(|(name, vs)| vs.iter().any(|e|
                         or_groups.iter().any(|g|
-                            g.iter().all(|c| veldt::variant_matches(e, c)))))
+                            g.iter().all(|c| veldt::variant_matches_in(e, name, c)))))
                     .map(|(n, _)| n.clone())
                     .collect();
                 println!("[absorb --filter {} — {} families]", expr, names.len());
@@ -524,7 +524,7 @@ fn main() {
                 .filter(|(n, vs)| n.to_lowercase().contains(&needle)
                     && or_groups.as_ref().map(|gs| vs.iter().any(|e|
                         gs.iter().any(|g|
-                            g.iter().all(|c| veldt::variant_matches(e, c)))))
+                            g.iter().all(|c| veldt::variant_matches_in(e, name, c)))))
                     .unwrap_or(true))
                 .collect();
             if args.iter().any(|a| a == "--json") {
@@ -3035,7 +3035,7 @@ fn main() {
                     .collect();
                 if let Some(vs) = veldt.functions.get_mut(&args[2]) {
                     vs.retain(|e| or_groups.iter().any(|g|
-                        g.iter().all(|c| veldt::variant_matches(e, c))));
+                        g.iter().all(|c| veldt::variant_matches_in(e, name, c))));
                 }
                 println!("[lineage --filter {}]", expr);
             }
@@ -3185,7 +3185,7 @@ fn main() {
                 for (name, vs) in &veldt.functions {
                     let keep: Vec<_> = vs.iter()
                         .filter(|e| or_groups.iter().any(|g|
-                            g.iter().all(|c| veldt::variant_matches(e, c))))
+                            g.iter().all(|c| veldt::variant_matches_in(e, name, c))))
                         .cloned().collect();
                     if !keep.is_empty() { filtered.insert(name.clone(), keep); }
                 }
@@ -3275,7 +3275,7 @@ fn main() {
                 for (name, vs) in &veldt.functions {
                     let keep: Vec<_> = vs.iter()
                         .filter(|e| or_groups.iter().any(|g|
-                            g.iter().all(|c| veldt::variant_matches(e, c))))
+                            g.iter().all(|c| veldt::variant_matches_in(e, name, c))))
                         .cloned().collect();
                     if !keep.is_empty() { filtered.insert(name.clone(), keep); }
                 }
