@@ -1850,6 +1850,64 @@ impl Interpreter {
                 }
                 Ok(Some(Value::Bool(true)))
             }
+            "astar" => {
+                // astar(c, sx, sy, tx, ty, walkable_ch, diagonal?) — A* on a
+                // canvas, Manhattan heuristic. Returns [[x,y],...] or null.
+                let (d, sx, sy, tx, ty, walk, diag) = match (args.get(0), args.get(1), args.get(2), args.get(3), args.get(4), args.get(5), args.get(6)) {
+                    (Some(Value::Dict(d)), Some(Value::Int(sx)), Some(Value::Int(sy)),
+                     Some(Value::Int(tx)), Some(Value::Int(ty)), Some(Value::Str(w)), diag)
+                        => (d, *sx, *sy, *tx, *ty, w.clone(), matches!(diag, Some(Value::Bool(true)))),
+                    _ => return Err("astar(c, sx, sy, tx, ty, walkable_ch, diag?) expects dict + 4 ints + str + bool".into()),
+                };
+                let (w, h) = (d.get("w").and_then(|v| if let Value::Int(w) = v { Some(*w as i64) } else { None }),
+                              d.get("h").and_then(|v| if let Value::Int(h) = v { Some(*h as i64) } else { None }));
+                let (Some(w), Some(h)) = (w, h) else { return Err("canvas: missing w/h".into()) };
+                let Some(Value::List(cells)) = d.get("cells") else { return Err("canvas: no cells".into()) };
+                let cell_ok = |x: i64, y: i64| -> bool {
+                    if x < 0 || y < 0 || x >= w || y >= h { return false; }
+                    if let Value::List(r) = &cells[y as usize] {
+                        if let Some(Value::Str(s)) = r.get(x as usize) { return *s == walk; }
+                    }
+                    false
+                };
+                let dirs: &[(i64, i64)] = if diag {
+                    &[(0,-1),(0,1),(-1,0),(1,0),(-1,-1),(1,-1),(-1,1),(1,1)]
+                } else {
+                    &[(0,-1),(0,1),(-1,0),(1,0)]
+                };
+                let mut open: std::collections::BinaryHeap<(std::cmp::Reverse<i64>, i64, i64)> = std::collections::BinaryHeap::new();
+                let mut g: std::collections::HashMap<(i64, i64), i64> = std::collections::HashMap::new();
+                let mut prev: std::collections::HashMap<(i64, i64), (i64, i64)> = std::collections::HashMap::new();
+                let h_of = |x: i64, y: i64| (tx - x).abs() + (ty - y).abs();
+                g.insert((sx, sy), 0);
+                open.push((std::cmp::Reverse(h_of(sx, sy)), sx, sy));
+                while let Some((_, cx, cy)) = open.pop() {
+                    if cx == tx && cy == ty { break; }
+                    let cg = g[&(cx, cy)];
+                    for &(dx, dy) in dirs {
+                        let (nx, ny) = (cx + dx, cy + dy);
+                        let ok = cell_ok(nx, ny) || (nx == tx && ny == ty);
+                        let ng = cg + if dx != 0 && dy != 0 { 14 } else { 10 };
+                        if ok && g.get(&(nx, ny)).map(|&v| ng < v).unwrap_or(true) {
+                            g.insert((nx, ny), ng);
+                            prev.insert((nx, ny), (cx, cy));
+                            open.push((std::cmp::Reverse(ng + h_of(nx, ny) * 10), nx, ny));
+                        }
+                    }
+                }
+                if !prev.contains_key(&(tx, ty)) && (sx, sy) != (tx, ty) {
+                    return Ok(Some(Value::Null));
+                }
+                let mut path = Vec::new();
+                let mut cur = (tx, ty);
+                loop {
+                    path.push(Value::List(im::vector![Value::Int(cur.0), Value::Int(cur.1)]));
+                    if cur == (sx, sy) { break; }
+                    cur = prev[&cur];
+                }
+                path.reverse();
+                Ok(Some(Value::List(path.into_iter().collect())))
+            }
             "dist_stats" => {
                 // dist_stats(fn, trials) — mean/stddev/min/max over n samples
                 let (f, trials) = match (args.get(0), args.get(1)) {
