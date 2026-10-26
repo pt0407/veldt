@@ -158,6 +158,9 @@ fn main() {
             }
             fuzz_family(&args[2]);
         }
+        "absorb" => {
+            absorb_traces(args.get(2).map(|s| s.as_str()));
+        }
         "search" => {
             if args.len() < 4 {
                 eprintln!("Usage: veldt search <url> <name>  (find families in a registry)");
@@ -1012,6 +1015,42 @@ fn fuzz_family(name: &str) {
         }
     }
     println!("{} boundary cases, {} divergent", cases, divergences);
+}
+
+/// std:telemetry (vision): convert recorded call traces into probes.
+/// Every real call a family has served becomes synthetic evidence —
+/// live production behavior feeds the selection pool.
+fn absorb_traces(only: Option<&str>) {
+    let mut veldt = veldt::Veldt::new();
+    if let Err(e) = veldt.load() { eprintln!("Error: {}", e); process::exit(1); }
+    let families: Vec<String> = match only {
+        Some(n) => vec![n.to_string()],
+        None => veldt.traces.keys().cloned().collect(),
+    };
+    let mut added = 0u32;
+    for name in &families {
+        let Some(traces) = veldt.traces.get(name) else { continue; };
+        let pool = veldt.probes.entry(name.clone()).or_insert_with(Vec::new);
+        for t in traces {
+            // dedupe: skip if an identical arg-set probe exists
+            if pool.iter().any(|p| p.args == t.args) { continue; }
+            let args: Vec<interpreter::Value> = t.args.iter()
+                .filter_map(|s| serde_json::from_str(s).ok()).collect();
+            if args.len() != t.args.len() { continue; }
+            pool.push(veldt::Probe {
+                args: t.args.clone(),
+                expected: t.result.clone(),
+                niche: evolve::Evolver::niche_signature(&args),
+                born: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs()).unwrap_or(0),
+                scale: 0,
+            });
+            added += 1;
+        }
+    }
+    veldt.save().unwrap_or_else(|e| eprintln!("Save error: {}", e));
+    println!("Absorbed {} traces into probes", added);
 }
 
 fn test_family(name: &str) {

@@ -332,7 +332,7 @@ impl Evolver {
 
     /// Coarse input signature — defines niches. Variants that specialise on
     /// particular input shapes can survive as niche champions.
-    fn niche_signature(args: &[crate::interpreter::Value]) -> String {
+    pub(crate) fn niche_signature(args: &[crate::interpreter::Value]) -> String {
         use crate::interpreter::Value;
         args.iter().map(|v| match v {
             Value::Int(n) => {
