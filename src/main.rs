@@ -1775,8 +1775,64 @@ fn main() {
                 veldt.functions = filtered;
                 println!("[bench --filter {}]", expr);
             }
-            let (report, _) = agent::bench_report(&veldt);
-            println!("{}", report);
+            let (report, rows) = agent::bench_report(&veldt);
+            // --save <file> — persist the run as a regression baseline
+            if let Some(path) = args.iter().position(|a| a == "--save")
+                .and_then(|p| args.get(p + 1)) {
+                match serde_json::to_string_pretty(&rows) {
+                    Ok(json) => match std::fs::write(path, json) {
+                        Ok(_) => println!("[bench baseline saved → {}]", path),
+                        Err(e) => eprintln!("baseline save failed: {}", e),
+                    },
+                    Err(e) => eprintln!("baseline serialize failed: {}", e),
+                }
+            }
+            // --compare <file> — diff the run against a saved baseline
+            if let Some(path) = args.iter().position(|a| a == "--compare")
+                .and_then(|p| args.get(p + 1)) {
+                match std::fs::read_to_string(path)
+                    .ok().and_then(|s| serde_json::from_str::<Vec<agent::BenchRow>>(&s).ok()) {
+                    Some(base) => {
+                        let base_map: std::collections::HashMap<_, _> =
+                            base.iter().map(|r| (r.name.as_str(), r)).collect();
+                        let mut regressions = 0;
+                        for r in &rows {
+                            if let Some(b) = base_map.get(r.name.as_str()) {
+                                let d_trial = r.trial - b.trial;
+                                let d_ms = r.ms as i64 - b.ms as i64;
+                                let flag = if !r.healthy && b.healthy { regressions += 1; " REGRESSED" }
+                                    else if d_trial < -0.05 { regressions += 1; " trial↓" }
+                                    else if d_ms > (b.ms as i64) / 2 && d_ms > 20 { " slower" }
+                                    else { "" };
+                                if !flag.is_empty() {
+                                    println!("  {:<16} trial {:.2}→{:.2} ({:+.2})  {}ms→{}ms ({:+}){}",
+                                        r.name, b.trial, r.trial, d_trial, b.ms, r.ms, d_ms, flag);
+                                }
+                            }
+                        }
+                        let new_species: Vec<_> = rows.iter()
+                            .filter(|r| !base_map.contains_key(r.name.as_str())).collect();
+                        if !new_species.is_empty() {
+                            println!("  {} new species: {}", new_species.len(),
+                                new_species.iter().map(|r| r.name.as_str()).collect::<Vec<_>>().join(" "));
+                        }
+                        let missing: Vec<_> = base.iter()
+                            .filter(|b| !rows.iter().any(|r| r.name == b.name)).collect();
+                        if !missing.is_empty() {
+                            println!("  {} dropped species: {}", missing.len(),
+                                missing.iter().map(|r| r.name.as_str()).collect::<Vec<_>>().join(" "));
+                        }
+                        println!("[bench compare {} — {} regression{}]", path, regressions,
+                            if regressions == 1 { "" } else { "s" });
+                    }
+                    None => eprintln!("couldn't load baseline {}", path),
+                }
+            }
+            if args.iter().any(|a| a == "--json") {
+                println!("{}", serde_json::to_string_pretty(&rows).unwrap_or_default());
+            } else {
+                println!("{}", report);
+            }
         }
         "clear" => {
             let mut veldt = veldt::Veldt::new();

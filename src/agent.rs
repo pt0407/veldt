@@ -2050,6 +2050,7 @@ fn extract_name(words: &[&str]) -> Option<String> {
 // garden (temp dir — never touches the user's) and times each stage,
 // then times canned intents. `veldt bench` and "benchmark" both hit this.
 
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct BenchRow {
     pub name: String,
     pub ms: u128,
