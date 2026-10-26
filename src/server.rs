@@ -43,6 +43,7 @@ pub async fn start_server(port: u16) {
         .route("/api/quarantine", post(quarantine_family))
         .route("/api/compare", post(compare_engines))
         .route("/api/lineage", get(lineage_family))
+        .route("/api/obituaries", get(obituaries))
         .route("/api/run", post(run_program))
         .route("/api/evolve", post(evolve))
         .route("/api/clear", post(clear_veldt))
@@ -172,6 +173,18 @@ async fn lineage_family(
         })).collect())
         .unwrap_or_default();
     Json(serde_json::json!({"name": req.name, "variants": variants}))
+}
+
+async fn obituaries() -> Json<serde_json::Value> {
+    let mut veldt = veldt::Veldt::new();
+    if veldt.load().is_err() {
+        return Json(serde_json::json!({"error": "garden load failed"}));
+    }
+    let obits: Vec<serde_json::Value> = veldt.obituaries.iter().map(|o| serde_json::json!({
+        "name": o.name, "id": o.id, "age": o.age, "cause": o.cause_of_death,
+        "health": format!("{:?}", o.health), "healing": o.healing_attempts.len(),
+    })).collect();
+    Json(serde_json::json!({"obituaries": obits}))
 }
 
 #[derive(Deserialize)]
