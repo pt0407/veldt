@@ -40,6 +40,7 @@ pub async fn start_server(port: u16) {
         .route("/api/call", post(call_fn))
         .route("/api/adopt", post(adopt_variant))
         .route("/api/verify", post(verify_family))
+        .route("/api/quarantine", post(quarantine_family))
         .route("/api/run", post(run_program))
         .route("/api/evolve", post(evolve))
         .route("/api/clear", post(clear_veldt))
@@ -102,6 +103,28 @@ async fn verify_family(
 ) -> Json<serde_json::Value> {
     let divergent = crate::verify_family_find_divergent(&req.name);
     Json(serde_json::json!({"verified": divergent.is_none(), "divergent": divergent}))
+}
+
+async fn quarantine_family(
+    Json(req): Json<VerifyRequest>,
+) -> Json<serde_json::Value> {
+    let divergent = crate::verify_family_find_divergent(&req.name);
+    let mut quarantined: Vec<u32> = Vec::new();
+    if let Some(id) = divergent {
+        let mut veldt = veldt::Veldt::new();
+        if veldt.load().is_ok() {
+            if let Some(vs) = veldt.functions.get_mut(&req.name) {
+                for e in vs.iter_mut() {
+                    if e.id == id {
+                        e.health = crate::veldt::Health::Dying;
+                        quarantined.push(id);
+                    }
+                }
+            }
+            veldt.save().unwrap_or_else(|e| eprintln!("Save error: {}", e));
+        }
+    }
+    Json(serde_json::json!({"quarantined": quarantined}))
 }
 
 #[derive(Deserialize)]
