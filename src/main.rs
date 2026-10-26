@@ -1743,7 +1743,32 @@ fn main() {
                         }
                     }
                 }
-                println!("{}", serde_json::json!({
+                // --family extras — the drill-down aggregates as JSON fields
+                let fam_extra = args.iter().position(|a| a == "--family")
+                    .and_then(|p| args.get(p + 1))
+                    .and_then(|fam| veldt.functions.get(fam).map(|vs| (fam.clone(), vs)));
+                let extra: serde_json::Map<String, serde_json::Value> = if let Some((fam, vs)) = fam_extra {
+                    let ages: Vec<u64> = vs.iter().map(|e| e.age).collect();
+                    let champ = vs.iter().max_by(|a, b| a.fitness.partial_cmp(&b.fitness)
+                        .unwrap_or(std::cmp::Ordering::Equal));
+                    let weak = vs.iter().min_by(|a, b| a.fitness.partial_cmp(&b.fitness)
+                        .unwrap_or(std::cmp::Ordering::Equal));
+                    let mut origins: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+                    for e in vs.iter() { *origins.entry(e.origin.clone()).or_insert(0) += 1; }
+                    serde_json::json!({
+                        "family": fam,
+                        "traces": veldt.traces.get(&fam).map(|t| t.len()).unwrap_or(0),
+                        "min_age": ages.iter().min().copied().unwrap_or(0),
+                        "max_age": ages.iter().max().copied().unwrap_or(0),
+                        "avg_age": ages.iter().map(|a| *a as f64).sum::<f64>() / ages.len().max(1) as f64,
+                        "origins": origins,
+                        "champion": champ.map(|e| serde_json::json!({"id": e.id, "fitness": e.fitness})),
+                        "weakest": weak.map(|e| serde_json::json!({"id": e.id, "fitness": e.fitness})),
+                    }).as_object().unwrap().clone()
+                } else {
+                    serde_json::Map::new()
+                };
+                let mut base = serde_json::json!({
                     "lineages": veldt.functions.len(), "variants": total,
                     "healthy": healthy, "sick": sick, "dying": dying,
                     "seedling": seed, "established": estab, "canonical": canon,
@@ -1760,7 +1785,9 @@ fn main() {
                         n.as_str(): *s / (*c).max(1) as f64,
                     })).collect::<Vec<_>>(),
                     "probe_coverage": veldt.probes.iter().map(|(n, p)| serde_json::json!({n.as_str(): p.len()})).collect::<Vec<_>>(),
-                }));
+                });
+                if let Some(obj) = base.as_object_mut() { obj.extend(extra); }
+                println!("{}", base);
             } else {
                 print_stats(&veldt);
             }
