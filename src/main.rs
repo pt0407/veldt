@@ -2269,6 +2269,13 @@ fn print_stats(veldt: &veldt::Veldt) {
                     let max = borns.iter().max().unwrap();
                     println!("  born: run {} – {}", min, max);
                 }
+                // parents — the family's lineage-depth profile
+                let parent_counts: Vec<usize> = vs.iter().map(|e| e.parents.len()).collect();
+                if !parent_counts.is_empty() {
+                    let avg = parent_counts.iter().sum::<usize>() as f64 / parent_counts.len() as f64;
+                    let max = parent_counts.iter().max().unwrap();
+                    println!("  parents: avg {:.1} (peak {})", avg, max);
+                }
             }
         }
         if veldt.fitness_history.len() >= 2 {
