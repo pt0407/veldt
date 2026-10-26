@@ -49,6 +49,14 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] JIT UPDATE 14: call_best -> native — the
+  dynamic garden-dispatch arm pushed a bytecode frame forever;
+  now shares tier-2 counter + jit_invoke. Also shipped this batch:
+  veldt evolve --vm (birth-trials via jit_call), veldt run --vm
+  --trace (real flag; interp.trace was dead), stats --verified
+  (bounded-check census on ONE shared interp — verify_on_interp),
+  garden --jit sig-mode tags (native/float/boxed), duplicate-define
+  fix (compile_variant must check $f/$v keys). 37/37 = 100%.
 - [Devin/main-side] JIT UPDATE 13: veldt evolve --vm (birth-trials
   through jit_call via evolver.use_vm). Honest value-mode perf:
   string-method code ~1.7x vs tree-walk (boxed helpers dominate;
