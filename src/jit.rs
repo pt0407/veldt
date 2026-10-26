@@ -881,8 +881,9 @@ impl JitEngine {
                         // (Int) + i64 payload at offset 8 (#[repr(C,u8)]
                         // union). Skips the helper's match + dispatch.
                         let can_inline = matches!(chunk.code[pc],
-                            Instr::Add|Instr::Sub|Instr::Mul|Instr::Eq|
-                            Instr::Neq|Instr::Lt|Instr::Gt|Instr::Le|Instr::Ge);
+                            Instr::Add|Instr::Sub|Instr::Mul|Instr::Div|
+                            Instr::Mod|Instr::Eq|Instr::Neq|Instr::Lt|
+                            Instr::Gt|Instr::Le|Instr::Ge);
                         let v = if can_inline {
                             let lt = b.ins().load(types::I8,
                                 cranelift_codegen::ir::MemFlagsData::trusted(), l, 0);
@@ -920,6 +921,31 @@ impl JitEngine {
                                 let c64 = b.ins().uextend(types::I64, c8);
                                 ecall!(rt.boolbox, rtv, c64)
                                     .unwrap_or_else(|| b.ins().iconst(types::I64, 0))
+                            } else if matches!(chunk.code[pc], Instr::Div|Instr::Mod) {
+                                // sdiv/srem trap on i64::MIN/-1 and 0 —
+                                // the helper wraps/errors correctly, so
+                                // only inline when the divisor is safe
+                                let z = b.ins().iconst(types::I64, 0);
+                                let nz = b.ins().icmp(IntCC::NotEqual, c, z);
+                                let min = b.ins().iconst(types::I64, i64::MIN);
+                                let neg1 = b.ins().iconst(types::I64, -1);
+                                let a_min = b.ins().icmp(IntCC::Equal, a, min);
+                                let c_neg1 = b.ins().icmp(IntCC::Equal, c, neg1);
+                                let ovf = b.ins().band(a_min, c_neg1);
+                                let ovf_not = b.ins().bnot(ovf);
+                                let safe = b.ins().band(nz, ovf_not);
+                                let db = b.create_block();
+                                b.ins().brif(safe, db, &[], hb, &[]);
+                                b.seal_block(db);
+                                b.switch_to_block(db);
+                                let res = match chunk.code[pc] {
+                                    Instr::Div => b.ins().sdiv(a, c),
+                                    _ => b.ins().srem(a, c),
+                                };
+                                let bv = ecall!(rt.intbox, rtv, res)
+                                    .unwrap_or_else(|| b.ins().iconst(types::I64, 0));
+                                b.ins().jump(mb, &[cranelift_codegen::ir::BlockArg::Value(bv)]);
+                                b.ins().iconst(types::I64, 0) // fb's unused tail value
                             } else {
                                 let res = match chunk.code[pc] {
                                     Instr::Add => b.ins().iadd(a, c),
@@ -929,7 +955,9 @@ impl JitEngine {
                                 ecall!(rt.intbox, rtv, res)
                                     .unwrap_or_else(|| b.ins().iconst(types::I64, 0))
                             };
-                            b.ins().jump(mb, &[cranelift_codegen::ir::BlockArg::Value(fv)]);
+                            if !matches!(chunk.code[pc], Instr::Div|Instr::Mod) {
+                                b.ins().jump(mb, &[cranelift_codegen::ir::BlockArg::Value(fv)]);
+                            }
                             // slow: helper covers every other type pair
                             b.switch_to_block(hb);
                             let hv = ecall!(rt.binop, rtv, o, l, r)
