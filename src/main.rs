@@ -4936,7 +4936,9 @@ fn print_family_detail(veldt: &veldt::Veldt, fam: &String, vs: &[veldt::Function
     if !borns.is_empty() {
         let min = borns.iter().min().unwrap();
         let max = borns.iter().max().unwrap();
-        println!("  born: run {} – {}", min, max);
+        let mut sorted: Vec<f64> = borns.iter().map(|b| *b as f64).collect();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        println!("  born: run {} – {}  {}", min, max, spark(&sorted));
     }
     // parents — the family's lineage-depth profile
     let parent_counts: Vec<usize> = vs.iter().map(|e| e.parents.len()).collect();
