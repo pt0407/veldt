@@ -602,12 +602,50 @@ fn main() {
                         }
                     }
                 }
+                let mut use_count: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+                let mut fit_by_source: std::collections::HashMap<String, Vec<f64>> = std::collections::HashMap::new();
+                let mut mut_rate: std::collections::HashMap<String, (usize, usize)> = std::collections::HashMap::new();
+                let mut niche_sum: std::collections::HashMap<String, (f64, usize)> = std::collections::HashMap::new();
+                const BUILTINS: &[&str] = &[
+                    "canvas", "grid_", "ui_", "bt_", "balance", "astar", "bfs", "los",
+                    "fov", "rand", "roll", "dice", "choice", "weighted", "noise", "fbm",
+                    "perlin", "poisson", "voronoi", "delaunay", "wfc", "maze", "flood",
+                    "neighbor", "lerp", "clamp", "dist", "aabb", "smoothstep", "bezier",
+                    "point_in_poly", "convex", "ease", "bounce", "line_points", "turn",
+                    "fsm", "book", "svc_", "robot", "edge", "game_loop", "dist_stats",
+                ];
+                for vs in veldt.functions.values() {
+                    for e in vs {
+                        let src = crate::fmt::format_program(&e.body);
+                        for b in BUILTINS { if src.contains(b) { *use_count.entry(b).or_default() += 1; } }
+                        let origin = e.origin.split(' ').next().unwrap_or("seed").to_string();
+                        fit_by_source.entry(origin.clone()).or_default().push(e.fitness);
+                        let ent = mut_rate.entry(origin).or_default();
+                        if e.health == veldt::Health::Healthy { ent.0 += 1; }
+                        ent.1 += 1;
+                        for (n, s) in &e.niche_scores {
+                            let ent = niche_sum.entry(n.clone()).or_default();
+                            ent.0 += s; ent.1 += 1;
+                        }
+                    }
+                }
                 println!("{}", serde_json::json!({
                     "lineages": veldt.functions.len(), "variants": total,
                     "healthy": healthy, "sick": sick, "dying": dying,
                     "seedling": seed, "established": estab, "canonical": canon,
                     "probes": veldt.probes.values().map(|v| v.len()).sum::<usize>(),
                     "deaths": veldt.obituaries.len(), "runs": veldt.run_count,
+                    "builtin_usage": use_count.iter().map(|(b, c)| serde_json::json!({(*b): c})).collect::<Vec<_>>(),
+                    "fitness_by_source": fit_by_source.iter().map(|(s, fits)| serde_json::json!({
+                        s.as_str(): fits.iter().sum::<f64>() / fits.len().max(1) as f64,
+                    })).collect::<Vec<_>>(),
+                    "mutation_success": mut_rate.iter().map(|(s, (h, t))| serde_json::json!({
+                        s.as_str(): *h as f64 / (*t).max(1) as f64,
+                    })).collect::<Vec<_>>(),
+                    "avg_niche_scores": niche_sum.iter().map(|(n, (s, c))| serde_json::json!({
+                        n.as_str(): *s / (*c).max(1) as f64,
+                    })).collect::<Vec<_>>(),
+                    "probe_coverage": veldt.probes.iter().map(|(n, p)| serde_json::json!({n.as_str(): p.len()})).collect::<Vec<_>>(),
                 }));
             } else {
                 print_stats(&veldt);
@@ -1153,6 +1191,16 @@ fn print_stats(veldt: &veldt::Veldt) {
         }
         println!("death health: {} healthy, {} sick, {} dying",
             h, s, d);
+    }
+    // avg variant body size — code length of living variants
+    let sizes: Vec<usize> = veldt.functions.values()
+        .flat_map(|vs| vs.iter().map(|e| crate::fmt::format_program(&e.body).len()))
+        .collect();
+    if !sizes.is_empty() {
+        let avg = sizes.iter().sum::<usize>() / sizes.len();
+        let (lo, hi) = (*sizes.iter().min().unwrap_or(&0),
+                        *sizes.iter().max().unwrap_or(&0));
+        println!("code size: avg {} chars/variant ({}..{})", avg, lo, hi);
     }
     // fitness trend — peak per run, is the garden improving?
     if veldt.fitness_history.len() >= 2 {
