@@ -1241,3 +1241,6 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   via /api/lint — code-health visible in-studio.
 - [Devin] garden --family footer shows ⚠N warnings — same
   wrap as check --garden, only when warnings exist.
+- [Devin] check --garden --bugs: defect-class-only filter —
+  same set as the birth/adopt gates. Currently 0 warnings:
+  the garden is defect-free.
