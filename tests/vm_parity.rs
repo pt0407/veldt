@@ -128,3 +128,30 @@ fn jit_engages_on_hot_fn() {
     assert!(v.fns["hot"][0].jit.borrow().is_some(),
         "hot() should have been JIT-compiled after 64 calls");
 }
+
+#[test]
+fn jit_loop_variant_matches_vm() {
+    // The evolved iterative fib — heavy slot usage + backward jumps.
+    let src = r#"
+        fn fib(n: int) {
+            if n <= 1 { return n }
+            let a = 0
+            let b = 1
+            let i = 2
+            while i <= n {
+                let tmp = a + b
+                a = b
+                b = tmp
+                i = i + 1
+            }
+            return b
+        }
+        let r = 0
+        for i in range(200) { r = fib(15) }
+        let rr = r
+    "#;
+    let i = interp_vars(src);
+    let v = vm_globals(src);
+    assert_eq!(get_i(&i, "rr"), get_vm(&v, "rr"),
+        "iterative fib diverged: JIT'd loop body wrong");
+}
