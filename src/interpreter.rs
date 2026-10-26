@@ -2083,6 +2083,95 @@ impl Interpreter {
                 d2.insert("cells".to_string(), Value::List(rows2));
                 Ok(Some(Value::Dict(d2)))
             }
+            "fov" => {
+                // fov(c, x, y, radius, wall_ch) — list of [x,y] cells visible
+                // from (x,y) within radius, walls blocking. Uses los() on each.
+                let (d, x0, y0, rad, wall) = match (args.get(0), args.get(1), args.get(2), args.get(3), args.get(4)) {
+                    (Some(Value::Dict(d)), Some(Value::Int(x)), Some(Value::Int(y)),
+                     Some(Value::Int(r)), Some(Value::Str(w)))
+                        => (d, *x, *y, *r, w.clone()),
+                    _ => return Err("fov(c, x, y, radius, wall_ch) expects dict + 3 ints + str".into()),
+                };
+                let Some(Value::List(cells)) = d.get("cells") else { return Err("canvas: no cells".into()) };
+                let (w, h) = (d.get("w").and_then(|v| if let Value::Int(w) = v { Some(*w) } else { None }),
+                              d.get("h").and_then(|v| if let Value::Int(h) = v { Some(*h) } else { None }));
+                let (Some(w), Some(h)) = (w, h) else { return Err("canvas: missing w/h".into()) };
+                let is_wall = |x: i64, y: i64| -> bool {
+                    if x < 0 || y < 0 || x >= w || y >= h { return true; }
+                    if let Value::List(r) = &cells[y as usize] {
+                        if let Some(Value::Str(s)) = r.get(x as usize) { return *s == wall; }
+                    }
+                    false
+                };
+                let los_clear = |x1: i64, y1: i64, x2: i64, y2: i64| -> bool {
+                    let (dx, dy) = ((x2 - x1).abs(), (y2 - y1).abs());
+                    let (sx, sy) = (if x1 < x2 { 1 } else { -1 }, if y1 < y2 { 1 } else { -1 });
+                    let (mut x, mut y, mut err) = (x1, y1, dx - dy);
+                    loop {
+                        if (x, y) != (x1, y1) && (x, y) != (x2, y2) && is_wall(x, y) { return false; }
+                        if x == x2 && y == y2 { return true; }
+                        let e2 = 2 * err;
+                        if e2 > -dy { err -= dy; x += sx; }
+                        if e2 < dx { err += dx; y += sy; }
+                    }
+                };
+                let mut out = Vec::new();
+                for y in (y0 - rad)..=(y0 + rad) {
+                    for x in (x0 - rad)..=(x0 + rad) {
+                        if x >= 0 && y >= 0 && x < w && y < h
+                            && !is_wall(x, y)
+                            && los_clear(x0, y0, x, y) {
+                            out.push(Value::List(im::vector![Value::Int(x), Value::Int(y)]));
+                        }
+                    }
+                }
+                Ok(Some(Value::List(out.into_iter().collect())))
+            }
+            "maze_gen" => {
+                // maze_gen(w, h, wall_ch) — recursive-backtracker maze on a canvas.
+                // Odd grid: wall on even coords, corridors on odd.
+                let (w, h, wall) = match (args.get(0), args.get(1), args.get(2)) {
+                    (Some(Value::Int(w)), Some(Value::Int(h)), Some(Value::Str(ch)))
+                        => (*w as usize, *h as usize, ch.clone()),
+                    _ => return Err("maze_gen(w, h, wall_ch) expects 2 ints + str".into()),
+                };
+                let mut grid: Vec<Vec<bool>> = vec![vec![true; w]; h]; // true = wall
+                let carve = |x: usize, y: usize| x % 2 == 1 && y % 2 == 1 && x < w && y < h;
+                let mut stack = vec![(1usize, 1usize)];
+                let mut rng = self.rng_state;
+                while let Some(&(cx, cy)) = stack.last() {
+                    grid[cy][cx] = false;
+                    let mut dirs = [(0i64,-2i64), (0,2), (-2,0), (2,0)];
+                    // shuffle dirs
+                    for i in (1..4).rev() {
+                        rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17;
+                        let j = (rng % (i + 1) as u64) as usize;
+                        dirs.swap(i, j);
+                    }
+                    let mut moved = false;
+                    for (dx, dy) in dirs {
+                        let (nx, ny) = ((cx as i64 + dx) as usize, (cy as i64 + dy) as usize);
+                        if carve(nx, ny) && grid[ny][nx] {
+                            grid[(cy as i64 + dy / 2) as usize][(cx as i64 + dx / 2) as usize] = false;
+                            grid[ny][nx] = false;
+                            stack.push((nx, ny));
+                            moved = true;
+                            break;
+                        }
+                    }
+                    if !moved { stack.pop(); }
+                }
+                self.rng_state = rng;
+                let cells: im::Vector<Value> = grid.iter().map(|row|
+                    Value::List(row.iter().map(|&wall_cell|
+                        Value::Str(if wall_cell { wall.clone() } else { " ".into() })).collect())
+                ).collect();
+                let mut d = im::HashMap::new();
+                d.insert("w".to_string(), Value::Int(w as i64));
+                d.insert("h".to_string(), Value::Int(h as i64));
+                d.insert("cells".to_string(), Value::List(cells));
+                Ok(Some(Value::Dict(d)))
+            }
             "dist_stats" => {
                 // dist_stats(fn, trials) — mean/stddev/min/max over n samples
                 let (f, trials) = match (args.get(0), args.get(1)) {
