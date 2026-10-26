@@ -1816,6 +1816,40 @@ impl Interpreter {
                 path.reverse();
                 Ok(Some(Value::List(path.into_iter().collect())))
             }
+            "los" => {
+                // los(c, x1, y1, x2, y2, wall_ch) — Bresenham line of sight:
+                // true if no cell containing wall_ch blocks the segment.
+                let (d, x1, y1, x2, y2, wall) = match (args.get(0), args.get(1), args.get(2), args.get(3), args.get(4), args.get(5)) {
+                    (Some(Value::Dict(d)), Some(Value::Int(a)), Some(Value::Int(b)),
+                     Some(Value::Int(c2)), Some(Value::Int(d2)), Some(Value::Str(w)))
+                        => (d, *a, *b, *c2, *d2, w.clone()),
+                    _ => return Err("los(c, x1, y1, x2, y2, wall_ch) expects dict + 4 ints + str".into()),
+                };
+                let Some(Value::List(cells)) = d.get("cells") else { return Err("canvas: no cells".into()) };
+                let (w, h) = (d.get("w").and_then(|v| if let Value::Int(w) = v { Some(*w as i64) } else { None }),
+                              d.get("h").and_then(|v| if let Value::Int(h) = v { Some(*h as i64) } else { None }));
+                let (Some(w), Some(h)) = (w, h) else { return Err("canvas: missing w/h".into()) };
+                let (mut x, mut y) = (x1, y1);
+                let (dx, dy) = ((x2 - x1).abs(), (y2 - y1).abs());
+                let (sx, sy) = (if x1 < x2 { 1 } else { -1 }, if y1 < y2 { 1 } else { -1 });
+                let mut err = dx - dy;
+                loop {
+                    if x >= 0 && y >= 0 && x < w && y < h {
+                        if let Value::List(r) = &cells[y as usize] {
+                            if let Some(Value::Str(s)) = r.get(x as usize) {
+                                if *s == wall && (x, y) != (x1, y1) && (x, y) != (x2, y2) {
+                                    return Ok(Some(Value::Bool(false)));
+                                }
+                            }
+                        }
+                    }
+                    if x == x2 && y == y2 { break; }
+                    let e2 = 2 * err;
+                    if e2 > -dy { err -= dy; x += sx; }
+                    if e2 < dx { err += dx; y += sy; }
+                }
+                Ok(Some(Value::Bool(true)))
+            }
             "dist_stats" => {
                 // dist_stats(fn, trials) — mean/stddev/min/max over n samples
                 let (f, trials) = match (args.get(0), args.get(1)) {
