@@ -1994,6 +1994,23 @@ fn main() {
                 println!("[verified] {} verified, {} divergent, {} single-variant",
                     ok, div, single);
             }
+            // --exact — the SMT gate census: how many families can
+            // z3 PROVE equivalent (vs bail to bounded)?
+            if args.iter().any(|a| a == "--exact") {
+                let (mut proven, mut div, mut bail, mut single) =
+                    (0usize, 0usize, 0usize, 0usize);
+                for name in veldt.functions.keys() {
+                    if veldt.functions[name].len() < 2 { single += 1; continue; }
+                    match smt::verify_exact_on_veldt(&veldt, name) {
+                        Ok(Some((id, cex))) => { div += 1;
+                            eprintln!("  {}#{} diverges at {}", name, id, cex.join(",")); }
+                        Ok(None) => { proven += 1; }
+                        Err(_) => { bail += 1; }
+                    }
+                }
+                println!("[exact] {} proven-equivalent, {} divergent,                           {} bail-to-bounded, {} single-variant",
+                         proven, div, bail, single);
+            }
             // --watch — re-render on a 2s poll until interrupted
             if args.iter().any(|a| a == "--watch") {
                 loop {
