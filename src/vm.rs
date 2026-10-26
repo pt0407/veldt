@@ -47,6 +47,8 @@ enum Instr {
     FieldSetVar(u32, u32),   // obj slot, field name idx — obj.f = v
     MakeStruct(u32, u32),    // name idx, field count (name,val pairs below)                // obj lo hi -> obj[lo:hi] (null bounds = open)
     MethodCallVar(u32, u32, u32), // receiver slot, method name idx, argc
+    TryPush(u32, u32),           // catch pc, err-var slot
+    TryPop,
     PrintOut,
     Return,
     Halt,
@@ -72,6 +74,7 @@ struct Frame {
     env: Vec<Option<Value>>,            // slot-indexed locals
     base: usize,                        // value-stack base for this frame
     iters: Vec<(Vec<Value>, usize)>,    // for-loop iterator stack
+    try_stack: Vec<(u32, u32)>,         // (catch_pc, err_var slot)
 }
 
 pub struct Vm {
@@ -115,6 +118,7 @@ impl Compiler {
             Instr::Jump(t) | Instr::JumpIfFalse(t)
             | Instr::PeekJumpIfNull(t) | Instr::ForNext(_, t) =>
                 *t = target as u32,
+            Instr::TryPush(t, _) => *t = target as u32,
             _ => panic!("patch on non-jump"),
         }
     }
@@ -220,6 +224,18 @@ impl Compiler {
                 }
                 let end = self.code.len();
                 for j in end_jumps { self.patch(j, end); }
+            }
+            Stmt::Try(body, err_var, handler) => {
+                let es = self.slot(err_var);
+                let tp = self.emit(Instr::TryPush(u32::MAX, es));
+                for st in body { self.compile_stmt(st)?; }
+                self.emit(Instr::TryPop);
+                let jend = self.emit(Instr::Jump(u32::MAX));
+                let catch = self.code.len();
+                self.patch(tp, catch);
+                for st in handler { self.compile_stmt(st)?; }
+                let end = self.code.len();
+                self.patch(jend, end);
             }
             Stmt::LetDestructure(names, e) => {
                 // let [a,b] = expr -> eval once into scratch, then index out
@@ -644,7 +660,8 @@ impl Vm {
     fn exec(&mut self, code: Rc<Chunk>, args_out: &mut Vec<Value>) -> Result<(), String> {
         let mut stack: Vec<Value> = Vec::with_capacity(64);
         let mut frames: Vec<Frame> = vec![Frame {
-            code, pc: 0, env: Vec::new(), base: 0, iters: Vec::new(),
+            code, pc: 0, env: Vec::new(), base: 0,
+            iters: Vec::new(), try_stack: Vec::new(),
         }];
         let mut code = frames.last().unwrap().code.clone(); // Rc bump — once
 
@@ -666,6 +683,39 @@ impl Vm {
                 frame.pc += 1;
                 code.code[i]
             };
+            if let Err(e) = self.step(&mut stack, &mut frames, &mut code, instr) {
+                // try/catch: unwind frames until one has a handler —
+                // errors inside nested calls propagate to the caller's
+                // try, matching the interpreter's exec_block semantics.
+                loop {
+                    let handled = {
+                        let frame = frames.last_mut().unwrap();
+                        if let Some((catch, errsl)) = frame.try_stack.pop() {
+                            stack.truncate(frame.base);
+                            if frame.env.len() <= errsl as usize {
+                                frame.env.resize(errsl as usize + 1, None);
+                            }
+                            frame.env[errsl as usize] =
+                                Some(Value::Str(e.clone().into()));
+                            frame.pc = catch as usize;
+                            true
+                        } else { false }
+                    };
+                    if handled { break; }
+                    if frames.len() == 1 { return Err(e); }
+                    let f = frames.pop().unwrap();
+                    stack.truncate(f.base);
+                }
+                code = frames.last().unwrap().code.clone();
+                continue;
+            }
+        }
+    }
+
+    /// One dispatch step — errors surface to exec's try/catch boundary.
+    fn step(&mut self, stack: &mut Vec<Value>, frames: &mut Vec<Frame>,
+            code: &mut Rc<Chunk>, instr: Instr) -> Result<(), String> {
+        {
             match instr {
                 Instr::Const(k) => stack.push(code.consts[k as usize].clone()),
                 Instr::Load(sl) => {
@@ -694,17 +744,17 @@ impl Vm {
                     self.globals.insert(code.names[ni as usize].clone(), v);
                 }
                 Instr::Pop => { stack.pop(); }
-                Instr::Add => self.binop(&mut stack, BinOp::Add)?,
-                Instr::Sub => self.binop(&mut stack, BinOp::Sub)?,
-                Instr::Mul => self.binop(&mut stack, BinOp::Mul)?,
-                Instr::Div => self.binop(&mut stack, BinOp::Div)?,
-                Instr::Mod => self.binop(&mut stack, BinOp::Mod)?,
-                Instr::Eq => self.binop(&mut stack, BinOp::Eq)?,
-                Instr::Neq => self.binop(&mut stack, BinOp::Neq)?,
-                Instr::Lt => self.binop(&mut stack, BinOp::Lt)?,
-                Instr::Gt => self.binop(&mut stack, BinOp::Gt)?,
-                Instr::Le => self.binop(&mut stack, BinOp::Le)?,
-                Instr::Ge => self.binop(&mut stack, BinOp::Ge)?,
+                Instr::Add => self.binop(stack, BinOp::Add)?,
+                Instr::Sub => self.binop(stack, BinOp::Sub)?,
+                Instr::Mul => self.binop(stack, BinOp::Mul)?,
+                Instr::Div => self.binop(stack, BinOp::Div)?,
+                Instr::Mod => self.binop(stack, BinOp::Mod)?,
+                Instr::Eq => self.binop(stack, BinOp::Eq)?,
+                Instr::Neq => self.binop(stack, BinOp::Neq)?,
+                Instr::Lt => self.binop(stack, BinOp::Lt)?,
+                Instr::Gt => self.binop(stack, BinOp::Gt)?,
+                Instr::Le => self.binop(stack, BinOp::Le)?,
+                Instr::Ge => self.binop(stack, BinOp::Ge)?,
                 Instr::AndOp => {
                     let r = stack.pop().unwrap(); let l = stack.pop().unwrap();
                     stack.push(Value::Bool(truthy(&l) && truthy(&r)));
@@ -830,15 +880,15 @@ impl Vm {
                         frames.push(Frame {
                             code: chosen.code.clone(),
                             pc: 0, env: fargs, base: stack.len(),
-                            iters: Vec::new(),
+                            iters: Vec::new(), try_stack: Vec::new(),
                         });
-                        code = frames.last().unwrap().code.clone();
-                        continue;
+                        *code = frames.last().unwrap().code.clone();
+                        return Ok(());
                     }
                     // builtin first (same as tree-walk)
                     if let Some(v) = self.helper.try_builtin(&name, &args)? {
                         stack.push(v);
-                        continue;
+                        return Ok(());
                     }
                     let variants = self.fns.get(&name)
                         .ok_or_else(|| format!("Undefined function: {}", name))?;
@@ -855,8 +905,9 @@ impl Vm {
                     frames.push(Frame {
                         code: chosen.code.clone(),   // Rc bump — no alloc
                         pc: 0, env, base: stack.len(), iters: Vec::new(),
+                        try_stack: Vec::new(),
                     });
-                    code = frames.last().unwrap().code.clone();
+                    *code = frames.last().unwrap().code.clone();
                 }
                 Instr::MethodCall(ni, argc) => {
                     let args: Vec<Value> =
@@ -976,22 +1027,27 @@ impl Vm {
                     let v = stack.pop().unwrap_or(Value::Null);
                     let f = frames.pop().unwrap();
                     stack.truncate(f.base);
-                    if frames.is_empty() {
-                        let _ = args_out;
-                        return Ok(());
-                    }
-                    code = frames.last().unwrap().code.clone();
+                    if frames.is_empty() { return Ok(()); }
+                    *code = frames.last().unwrap().code.clone();
                     stack.push(v);
                 }
                 Instr::Halt => {
                     if frames.len() == 1 { return Ok(()); }
                     let f = frames.pop().unwrap();
                     stack.truncate(f.base);
-                    code = frames.last().unwrap().code.clone();
+                    *code = frames.last().unwrap().code.clone();
                     stack.push(Value::Null);
+                }
+                Instr::TryPush(catch_pc, errsl) => {
+                    frames.last_mut().unwrap()
+                        .try_stack.push((catch_pc, errsl));
+                }
+                Instr::TryPop => {
+                    frames.last_mut().unwrap().try_stack.pop();
                 }
             }
         }
+        Ok(())
     }
 
     /// Delegate a method call to the shared interpreter by evaluating a

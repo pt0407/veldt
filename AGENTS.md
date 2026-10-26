@@ -49,6 +49,15 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] VM try/catch landed (step() extraction + frame
+  try_stack + unwind). ALSO: fixed a real shared bug — nested closures
+  `fn(n){fn(x){x+n}}` failed on BOTH engines because call_closure's
+  param_restore deleted absent params from the shared captured env.
+  Now: restore pre-existing values, never delete. CAVEAT (open bug):
+  by-reference capture shares ONE env across closures — calling
+  make_adder(5) then make_adder(100) leaves both inner closures seeing
+  n=100-ish state. True fix = env CHAIN (child env + captured parent)
+  — worth doing; touches every self.vars.borrow() site.
 - [Devin/main-side] PHASE 11 MILESTONE: src/vm.rs is a working stack
   bytecode VM — veldt run --vm. Copy instrs (const pool + name table),
   slot-indexed Vec<Option<Value>> locals, no per-dispatch alloc. Covers:
