@@ -1495,6 +1495,16 @@ fn print_stats(veldt: &veldt::Veldt) {
             .map(|(n, a)| format!("{}:{:.0}", n, a)).collect();
         println!("avg niches/family: {}", line.join(" "));
     }
+    // avg probes per family — per-lineage selection pressure depth
+    let mut fam_probe: Vec<(&String, f64)> = veldt.functions.keys()
+        .map(|n| (n, veldt.probes.get(n).map(|p| p.len() as f64).unwrap_or(0.0)))
+        .collect();
+    fam_probe.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    if !fam_probe.is_empty() {
+        let line: Vec<String> = fam_probe.iter().take(8)
+            .map(|(n, a)| format!("{}:{:.0}", n, a)).collect();
+        println!("probes/family: {}", line.join(" "));
+    }
     // fitness trend — peak per run, is the garden improving?
     if veldt.fitness_history.len() >= 2 {
         let trend: Vec<String> = veldt.fitness_history.iter()
