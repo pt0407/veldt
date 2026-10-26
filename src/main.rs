@@ -2102,472 +2102,7 @@ fn print_stats(veldt: &veldt::Veldt) {
         if let Some(fam) = argv.iter().position(|a| a == "--family")
             .and_then(|p| argv.get(p + 1)) {
             if let Some(vs) = veldt.functions.get(fam) {
-                let mut sorted = vs.clone();
-                let sort_field = argv.iter().position(|a| a == "--sort")
-                    .and_then(|p| argv.get(p + 1)).cloned().unwrap_or_default();
-                veldt::sort_variants(&mut sorted, if sort_field.is_empty() { "fitness" } else { &sort_field });
-                let top_n = argv.iter().position(|a| a == "--top")
-                    .and_then(|p| argv.get(p + 1)).and_then(|s| s.parse::<usize>().ok()).unwrap_or(5);
-                println!("  top variants:");
-                for e in sorted.iter().take(top_n) {
-                    let h = match &e.health { Health::Healthy => "ok", Health::Sick(_) => "sick", Health::Dying => "dying" };
-                    let t = match e.trust { veldt::Trust::Canonical => "canon", veldt::Trust::Established => "estab", _ => "seed" };
-                    println!("    {}#{:<3} fit {:.2} | age {} | usage {} | {} {}", e.name, e.id, e.fitness, e.age, e.usage_count, h, t);
-                }
-                // per-niche avg scores — the family's niche coverage
-                let mut niche_totals: std::collections::HashMap<String, (f64, usize)> = std::collections::HashMap::new();
-                for e in vs.iter() {
-                    for (niche, score) in &e.niche_scores {
-                        let entry = niche_totals.entry(niche.clone()).or_insert((0.0, 0));
-                        entry.0 += score; entry.1 += 1;
-                    }
-                }
-                if !niche_totals.is_empty() {
-                    println!("  niche coverage:");
-                    let mut niches: Vec<_> = niche_totals.iter().collect();
-                    niches.sort_by(|a, b| a.0.cmp(&b.0));
-                    for (niche, (total, count)) in niches.iter().take(10) {
-                        println!("    {:<20} avg {:.2} ({} variants)", niche, total / *count as f64, count);
-                    }
-                }
-                // origin/source breakdown — the family's mutation-source histogram
-                let mut origins: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-                for e in vs.iter() {
-                    let src = e.origin.split(' ').next().unwrap_or("?").to_string();
-                    *origins.entry(src).or_insert(0) += 1;
-                }
-                if !origins.is_empty() {
-                    println!("  origins:");
-                    let mut sorted: Vec<_> = origins.iter().collect();
-                    sorted.sort_by(|a, b| b.1.cmp(&a.1));
-                    for (src, count) in sorted.iter().take(10) {
-                        println!("    {:<20} {} variants", src, count);
-                    }
-                }
-                // trust breakdown — the family's trust distribution
-                let seedling = vs.iter().filter(|e| matches!(e.trust, veldt::Trust::Seedling)).count();
-                let estab = vs.iter().filter(|e| matches!(e.trust, veldt::Trust::Established)).count();
-                let canon = vs.iter().filter(|e| matches!(e.trust, veldt::Trust::Canonical)).count();
-                println!("  trust: {} seedling → {} established → {} canonical", seedling, estab, canon);
-                // health breakdown — the family's health distribution
-                let healthy_n = vs.iter().filter(|e| matches!(e.health, Health::Healthy)).count();
-                let sick_n = vs.iter().filter(|e| matches!(e.health, Health::Sick(_))).count();
-                let dying_n = vs.iter().filter(|e| matches!(e.health, Health::Dying)).count();
-                println!("  health: {} healthy · {} sick · {} dying", healthy_n, sick_n, dying_n);
-                // probe coverage — the family's test suite stats
-                let probe_count = veldt.probes.get(fam).map(|p| p.len()).unwrap_or(0);
-                let trace_count = veldt.traces.get(fam).map(|t| t.len()).unwrap_or(0);
-                let death_count = veldt.obituaries.iter().filter(|o| o.name == *fam).count();
-                println!("  probes: {} · traces: {} · deaths: {}", probe_count, trace_count, death_count);
-                // age distribution — youngest / oldest / avg
-                let ages: Vec<u64> = vs.iter().map(|e| e.age).collect();
-                if !ages.is_empty() {
-                    let min = ages.iter().min().unwrap();
-                    let max = ages.iter().max().unwrap();
-                    let avg = ages.iter().sum::<u64>() as f64 / ages.len() as f64;
-                    println!("  ages: {} – {} (avg {:.1})", min, max, avg);
-                }
-                // usage distribution — total calls + per-variant avg + most-called
-                let total_usage = vs.iter().map(|e| e.usage_count).sum::<u64>();
-                let avg_usage = total_usage as f64 / vs.len().max(1) as f64;
-                let max_usage = vs.iter().map(|e| e.usage_count).max().unwrap_or(0);
-                println!("  usage: {} calls (avg {:.1}, peak {})", total_usage, avg_usage, max_usage);
-                // fitness distribution — min / avg / peak
-                let fits: Vec<f64> = vs.iter().map(|e| e.fitness).collect();
-                if !fits.is_empty() {
-                    let min = fits.iter().cloned().fold(f64::INFINITY, f64::min);
-                    let max = fits.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-                    let avg = fits.iter().sum::<f64>() / fits.len() as f64;
-                    println!("  fitness: {:.2} – {:.2} (avg {:.2})", min, max, avg);
-                }
-                // size distribution — avg / peak code size
-                let sizes: Vec<usize> = vs.iter()
-                    .map(|e| crate::fmt::format_program(&e.body).len()).collect();
-                if !sizes.is_empty() {
-                    let avg = sizes.iter().sum::<usize>() as f64 / sizes.len() as f64;
-                    let max = sizes.iter().max().unwrap();
-                    println!("  size: avg {:.0} chars (peak {})", avg, max);
-                }
-                // builtin usage — which builtins the family's variants call
-                let mut builtins: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-                for e in vs.iter() {
-                    let src = crate::fmt::format_program(&e.body);
-                    for b in ["turn", "canvas", "grid_", "ui_", "bt_", "balance", "astar",
-                              "bfs", "los", "fov", "rand", "roll", "dice", "choice", "weighted",
-                              "noise", "fbm", "perlin", "poisson", "voronoi", "delaunay", "wfc",
-                              "maze", "flood", "neighbor", "lerp", "clamp", "dist", "aabb",
-                              "smoothstep", "bezier", "point_in_poly", "convex", "ease", "bounce",
-                              "line_points", "fsm", "book", "svc_", "robot", "edge", "game_loop",
-                              "dist_stats", "minimax", "book", "score", "winner", "heuristic"].iter() {
-                        if src.contains(b) {
-                            *builtins.entry(b.to_string()).or_insert(0) += 1;
-                        }
-                    }
-                }
-                if !builtins.is_empty() {
-                    println!("  builtins:");
-                    let mut sorted: Vec<_> = builtins.iter().collect();
-                    sorted.sort_by(|a, b| b.1.cmp(&a.1));
-                    for (b, count) in sorted.iter().take(8) {
-                        println!("    {:<20} {} variants", b, count);
-                    }
-                }
-                // healing attempts — variants that tried to heal
-                let healed: Vec<_> = vs.iter().filter(|e| !e.healing_attempts.is_empty()).collect();
-                if !healed.is_empty() {
-                    println!("  healing:");
-                    for e in healed.iter().take(5) {
-                        println!("    {}#{} — {} attempt(s)", e.name, e.id, e.healing_attempts.len());
-                    }
-                }
-                // staleness — last_used distribution (recency profile)
-                let lus: Vec<u64> = vs.iter().map(|e| e.last_used).collect();
-                if !lus.is_empty() {
-                    let min = lus.iter().min().unwrap();
-                    let max = lus.iter().max().unwrap();
-                    let stale = veldt.run_count.saturating_sub(*max);
-                    println!("  last_used: {} – {} ({} runs stale)", min, max, stale);
-                }
-                // trial_score + lifespan — the quality + longevity profile
-                let trials: Vec<f64> = vs.iter().map(|e| e.trial_score).collect();
-                if !trials.is_empty() {
-                    let avg = trials.iter().sum::<f64>() / trials.len() as f64;
-                    println!("  trial_score: avg {:.2}", avg);
-                }
-                let lifespans: Vec<f64> = vs.iter().map(|e| e.lifespan).collect();
-                if !lifespans.is_empty() {
-                    let avg = lifespans.iter().sum::<f64>() / lifespans.len() as f64;
-                    let max = lifespans.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-                    println!("  lifespan: avg {:.1} (peak {:.1})", avg, max);
-                }
-                // args distribution — the signature profile
-                let args_counts: Vec<usize> = vs.iter().map(|e| e.params.len()).collect();
-                if !args_counts.is_empty() {
-                    let avg = args_counts.iter().sum::<usize>() as f64 / args_counts.len() as f64;
-                    let max = args_counts.iter().max().unwrap();
-                    println!("  args: avg {:.1} params (peak {})", avg, max);
-                }
-                // niche count — the coverage breadth
-                let niche_counts: Vec<usize> = vs.iter().map(|e| e.niche_scores.len()).collect();
-                if !niche_counts.is_empty() {
-                    let avg = niche_counts.iter().sum::<usize>() as f64 / niche_counts.len() as f64;
-                    let max = niche_counts.iter().max().unwrap();
-                    println!("  niches: avg {:.1} (peak {})", avg, max);
-                }
-                // efficiency — the family's steps-efficiency profile
-                let effs: Vec<f64> = vs.iter().map(|e| e.efficiency).collect();
-                if !effs.is_empty() {
-                    let avg = effs.iter().sum::<f64>() / effs.len() as f64;
-                    let max = effs.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-                    let min = effs.iter().cloned().fold(f64::INFINITY, f64::min);
-                    println!("  efficiency: {:.2}x – {:.2}x (avg {:.2}x)", min, max, avg);
-                }
-                // born — the family's birth timeline
-                let borns: Vec<u64> = vs.iter().map(|e| e.born).collect();
-                if !borns.is_empty() {
-                    let min = borns.iter().min().unwrap();
-                    let max = borns.iter().max().unwrap();
-                    println!("  born: run {} – {}", min, max);
-                }
-                // parents — the family's lineage-depth profile
-                let parent_counts: Vec<usize> = vs.iter().map(|e| e.parents.len()).collect();
-                if !parent_counts.is_empty() {
-                    let avg = parent_counts.iter().sum::<usize>() as f64 / parent_counts.len() as f64;
-                    let max = parent_counts.iter().max().unwrap();
-                    println!("  parents: avg {:.1} (peak {})", avg, max);
-                }
-                // turnover — the family's churn (born vs died)
-                let born_n = vs.len();
-                let died_n = veldt.obituaries.iter().filter(|o| o.name == *fam).count();
-                if born_n + died_n > 0 {
-                    let churn = died_n as f64 / (born_n + died_n) as f64;
-                    println!("  turnover: {} living · {} died ({:.0}% churn)", born_n, died_n, churn * 100.0);
-                }
-                // diversity — unique origins + niche breadth (the genetic diversity)
-                let unique_origins: std::collections::HashSet<_> = vs.iter().map(|e| e.origin.as_str()).collect();
-                let unique_niches: std::collections::HashSet<_> = vs.iter()
-                    .flat_map(|e| e.niche_scores.keys().map(|s| s.as_str())).collect();
-                println!("  diversity: {} origins · {} niches", unique_origins.len(), unique_niches.len());
-                // immigrants — the family's foreign-garden influence
-                let immigrants = vs.iter().filter(|e| e.origin.contains("immigrant")).count();
-                let seeds = vs.iter().filter(|e| e.origin.starts_with("seed")).count();
-                let llms = vs.iter().filter(|e| e.origin.contains("llm")).count();
-                println!("  population: {} immigrant · {} seed · {} LLM · {} bred",
-                    immigrants, seeds, llms, vs.len() - immigrants - seeds - llms);
-                // sick errors — the family's failure modes
-                let errs: Vec<_> = vs.iter().filter_map(|e|
-                    if let Health::Sick(err) = &e.health { Some(err) } else { None }).collect();
-                if !errs.is_empty() {
-                    println!("  sick errors:");
-                    for err in errs.iter().take(5) {
-                        println!("    {}", err);
-                    }
-                }
-                // lifecycle — growing (age < lifespan) vs aging (age >= lifespan)
-                let growing = vs.iter().filter(|e| (e.age as f64) < e.lifespan).count();
-                let aging = vs.iter().filter(|e| (e.age as f64) >= e.lifespan).count();
-                println!("  lifecycle: {} growing · {} aging", growing, aging);
-                // workload — overworked (usage > lifespan) vs underused (usage < lifespan)
-                let over = vs.iter().filter(|e| e.usage_count as f64 > e.lifespan).count();
-                let under = vs.iter().filter(|e| (e.usage_count as f64) < e.lifespan).count();
-                println!("  workload: {} overworked · {} underused", over, under);
-                // source success — which mutation sources produced healthy variants
-                let mut src_healthy: std::collections::HashMap<String, (usize, usize)> = std::collections::HashMap::new();
-                for e in vs.iter() {
-                    let src = e.origin.split(' ').next().unwrap_or("?").to_string();
-                    let entry = src_healthy.entry(src).or_insert((0, 0));
-                    entry.1 += 1;
-                    if matches!(e.health, Health::Healthy) { entry.0 += 1; }
-                }
-                if !src_healthy.is_empty() {
-                    println!("  source success:");
-                    let mut sorted: Vec<_> = src_healthy.iter().collect();
-                    sorted.sort_by(|a, b| (b.1.0 as f64 / b.1.1.max(1) as f64)
-                        .partial_cmp(&(a.1.0 as f64 / a.1.1.max(1) as f64)).unwrap_or(std::cmp::Ordering::Equal));
-                    for (src, (h, t)) in sorted.iter().take(6) {
-                        println!("    {:<20} {}/{} healthy", src, h, t);
-                    }
-                }
-                // probe inputs — which inputs the family's probes test
-                if let Some(probes) = veldt.probes.get(fam) {
-                    let inputs: Vec<_> = probes.iter().take(8).map(|p| p.args.join(" ")).collect();
-                    if !inputs.is_empty() {
-                        println!("  probe inputs:");
-                        for inp in inputs { println!("    {}", inp); }
-                    }
-                }
-                // recent traces — the family's call history
-                if let Some(traces) = veldt.traces.get(fam) {
-                    let recent: Vec<_> = traces.iter().rev().take(5).collect();
-                    if !recent.is_empty() {
-                        println!("  recent traces:");
-                        for t in recent {
-                            println!("    {}({}) → {} [v{}]", fam, t.args.join(" "), t.result, t.variant);
-                        }
-                    }
-                }
-                // recent deaths — the family's obituary log
-                let deaths: Vec<_> = veldt.obituaries.iter().filter(|o| o.name == *fam).rev().take(5).collect();
-                if !deaths.is_empty() {
-                    println!("  recent deaths:");
-                    for o in deaths {
-                        println!("    {}#{} — {} (age {})", o.name, o.id, o.cause_of_death, o.age);
-                    }
-                }
-                // probe pass rate — the family's test-suite health
-                if let Some(probes) = veldt.probes.get(fam) {
-                    let passed = probes.iter().filter(|p|
-                        vs.iter().any(|e| e.niche_scores.get(&p.niche)
-                            .map(|s| *s >= 0.5).unwrap_or(false))).count();
-                    if !probes.is_empty() {
-                        println!("  probe pass rate: {}/{} ({}%)", passed, probes.len(),
-                            (passed * 100) / probes.len().max(1));
-                    }
-                }
-                // champion — the family's peak-fitness variant (the flagship)
-                if let Some(champ) = vs.iter().max_by(|a, b| a.fitness
-                    .partial_cmp(&b.fitness).unwrap_or(std::cmp::Ordering::Equal)) {
-                    let h = match &champ.health { Health::Healthy => "ok", Health::Sick(_) => "sick", Health::Dying => "dying" };
-                    let t = match champ.trust { veldt::Trust::Canonical => "canon", veldt::Trust::Established => "estab", _ => "seed" };
-                    println!("  champion: {}#{} fit {:.2} | age {} | {} {}", champ.name, champ.id, champ.fitness, champ.age, h, t);
-                }
-                // weakest — the family's weakest link (the triage candidate)
-                if let Some(weak) = vs.iter().min_by(|a, b| a.fitness
-                    .partial_cmp(&b.fitness).unwrap_or(std::cmp::Ordering::Equal)) {
-                    let h = match &weak.health { Health::Healthy => "ok", Health::Sick(_) => "sick", Health::Dying => "dying" };
-                    println!("  weakest: {}#{} fit {:.2} | age {} | {}", weak.name, weak.id, weak.fitness, weak.age, h);
-                }
-                // fit_rate — the fastest-learners (fitness/age)
-                let rates: Vec<f64> = vs.iter().map(|e| e.fitness / (e.age as f64 + 1.0)).collect();
-                if !rates.is_empty() {
-                    let avg = rates.iter().sum::<f64>() / rates.len() as f64;
-                    let max = rates.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-                    let fastest = vs.iter().max_by(|a, b|
-                        (a.fitness / (a.age as f64 + 1.0)).partial_cmp(&(b.fitness / (b.age as f64 + 1.0)))
-                        .unwrap_or(std::cmp::Ordering::Equal)).unwrap();
-                    println!("  fit_rate: avg {:.3} (peak {:.3} — {}#{})", avg, max, fastest.name, fastest.id);
-                }
-                // usage_rate + size_rate — the throughput + growth-rate profile
-                let usage_rates: Vec<f64> = vs.iter()
-                    .map(|e| e.usage_count as f64 / (e.age as f64 + 1.0)).collect();
-                if !usage_rates.is_empty() {
-                    let avg = usage_rates.iter().sum::<f64>() / usage_rates.len() as f64;
-                    println!("  usage_rate: avg {:.2} calls/run", avg);
-                }
-                let size_rates: Vec<f64> = vs.iter()
-                    .map(|e| crate::fmt::format_program(&e.body).len() as f64 / (e.age as f64 + 1.0)).collect();
-                if !size_rates.is_empty() {
-                    let avg = size_rates.iter().sum::<f64>() / size_rates.len() as f64;
-                    println!("  size_rate: avg {:.1} chars/run", avg);
-                }
-                // pressure — the family's selection pressure (fitness spread)
-                if vs.len() > 1 {
-                    let fits: Vec<f64> = vs.iter().map(|e| e.fitness).collect();
-                    let mean = fits.iter().sum::<f64>() / fits.len() as f64;
-                    let variance = fits.iter().map(|f| (f - mean).powi(2)).sum::<f64>() / fits.len() as f64;
-                    let stddev = variance.sqrt();
-                    println!("  pressure: σ{:.3} fitness spread ({} rivals)", stddev, vs.len() - 1);
-                }
-                // niche matrix — variants × niches heatmap (the coverage map)
-                let all_niches: std::collections::HashSet<_> = vs.iter()
-                    .flat_map(|e| e.niche_scores.keys()).collect();
-                if !all_niches.is_empty() {
-                    let mut niches: Vec<_> = all_niches.iter().collect();
-                    niches.sort();
-                    let header: Vec<_> = niches.iter().take(6).map(|n| {
-                        let s: &str = n.as_str();
-                        s.rsplit(':').next().unwrap_or(s)
-                    }).collect();
-                    println!("  niche matrix ({}):", header.join(" "));
-                    for e in vs.iter().take(6) {
-                        let scores: Vec<_> = niches.iter().take(6).map(|n|
-                            format!("{:.2}", e.niche_scores.get(n.as_str()).copied().unwrap_or(0.0))).collect();
-                        println!("    {}#{:<3} {}", e.name, e.id, scores.join(" "));
-                    }
-                }
-                // healing details — what the family's healing attempts tried
-                let healed: Vec<_> = vs.iter().filter(|e| !e.healing_attempts.is_empty()).collect();
-                if !healed.is_empty() {
-                    println!("  healing attempts:");
-                    for e in healed.iter().take(5) {
-                        for a in e.healing_attempts.iter().take(3) {
-                            println!("    {}#{} — {}", e.name, e.id, a);
-                        }
-                    }
-                }
-                // born timeline — births per run (the family's growth curve)
-                let mut borns: std::collections::HashMap<u64, usize> = std::collections::HashMap::new();
-                for e in vs.iter() { *borns.entry(e.born).or_insert(0) += 1; }
-                if borns.len() > 1 {
-                    let mut runs: Vec<_> = borns.iter().collect();
-                    runs.sort_by_key(|(r, _)| *r);
-                    let timeline: Vec<_> = runs.iter().map(|(r, n)| format!("{}:{}", **r % 100, n)).collect();
-                    println!("  birth timeline: {}", timeline.join(" "));
-                }
-                // siblings — variants sharing a parent (the sibling map)
-                let mut parents_map: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
-                for e in vs.iter() {
-                    let key = e.origin.split(' ').last().unwrap_or("seed").to_string();
-                    parents_map.entry(key).or_default().push(format!("{}#{}", e.name, e.id));
-                }
-                let sibling_groups: Vec<_> = parents_map.values()
-                    .filter(|kids| kids.len() > 1).collect();
-                if !sibling_groups.is_empty() {
-                    println!("  siblings:");
-                    for kids in sibling_groups.iter().take(4) {
-                        println!("    {}", kids.join(" "));
-                    }
-                }
-                // code diversity — how much the variants' bodies differ
-                if vs.len() > 1 {
-                    let bodies: Vec<String> = vs.iter()
-                        .map(|e| crate::fmt::format_program(&e.body)).collect();
-                    let unique: std::collections::HashSet<_> = bodies.iter().collect();
-                    let avg_len = bodies.iter().map(|b| b.len()).sum::<usize>() / bodies.len();
-                    println!("  code diversity: {} unique bodies (avg {} chars)", unique.len(), avg_len);
-                }
-                // death causes — what killed the family's variants
-                let deaths: Vec<_> = veldt.obituaries.iter().filter(|o| o.name == *fam).collect();
-                if !deaths.is_empty() {
-                    let mut causes: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-                    for o in &deaths { *causes.entry(o.cause_of_death.clone()).or_insert(0) += 1; }
-                    let mut sorted: Vec<_> = causes.iter().collect();
-                    sorted.sort_by(|a, b| b.1.cmp(&a.1));
-                    println!("  death causes:");
-                    for (cause, n) in sorted.iter().take(5) {
-                        println!("    {:<20} {}", cause, n);
-                    }
-                }
-                // maturity — old+trusted vs young+seedling (the trust-age profile)
-                let old_trusted = vs.iter().filter(|e|
-                    e.age > 30 && matches!(e.trust, veldt::Trust::Established | veldt::Trust::Canonical)).count();
-                let young_seedling = vs.iter().filter(|e|
-                    e.age <= 10 && matches!(e.trust, veldt::Trust::Seedling)).count();
-                println!("  maturity: {} veteran·trusted · {} new·seedling", old_trusted, young_seedling);
-                // niche gaps — which niches have low coverage (the gap analysis)
-                let mut niche_avg: std::collections::HashMap<String, (f64, usize)> = std::collections::HashMap::new();
-                for e in vs.iter() {
-                    for (niche, score) in &e.niche_scores {
-                        let entry = niche_avg.entry(niche.clone()).or_insert((0.0, 0));
-                        entry.0 += score; entry.1 += 1;
-                    }
-                }
-                let gaps: Vec<_> = niche_avg.iter()
-                    .filter(|(_, (t, n))| *n > 0 && (*t / *n as f64) < 0.5).collect();
-                if !gaps.is_empty() {
-                    println!("  niche gaps:");
-                    for (niche, (t, n)) in gaps.iter().take(5) {
-                        println!("    {:<20} avg {:.2} ({} variants)", niche, *t / *n as f64, n);
-                    }
-                }
-                // proven/risky — the family's deployment-readiness split
-                let proven = vs.iter().filter(|e| matches!(e.health, Health::Healthy)
-                    && matches!(e.trust, veldt::Trust::Established | veldt::Trust::Canonical)).count();
-                let risky = vs.iter().filter(|e| matches!(e.health, Health::Sick(_))
-                    && matches!(e.trust, veldt::Trust::Seedling)).count();
-                println!("  proven: {} · risky: {}", proven, risky);
-                // healing success — how many healing attempts produced healthy variants
-                let healed_ok = vs.iter().filter(|e| !e.healing_attempts.is_empty()
-                    && matches!(e.health, Health::Healthy)).count();
-                let healed_total = vs.iter().filter(|e| !e.healing_attempts.is_empty()).count();
-                if healed_total > 0 {
-                    println!("  healing success: {}/{} ({}%)", healed_ok, healed_total,
-                        (healed_ok * 100) / healed_total);
-                }
-                // trace-rate — calls traced per variant (the observability profile)
-                let trace_n = veldt.traces.get(fam).map(|t| t.len()).unwrap_or(0);
-                if trace_n > 0 {
-                    println!("  trace rate: {} traces (avg {:.1} per variant)", trace_n,
-                        trace_n as f64 / vs.len().max(1) as f64);
-                }
-                // LLM influence — the family's BYOK mutations
-                let llm_n = vs.iter().filter(|e| e.origin.contains("llm")).count();
-                if llm_n > 0 {
-                    println!("  LLM-bred: {} variants", llm_n);
-                }
-                // immigrant origins — which gardens the immigrants came from
-                let mut imm_sources: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-                for e in vs.iter().filter(|e| e.origin.contains("immigrant")) {
-                    let src = e.origin.split(':').next().unwrap_or("unknown").to_string();
-                    *imm_sources.entry(src).or_insert(0) += 1;
-                }
-                if !imm_sources.is_empty() {
-                    println!("  immigrant origins:");
-                    let mut sorted: Vec<_> = imm_sources.iter().collect();
-                    sorted.sort_by(|a, b| b.1.cmp(&a.1));
-                    for (src, n) in sorted.iter().take(5) {
-                        println!("    {:<20} {}", src, n);
-                    }
-                }
-                // source fitness — avg fitness per mutation source
-                let mut src_fit: std::collections::HashMap<String, (f64, usize)> = std::collections::HashMap::new();
-                for e in vs.iter() {
-                    let src = e.origin.split(' ').next().unwrap_or("?").to_string();
-                    let entry = src_fit.entry(src).or_insert((0.0, 0));
-                    entry.0 += e.fitness; entry.1 += 1;
-                }
-                if !src_fit.is_empty() {
-                    println!("  source fitness:");
-                    let mut sorted: Vec<_> = src_fit.iter().collect();
-                    sorted.sort_by(|a, b| (b.1.0 / b.1.1.max(1) as f64)
-                        .partial_cmp(&(a.1.0 / a.1.1.max(1) as f64)).unwrap_or(std::cmp::Ordering::Equal));
-                    for (src, (t, n)) in sorted.iter().take(6) {
-                        println!("    {:<20} avg {:.2} ({} variants)", src, t / *n as f64, n);
-                    }
-                }
-                // probe niches — which niches the family's probes target
-                if let Some(probes) = veldt.probes.get(fam) {
-                    let mut niche_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-                    for p in probes { *niche_counts.entry(p.niche.clone()).or_insert(0) += 1; }
-                    if !niche_counts.is_empty() {
-                        println!("  probe niches:");
-                        let mut sorted: Vec<_> = niche_counts.iter().collect();
-                        sorted.sort_by(|a, b| b.1.cmp(&a.1));
-                        for (niche, n) in sorted.iter().take(6) {
-                            println!("    {:<20} {} probes", niche, n);
-                        }
-                    }
-                }
+                print_family_detail(veldt, fam, vs);
             }
         }
         if veldt.fitness_history.len() >= 2 {
@@ -4676,5 +4211,476 @@ fn run_program(path: &str, trace: bool, evolve_after: bool) {
     // Save veldt to disk
     if let Err(e) = veldt.save() {
         eprintln!("Error saving veldt: {}", e);
+    }
+}
+
+/// stats --family --top — the per-family detail dashboard
+fn print_family_detail(veldt: &veldt::Veldt, fam: &String, vs: &[veldt::FunctionEntry]) {
+    let argv: Vec<String> = std::env::args().collect();
+    let mut sorted = vs.to_vec();
+    let sort_field = argv.iter().position(|a| a == "--sort")
+        .and_then(|p| argv.get(p + 1)).cloned().unwrap_or_default();
+    veldt::sort_variants(&mut sorted, if sort_field.is_empty() { "fitness" } else { &sort_field });
+    let top_n = argv.iter().position(|a| a == "--top")
+        .and_then(|p| argv.get(p + 1)).and_then(|s| s.parse::<usize>().ok()).unwrap_or(5);
+    println!("  top variants:");
+    for e in sorted.iter().take(top_n) {
+        let h = match &e.health { Health::Healthy => "ok", Health::Sick(_) => "sick", Health::Dying => "dying" };
+        let t = match e.trust { veldt::Trust::Canonical => "canon", veldt::Trust::Established => "estab", _ => "seed" };
+        println!("    {}#{:<3} fit {:.2} | age {} | usage {} | {} {}", e.name, e.id, e.fitness, e.age, e.usage_count, h, t);
+    }
+    // per-niche avg scores — the family's niche coverage
+    let mut niche_totals: std::collections::HashMap<String, (f64, usize)> = std::collections::HashMap::new();
+    for e in vs.iter() {
+        for (niche, score) in &e.niche_scores {
+            let entry = niche_totals.entry(niche.clone()).or_insert((0.0, 0));
+            entry.0 += score; entry.1 += 1;
+        }
+    }
+    if !niche_totals.is_empty() {
+        println!("  niche coverage:");
+        let mut niches: Vec<_> = niche_totals.iter().collect();
+        niches.sort_by(|a, b| a.0.cmp(&b.0));
+        for (niche, (total, count)) in niches.iter().take(10) {
+            println!("    {:<20} avg {:.2} ({} variants)", niche, total / *count as f64, count);
+        }
+    }
+    // origin/source breakdown — the family's mutation-source histogram
+    let mut origins: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for e in vs.iter() {
+        let src = e.origin.split(' ').next().unwrap_or("?").to_string();
+        *origins.entry(src).or_insert(0) += 1;
+    }
+    if !origins.is_empty() {
+        println!("  origins:");
+        let mut sorted: Vec<_> = origins.iter().collect();
+        sorted.sort_by(|a, b| b.1.cmp(&a.1));
+        for (src, count) in sorted.iter().take(10) {
+            println!("    {:<20} {} variants", src, count);
+        }
+    }
+    // trust breakdown — the family's trust distribution
+    let seedling = vs.iter().filter(|e| matches!(e.trust, veldt::Trust::Seedling)).count();
+    let estab = vs.iter().filter(|e| matches!(e.trust, veldt::Trust::Established)).count();
+    let canon = vs.iter().filter(|e| matches!(e.trust, veldt::Trust::Canonical)).count();
+    println!("  trust: {} seedling → {} established → {} canonical", seedling, estab, canon);
+    // health breakdown — the family's health distribution
+    let healthy_n = vs.iter().filter(|e| matches!(e.health, Health::Healthy)).count();
+    let sick_n = vs.iter().filter(|e| matches!(e.health, Health::Sick(_))).count();
+    let dying_n = vs.iter().filter(|e| matches!(e.health, Health::Dying)).count();
+    println!("  health: {} healthy · {} sick · {} dying", healthy_n, sick_n, dying_n);
+    // probe coverage — the family's test suite stats
+    let probe_count = veldt.probes.get(fam).map(|p| p.len()).unwrap_or(0);
+    let trace_count = veldt.traces.get(fam).map(|t| t.len()).unwrap_or(0);
+    let death_count = veldt.obituaries.iter().filter(|o| o.name == *fam).count();
+    println!("  probes: {} · traces: {} · deaths: {}", probe_count, trace_count, death_count);
+    // age distribution — youngest / oldest / avg
+    let ages: Vec<u64> = vs.iter().map(|e| e.age).collect();
+    if !ages.is_empty() {
+        let min = ages.iter().min().unwrap();
+        let max = ages.iter().max().unwrap();
+        let avg = ages.iter().sum::<u64>() as f64 / ages.len() as f64;
+        println!("  ages: {} – {} (avg {:.1})", min, max, avg);
+    }
+    // usage distribution — total calls + per-variant avg + most-called
+    let total_usage = vs.iter().map(|e| e.usage_count).sum::<u64>();
+    let avg_usage = total_usage as f64 / vs.len().max(1) as f64;
+    let max_usage = vs.iter().map(|e| e.usage_count).max().unwrap_or(0);
+    println!("  usage: {} calls (avg {:.1}, peak {})", total_usage, avg_usage, max_usage);
+    // fitness distribution — min / avg / peak
+    let fits: Vec<f64> = vs.iter().map(|e| e.fitness).collect();
+    if !fits.is_empty() {
+        let min = fits.iter().cloned().fold(f64::INFINITY, f64::min);
+        let max = fits.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let avg = fits.iter().sum::<f64>() / fits.len() as f64;
+        println!("  fitness: {:.2} – {:.2} (avg {:.2})", min, max, avg);
+    }
+    // size distribution — avg / peak code size
+    let sizes: Vec<usize> = vs.iter()
+        .map(|e| crate::fmt::format_program(&e.body).len()).collect();
+    if !sizes.is_empty() {
+        let avg = sizes.iter().sum::<usize>() as f64 / sizes.len() as f64;
+        let max = sizes.iter().max().unwrap();
+        println!("  size: avg {:.0} chars (peak {})", avg, max);
+    }
+    // builtin usage — which builtins the family's variants call
+    let mut builtins: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for e in vs.iter() {
+        let src = crate::fmt::format_program(&e.body);
+        for b in ["turn", "canvas", "grid_", "ui_", "bt_", "balance", "astar",
+                  "bfs", "los", "fov", "rand", "roll", "dice", "choice", "weighted",
+                  "noise", "fbm", "perlin", "poisson", "voronoi", "delaunay", "wfc",
+                  "maze", "flood", "neighbor", "lerp", "clamp", "dist", "aabb",
+                  "smoothstep", "bezier", "point_in_poly", "convex", "ease", "bounce",
+                  "line_points", "fsm", "book", "svc_", "robot", "edge", "game_loop",
+                  "dist_stats", "minimax", "book", "score", "winner", "heuristic"].iter() {
+            if src.contains(b) {
+                *builtins.entry(b.to_string()).or_insert(0) += 1;
+            }
+        }
+    }
+    if !builtins.is_empty() {
+        println!("  builtins:");
+        let mut sorted: Vec<_> = builtins.iter().collect();
+        sorted.sort_by(|a, b| b.1.cmp(&a.1));
+        for (b, count) in sorted.iter().take(8) {
+            println!("    {:<20} {} variants", b, count);
+        }
+    }
+    // healing attempts — variants that tried to heal
+    let healed: Vec<_> = vs.iter().filter(|e| !e.healing_attempts.is_empty()).collect();
+    if !healed.is_empty() {
+        println!("  healing:");
+        for e in healed.iter().take(5) {
+            println!("    {}#{} — {} attempt(s)", e.name, e.id, e.healing_attempts.len());
+        }
+    }
+    // staleness — last_used distribution (recency profile)
+    let lus: Vec<u64> = vs.iter().map(|e| e.last_used).collect();
+    if !lus.is_empty() {
+        let min = lus.iter().min().unwrap();
+        let max = lus.iter().max().unwrap();
+        let stale = veldt.run_count.saturating_sub(*max);
+        println!("  last_used: {} – {} ({} runs stale)", min, max, stale);
+    }
+    // trial_score + lifespan — the quality + longevity profile
+    let trials: Vec<f64> = vs.iter().map(|e| e.trial_score).collect();
+    if !trials.is_empty() {
+        let avg = trials.iter().sum::<f64>() / trials.len() as f64;
+        println!("  trial_score: avg {:.2}", avg);
+    }
+    let lifespans: Vec<f64> = vs.iter().map(|e| e.lifespan).collect();
+    if !lifespans.is_empty() {
+        let avg = lifespans.iter().sum::<f64>() / lifespans.len() as f64;
+        let max = lifespans.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        println!("  lifespan: avg {:.1} (peak {:.1})", avg, max);
+    }
+    // args distribution — the signature profile
+    let args_counts: Vec<usize> = vs.iter().map(|e| e.params.len()).collect();
+    if !args_counts.is_empty() {
+        let avg = args_counts.iter().sum::<usize>() as f64 / args_counts.len() as f64;
+        let max = args_counts.iter().max().unwrap();
+        println!("  args: avg {:.1} params (peak {})", avg, max);
+    }
+    // niche count — the coverage breadth
+    let niche_counts: Vec<usize> = vs.iter().map(|e| e.niche_scores.len()).collect();
+    if !niche_counts.is_empty() {
+        let avg = niche_counts.iter().sum::<usize>() as f64 / niche_counts.len() as f64;
+        let max = niche_counts.iter().max().unwrap();
+        println!("  niches: avg {:.1} (peak {})", avg, max);
+    }
+    // efficiency — the family's steps-efficiency profile
+    let effs: Vec<f64> = vs.iter().map(|e| e.efficiency).collect();
+    if !effs.is_empty() {
+        let avg = effs.iter().sum::<f64>() / effs.len() as f64;
+        let max = effs.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let min = effs.iter().cloned().fold(f64::INFINITY, f64::min);
+        println!("  efficiency: {:.2}x – {:.2}x (avg {:.2}x)", min, max, avg);
+    }
+    // born — the family's birth timeline
+    let borns: Vec<u64> = vs.iter().map(|e| e.born).collect();
+    if !borns.is_empty() {
+        let min = borns.iter().min().unwrap();
+        let max = borns.iter().max().unwrap();
+        println!("  born: run {} – {}", min, max);
+    }
+    // parents — the family's lineage-depth profile
+    let parent_counts: Vec<usize> = vs.iter().map(|e| e.parents.len()).collect();
+    if !parent_counts.is_empty() {
+        let avg = parent_counts.iter().sum::<usize>() as f64 / parent_counts.len() as f64;
+        let max = parent_counts.iter().max().unwrap();
+        println!("  parents: avg {:.1} (peak {})", avg, max);
+    }
+    // turnover — the family's churn (born vs died)
+    let born_n = vs.len();
+    let died_n = veldt.obituaries.iter().filter(|o| o.name == *fam).count();
+    if born_n + died_n > 0 {
+        let churn = died_n as f64 / (born_n + died_n) as f64;
+        println!("  turnover: {} living · {} died ({:.0}% churn)", born_n, died_n, churn * 100.0);
+    }
+    // diversity — unique origins + niche breadth (the genetic diversity)
+    let unique_origins: std::collections::HashSet<_> = vs.iter().map(|e| e.origin.as_str()).collect();
+    let unique_niches: std::collections::HashSet<_> = vs.iter()
+        .flat_map(|e| e.niche_scores.keys().map(|s| s.as_str())).collect();
+    println!("  diversity: {} origins · {} niches", unique_origins.len(), unique_niches.len());
+    // immigrants — the family's foreign-garden influence
+    let immigrants = vs.iter().filter(|e| e.origin.contains("immigrant")).count();
+    let seeds = vs.iter().filter(|e| e.origin.starts_with("seed")).count();
+    let llms = vs.iter().filter(|e| e.origin.contains("llm")).count();
+    println!("  population: {} immigrant · {} seed · {} LLM · {} bred",
+        immigrants, seeds, llms, vs.len() - immigrants - seeds - llms);
+    // sick errors — the family's failure modes
+    let errs: Vec<_> = vs.iter().filter_map(|e|
+        if let Health::Sick(err) = &e.health { Some(err) } else { None }).collect();
+    if !errs.is_empty() {
+        println!("  sick errors:");
+        for err in errs.iter().take(5) {
+            println!("    {}", err);
+        }
+    }
+    // lifecycle — growing (age < lifespan) vs aging (age >= lifespan)
+    let growing = vs.iter().filter(|e| (e.age as f64) < e.lifespan).count();
+    let aging = vs.iter().filter(|e| (e.age as f64) >= e.lifespan).count();
+    println!("  lifecycle: {} growing · {} aging", growing, aging);
+    // workload — overworked (usage > lifespan) vs underused (usage < lifespan)
+    let over = vs.iter().filter(|e| e.usage_count as f64 > e.lifespan).count();
+    let under = vs.iter().filter(|e| (e.usage_count as f64) < e.lifespan).count();
+    println!("  workload: {} overworked · {} underused", over, under);
+    // source success — which mutation sources produced healthy variants
+    let mut src_healthy: std::collections::HashMap<String, (usize, usize)> = std::collections::HashMap::new();
+    for e in vs.iter() {
+        let src = e.origin.split(' ').next().unwrap_or("?").to_string();
+        let entry = src_healthy.entry(src).or_insert((0, 0));
+        entry.1 += 1;
+        if matches!(e.health, Health::Healthy) { entry.0 += 1; }
+    }
+    if !src_healthy.is_empty() {
+        println!("  source success:");
+        let mut sorted: Vec<_> = src_healthy.iter().collect();
+        sorted.sort_by(|a, b| (b.1.0 as f64 / b.1.1.max(1) as f64)
+            .partial_cmp(&(a.1.0 as f64 / a.1.1.max(1) as f64)).unwrap_or(std::cmp::Ordering::Equal));
+        for (src, (h, t)) in sorted.iter().take(6) {
+            println!("    {:<20} {}/{} healthy", src, h, t);
+        }
+    }
+    // probe inputs — which inputs the family's probes test
+    if let Some(probes) = veldt.probes.get(fam) {
+        let inputs: Vec<_> = probes.iter().take(8).map(|p| p.args.join(" ")).collect();
+        if !inputs.is_empty() {
+            println!("  probe inputs:");
+            for inp in inputs { println!("    {}", inp); }
+        }
+    }
+    // recent traces — the family's call history
+    if let Some(traces) = veldt.traces.get(fam) {
+        let recent: Vec<_> = traces.iter().rev().take(5).collect();
+        if !recent.is_empty() {
+            println!("  recent traces:");
+            for t in recent {
+                println!("    {}({}) → {} [v{}]", fam, t.args.join(" "), t.result, t.variant);
+            }
+        }
+    }
+    // recent deaths — the family's obituary log
+    let deaths: Vec<_> = veldt.obituaries.iter().filter(|o| o.name == *fam).rev().take(5).collect();
+    if !deaths.is_empty() {
+        println!("  recent deaths:");
+        for o in deaths {
+            println!("    {}#{} — {} (age {})", o.name, o.id, o.cause_of_death, o.age);
+        }
+    }
+    // probe pass rate — the family's test-suite health
+    if let Some(probes) = veldt.probes.get(fam) {
+        let passed = probes.iter().filter(|p|
+            vs.iter().any(|e| e.niche_scores.get(&p.niche)
+                .map(|s| *s >= 0.5).unwrap_or(false))).count();
+        if !probes.is_empty() {
+            println!("  probe pass rate: {}/{} ({}%)", passed, probes.len(),
+                (passed * 100) / probes.len().max(1));
+        }
+    }
+    // champion — the family's peak-fitness variant (the flagship)
+    if let Some(champ) = vs.iter().max_by(|a, b| a.fitness
+        .partial_cmp(&b.fitness).unwrap_or(std::cmp::Ordering::Equal)) {
+        let h = match &champ.health { Health::Healthy => "ok", Health::Sick(_) => "sick", Health::Dying => "dying" };
+        let t = match champ.trust { veldt::Trust::Canonical => "canon", veldt::Trust::Established => "estab", _ => "seed" };
+        println!("  champion: {}#{} fit {:.2} | age {} | {} {}", champ.name, champ.id, champ.fitness, champ.age, h, t);
+    }
+    // weakest — the family's weakest link (the triage candidate)
+    if let Some(weak) = vs.iter().min_by(|a, b| a.fitness
+        .partial_cmp(&b.fitness).unwrap_or(std::cmp::Ordering::Equal)) {
+        let h = match &weak.health { Health::Healthy => "ok", Health::Sick(_) => "sick", Health::Dying => "dying" };
+        println!("  weakest: {}#{} fit {:.2} | age {} | {}", weak.name, weak.id, weak.fitness, weak.age, h);
+    }
+    // fit_rate — the fastest-learners (fitness/age)
+    let rates: Vec<f64> = vs.iter().map(|e| e.fitness / (e.age as f64 + 1.0)).collect();
+    if !rates.is_empty() {
+        let avg = rates.iter().sum::<f64>() / rates.len() as f64;
+        let max = rates.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let fastest = vs.iter().max_by(|a, b|
+            (a.fitness / (a.age as f64 + 1.0)).partial_cmp(&(b.fitness / (b.age as f64 + 1.0)))
+            .unwrap_or(std::cmp::Ordering::Equal)).unwrap();
+        println!("  fit_rate: avg {:.3} (peak {:.3} — {}#{})", avg, max, fastest.name, fastest.id);
+    }
+    // usage_rate + size_rate — the throughput + growth-rate profile
+    let usage_rates: Vec<f64> = vs.iter()
+        .map(|e| e.usage_count as f64 / (e.age as f64 + 1.0)).collect();
+    if !usage_rates.is_empty() {
+        let avg = usage_rates.iter().sum::<f64>() / usage_rates.len() as f64;
+        println!("  usage_rate: avg {:.2} calls/run", avg);
+    }
+    let size_rates: Vec<f64> = vs.iter()
+        .map(|e| crate::fmt::format_program(&e.body).len() as f64 / (e.age as f64 + 1.0)).collect();
+    if !size_rates.is_empty() {
+        let avg = size_rates.iter().sum::<f64>() / size_rates.len() as f64;
+        println!("  size_rate: avg {:.1} chars/run", avg);
+    }
+    // pressure — the family's selection pressure (fitness spread)
+    if vs.len() > 1 {
+        let fits: Vec<f64> = vs.iter().map(|e| e.fitness).collect();
+        let mean = fits.iter().sum::<f64>() / fits.len() as f64;
+        let variance = fits.iter().map(|f| (f - mean).powi(2)).sum::<f64>() / fits.len() as f64;
+        let stddev = variance.sqrt();
+        println!("  pressure: σ{:.3} fitness spread ({} rivals)", stddev, vs.len() - 1);
+    }
+    // niche matrix — variants × niches heatmap (the coverage map)
+    let all_niches: std::collections::HashSet<_> = vs.iter()
+        .flat_map(|e| e.niche_scores.keys()).collect();
+    if !all_niches.is_empty() {
+        let mut niches: Vec<_> = all_niches.iter().collect();
+        niches.sort();
+        let header: Vec<_> = niches.iter().take(6).map(|n| {
+            let s: &str = n.as_str();
+            s.rsplit(':').next().unwrap_or(s)
+        }).collect();
+        println!("  niche matrix ({}):", header.join(" "));
+        for e in vs.iter().take(6) {
+            let scores: Vec<_> = niches.iter().take(6).map(|n|
+                format!("{:.2}", e.niche_scores.get(n.as_str()).copied().unwrap_or(0.0))).collect();
+            println!("    {}#{:<3} {}", e.name, e.id, scores.join(" "));
+        }
+    }
+    // healing details — what the family's healing attempts tried
+    let healed: Vec<_> = vs.iter().filter(|e| !e.healing_attempts.is_empty()).collect();
+    if !healed.is_empty() {
+        println!("  healing attempts:");
+        for e in healed.iter().take(5) {
+            for a in e.healing_attempts.iter().take(3) {
+                println!("    {}#{} — {}", e.name, e.id, a);
+            }
+        }
+    }
+    // born timeline — births per run (the family's growth curve)
+    let mut borns: std::collections::HashMap<u64, usize> = std::collections::HashMap::new();
+    for e in vs.iter() { *borns.entry(e.born).or_insert(0) += 1; }
+    if borns.len() > 1 {
+        let mut runs: Vec<_> = borns.iter().collect();
+        runs.sort_by_key(|(r, _)| *r);
+        let timeline: Vec<_> = runs.iter().map(|(r, n)| format!("{}:{}", **r % 100, n)).collect();
+        println!("  birth timeline: {}", timeline.join(" "));
+    }
+    // siblings — variants sharing a parent (the sibling map)
+    let mut parents_map: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+    for e in vs.iter() {
+        let key = e.origin.split(' ').last().unwrap_or("seed").to_string();
+        parents_map.entry(key).or_default().push(format!("{}#{}", e.name, e.id));
+    }
+    let sibling_groups: Vec<_> = parents_map.values()
+        .filter(|kids| kids.len() > 1).collect();
+    if !sibling_groups.is_empty() {
+        println!("  siblings:");
+        for kids in sibling_groups.iter().take(4) {
+            println!("    {}", kids.join(" "));
+        }
+    }
+    // code diversity — how much the variants' bodies differ
+    if vs.len() > 1 {
+        let bodies: Vec<String> = vs.iter()
+            .map(|e| crate::fmt::format_program(&e.body)).collect();
+        let unique: std::collections::HashSet<_> = bodies.iter().collect();
+        let avg_len = bodies.iter().map(|b| b.len()).sum::<usize>() / bodies.len();
+        println!("  code diversity: {} unique bodies (avg {} chars)", unique.len(), avg_len);
+    }
+    // death causes — what killed the family's variants
+    let deaths: Vec<_> = veldt.obituaries.iter().filter(|o| o.name == *fam).collect();
+    if !deaths.is_empty() {
+        let mut causes: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        for o in &deaths { *causes.entry(o.cause_of_death.clone()).or_insert(0) += 1; }
+        let mut sorted: Vec<_> = causes.iter().collect();
+        sorted.sort_by(|a, b| b.1.cmp(&a.1));
+        println!("  death causes:");
+        for (cause, n) in sorted.iter().take(5) {
+            println!("    {:<20} {}", cause, n);
+        }
+    }
+    // maturity — old+trusted vs young+seedling (the trust-age profile)
+    let old_trusted = vs.iter().filter(|e|
+        e.age > 30 && matches!(e.trust, veldt::Trust::Established | veldt::Trust::Canonical)).count();
+    let young_seedling = vs.iter().filter(|e|
+        e.age <= 10 && matches!(e.trust, veldt::Trust::Seedling)).count();
+    println!("  maturity: {} veteran·trusted · {} new·seedling", old_trusted, young_seedling);
+    // niche gaps — which niches have low coverage (the gap analysis)
+    let mut niche_avg: std::collections::HashMap<String, (f64, usize)> = std::collections::HashMap::new();
+    for e in vs.iter() {
+        for (niche, score) in &e.niche_scores {
+            let entry = niche_avg.entry(niche.clone()).or_insert((0.0, 0));
+            entry.0 += score; entry.1 += 1;
+        }
+    }
+    let gaps: Vec<_> = niche_avg.iter()
+        .filter(|(_, (t, n))| *n > 0 && (*t / *n as f64) < 0.5).collect();
+    if !gaps.is_empty() {
+        println!("  niche gaps:");
+        for (niche, (t, n)) in gaps.iter().take(5) {
+            println!("    {:<20} avg {:.2} ({} variants)", niche, *t / *n as f64, n);
+        }
+    }
+    // proven/risky — the family's deployment-readiness split
+    let proven = vs.iter().filter(|e| matches!(e.health, Health::Healthy)
+        && matches!(e.trust, veldt::Trust::Established | veldt::Trust::Canonical)).count();
+    let risky = vs.iter().filter(|e| matches!(e.health, Health::Sick(_))
+        && matches!(e.trust, veldt::Trust::Seedling)).count();
+    println!("  proven: {} · risky: {}", proven, risky);
+    // healing success — how many healing attempts produced healthy variants
+    let healed_ok = vs.iter().filter(|e| !e.healing_attempts.is_empty()
+        && matches!(e.health, Health::Healthy)).count();
+    let healed_total = vs.iter().filter(|e| !e.healing_attempts.is_empty()).count();
+    if healed_total > 0 {
+        println!("  healing success: {}/{} ({}%)", healed_ok, healed_total,
+            (healed_ok * 100) / healed_total);
+    }
+    // trace-rate — calls traced per variant (the observability profile)
+    let trace_n = veldt.traces.get(fam).map(|t| t.len()).unwrap_or(0);
+    if trace_n > 0 {
+        println!("  trace rate: {} traces (avg {:.1} per variant)", trace_n,
+            trace_n as f64 / vs.len().max(1) as f64);
+    }
+    // LLM influence — the family's BYOK mutations
+    let llm_n = vs.iter().filter(|e| e.origin.contains("llm")).count();
+    if llm_n > 0 {
+        println!("  LLM-bred: {} variants", llm_n);
+    }
+    // immigrant origins — which gardens the immigrants came from
+    let mut imm_sources: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for e in vs.iter().filter(|e| e.origin.contains("immigrant")) {
+        let src = e.origin.split(':').next().unwrap_or("unknown").to_string();
+        *imm_sources.entry(src).or_insert(0) += 1;
+    }
+    if !imm_sources.is_empty() {
+        println!("  immigrant origins:");
+        let mut sorted: Vec<_> = imm_sources.iter().collect();
+        sorted.sort_by(|a, b| b.1.cmp(&a.1));
+        for (src, n) in sorted.iter().take(5) {
+            println!("    {:<20} {}", src, n);
+        }
+    }
+    // source fitness — avg fitness per mutation source
+    let mut src_fit: std::collections::HashMap<String, (f64, usize)> = std::collections::HashMap::new();
+    for e in vs.iter() {
+        let src = e.origin.split(' ').next().unwrap_or("?").to_string();
+        let entry = src_fit.entry(src).or_insert((0.0, 0));
+        entry.0 += e.fitness; entry.1 += 1;
+    }
+    if !src_fit.is_empty() {
+        println!("  source fitness:");
+        let mut sorted: Vec<_> = src_fit.iter().collect();
+        sorted.sort_by(|a, b| (b.1.0 / b.1.1.max(1) as f64)
+            .partial_cmp(&(a.1.0 / a.1.1.max(1) as f64)).unwrap_or(std::cmp::Ordering::Equal));
+        for (src, (t, n)) in sorted.iter().take(6) {
+            println!("    {:<20} avg {:.2} ({} variants)", src, t / *n as f64, n);
+        }
+    }
+    // probe niches — which niches the family's probes target
+    if let Some(probes) = veldt.probes.get(fam) {
+        let mut niche_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        for p in probes { *niche_counts.entry(p.niche.clone()).or_insert(0) += 1; }
+        if !niche_counts.is_empty() {
+            println!("  probe niches:");
+            let mut sorted: Vec<_> = niche_counts.iter().collect();
+            sorted.sort_by(|a, b| b.1.cmp(&a.1));
+            for (niche, n) in sorted.iter().take(6) {
+                println!("    {:<20} {} probes", niche, n);
+            }
+        }
     }
 }
