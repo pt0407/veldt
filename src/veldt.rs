@@ -629,6 +629,11 @@ impl Veldt {
         // Functions
         let mut func_count = 0;
         for (name, variants) in &self.functions {
+            // champion marker — the variant `call_best` would dispatch to
+            let best_id = variants.iter()
+                .max_by(|a, b| a.fitness.partial_cmp(&b.fitness)
+                    .unwrap_or(std::cmp::Ordering::Equal))
+                .map(|e| e.id);
             for entry in variants {
                 let show = if sick_only {
                     matches!(entry.health, Health::Sick(_) | Health::Dying)
@@ -641,8 +646,9 @@ impl Veldt {
                         Health::Sick(e) => format!("sick: {}", e),
                         Health::Dying => "dying".into(),
                     };
-                    println!("  {}#{} — {} | age: {} | lifespan: {:.1} | usage: {} | fitness: {:.2}",
-                        name, entry.id, health_str, entry.age, entry.lifespan, entry.usage_count, entry.fitness);
+                    let marker = if Some(entry.id) == best_id { " *" } else { "" };
+                    println!("  {}#{}{} — {} | age: {} | lifespan: {:.1} | usage: {} | fitness: {:.2}",
+                        name, entry.id, marker, health_str, entry.age, entry.lifespan, entry.usage_count, entry.fitness);
                     func_count += 1;
                 }
             }
