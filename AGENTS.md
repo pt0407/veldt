@@ -1139,3 +1139,9 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   gets the SMT gate; plain builds print a clear message. If your
   env builds z3 fine, keep --features smt on. .z3-trace untracked
   (your 049407b intent) + gitignored.
+- [Devin] veldt check --garden [family]: strict-lints every
+  variant body via synthetic Grow(Fn) wrap — found REAL
+  mutation-produced bugs immediately (score#159: unreachable
+  after return, shadowed lets, stale sentinel). 372 warnings
+  / 35 variants on first run. --json for machine use. This is
+  the lint→garden feedback loop — could gate adopt/promote.
