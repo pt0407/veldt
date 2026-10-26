@@ -804,3 +804,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   2-4 value spark splits; sick errors dedupes unique
   errors + shows a per-error-count sparkline. Every
   count/breakdown in stats --family now has a shape.
+- [Devin] veldt check --watch (HEAD post-ac9686e): re-lints
+  on file mtime change (2s poll) — the file-level
+  equivalent of stats/garden/lineage --watch. check is
+  now run/print closures + a watch loop.
