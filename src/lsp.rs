@@ -69,7 +69,8 @@ pub fn run_lsp() {
                             "legend": {"tokenTypes": ["keyword","function","variable","string","number","comment","property","operator"], "tokenModifiers": []},
                             "full": true,
                         },
-                        "completionProvider": {"triggerCharacters": [".", ":"]}
+                        "completionProvider": {"triggerCharacters": [".", ":"]},
+                        "codeActionProvider": true
                     },
                     "serverInfo": {"name": "veldt-lsp", "version": env!("CARGO_PKG_VERSION")}
                 })),
@@ -87,6 +88,7 @@ pub fn run_lsp() {
                 "textDocument/codeLens" => code_lens(params, &docs),
                 "textDocument/semanticTokens/full" => semantic_tokens(params, &docs),
                 "textDocument/foldingRange" => folding_range(params, &docs),
+                "textDocument/codeAction" => code_action(params, &docs),
                 _ => None,
             };
 
@@ -624,4 +626,35 @@ fn completion(params: &Value, docs: &HashMap<String, Doc>) -> Option<Value> {
         }
     }
     Some(json!({"isIncomplete": false, "items": items}))
+}
+
+/// "veldt: fix dead code" — offers a whole-document WorkspaceEdit
+/// when the mechanical repair passes would change anything.
+fn code_action(params: &Value, docs: &HashMap<String, Doc>) -> Option<Value> {
+    let doc = doc_of(params, docs)?;
+    let mut lx = crate::lexer::Lexer::new(&doc.text);
+    let toks = lx.tokenize().ok()?;
+    let mut p = crate::parser::Parser::new_with_lines(toks, lx.token_lines.clone());
+    let mut stmts = p.parse_program().ok()?;
+    if !crate::health::HealthChecker::repair_program(&mut stmts) {
+        return Some(json!([]));
+    }
+    let new_text = crate::fmt::format_program(&stmts);
+    let end_line = doc.text.lines().count() as u32;
+    let uri = params["textDocument"]["uri"].as_str()?;
+    Some(json!([{
+        "title": "veldt: fix dead code",
+        "kind": "quickfix",
+        "edit": {
+            "changes": {
+                uri: [{
+                    "range": {
+                        "start": {"line": 0, "character": 0},
+                        "end": {"line": end_line, "character": 0}
+                    },
+                    "newText": new_text
+                }]
+            }
+        }
+    }]))
 }
