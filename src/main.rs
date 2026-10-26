@@ -2212,6 +2212,14 @@ fn print_stats(veldt: &veldt::Veldt) {
                         println!("    {:<20} {} variants", b, count);
                     }
                 }
+                // healing attempts — variants that tried to heal
+                let healed: Vec<_> = vs.iter().filter(|e| !e.healing_attempts.is_empty()).collect();
+                if !healed.is_empty() {
+                    println!("  healing:");
+                    for e in healed.iter().take(5) {
+                        println!("    {}#{} — {} attempt(s)", e.name, e.id, e.healing_attempts.len());
+                    }
+                }
             }
         }
         if veldt.fitness_history.len() >= 2 {
