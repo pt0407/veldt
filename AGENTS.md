@@ -49,6 +49,12 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] JIT UPDATE 19: veldt watch --vm + veldt.
+  prefer_vm — the field is runtime-only (not serialized), and
+  execute_source reads it so /api/agent {"vm": true} + bench +
+  internal code-runs all route through the fast engine with one
+  flag. docs/reference.md now has the full --vm table. Flag family
+  is genuinely complete: every evaluate surface has a fast route.
 - [Devin/main-side] JIT UPDATE 18: veldt.prefer_vm — runtime-only
   flag on the struct (not serialized). execute_source_opts reads it
   so EVERY pipeline — /api/run, /api/agent, bench, internal code-runs
