@@ -22,6 +22,11 @@ pub enum Value {
     Null,
 }
 
+/// Read the char tile at (x, y) from a canvas's cells list.
+fn r_tile(rows: &im::Vector<Value>, x: usize, y: usize) -> Option<Value> {
+    rows.get(y).and_then(|r| if let Value::List(r) = r { r.get(x).cloned() } else { None })
+}
+
 /// Extract a numeric arg (Int or Float) as f64 — used by game-math builtins.
 fn num_at(args: &[Value], i: usize) -> Result<f64, String> {
     match args.get(i) {
@@ -2820,6 +2825,273 @@ impl Interpreter {
                 let mut d2 = d.clone();
                 d2.insert("cells".to_string(), Value::List(rows2));
                 Ok(Some(Value::Dict(d2)))
+            }
+            "voronoi" => {
+                // voronoi(c, [[x, y, ch], ...]) — nearest-site partition:
+                // every cell gets the ch of its closest seed point.
+                let (d, seeds) = match (args.get(0), args.get(1)) {
+                    (Some(Value::Dict(d)), Some(Value::List(s))) => (d.clone(), s.clone()),
+                    _ => return Err("voronoi(c, [[x, y, ch], ...]) expects dict + seed list".into()),
+                };
+                let Some(Value::List(rows)) = d.get("cells") else { return Err("canvas: no cells".into()) };
+                let (w, h) = (d.get("w").and_then(|v| if let Value::Int(w) = v { Some(*w as usize) } else { None }),
+                              d.get("h").and_then(|v| if let Value::Int(h) = v { Some(*h as usize) } else { None }));
+                let (Some(w), Some(h)) = (w, h) else { return Err("canvas: missing w/h".into()) };
+                let seed_pts: Vec<(f64, f64, std::sync::Arc<str>)> = seeds.iter().filter_map(|s| {
+                    if let Value::List(p) = s {
+                        if p.len() == 3 {
+                            if let (Value::Int(x), Value::Int(y), Value::Str(ch)) = (&p[0], &p[1], &p[2]) {
+                                return Some((*x as f64, *y as f64, ch.clone()));
+                            }
+                        }
+                    }
+                    None
+                }).collect();
+                let mut rows2 = rows.clone();
+                for yy in 0..h.min(rows2.len()) {
+                    if let Value::List(r) = &rows2[yy] {
+                        let mut nr = r.clone();
+                        for xx in 0..w.min(nr.len()) {
+                            let (px, py) = (xx as f64, yy as f64);
+                            if let Some((_, _, ch)) = seed_pts.iter().min_by(|a, b| {
+                                let da = (a.0 - px).powi(2) + (a.1 - py).powi(2);
+                                let db = (b.0 - px).powi(2) + (b.1 - py).powi(2);
+                                da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+                            }) {
+                                nr[xx] = Value::Str(ch.clone());
+                            }
+                        }
+                        rows2[yy] = Value::List(nr);
+                    }
+                }
+                let mut d2 = d.clone();
+                d2.insert("cells".to_string(), Value::List(rows2));
+                Ok(Some(Value::Dict(d2)))
+            }
+            "delaunay" => {
+                // delaunay([[x, y], ...]) — Bowyer-Watson triangulation.
+                // Returns [[p0, p1, p2], ...] triangles.
+                let Value::List(pts) = args.get(0).cloned().unwrap_or(Value::Null) else {
+                    return Err("delaunay([[x,y],...]) expects a point list".into())
+                };
+                let f_of = |v: &Value| match v { Value::Int(i) => *i as f64, Value::Float(f) => *f, _ => 0.0 };
+                let mut points: Vec<(f64, f64)> = pts.iter().filter_map(|v| {
+                    if let Value::List(p) = v {
+                        if p.len() == 2 { return Some((f_of(&p[0]), f_of(&p[1]))); }
+                    }
+                    None
+                }).collect();
+                if points.len() < 3 { return Ok(Some(Value::List(im::vector![]))); }
+                // super-triangle covering all points
+                let (mut min_x, mut min_y, mut max_x, mut max_y) = (f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+                for &(x, y) in &points {
+                    min_x = min_x.min(x); min_y = min_y.min(y);
+                    max_x = max_x.max(x); max_y = max_y.max(y);
+                }
+                let span = (max_x - min_x).max(max_y - min_y).max(1.0);
+                let (cx, cy) = ((min_x + max_x) / 2.0, (min_y + max_y) / 2.0);
+                let super_tri = [
+                    (cx - 20.0 * span, cy - span),
+                    (cx, cy + 20.0 * span),
+                    (cx + 20.0 * span, cy - span),
+                ];
+                points.extend_from_slice(&super_tri);
+                let n = points.len();
+                let mut tris: Vec<(usize, usize, usize)> = vec![(n - 3, n - 2, n - 1)];
+                let circum = |a: (f64, f64), b: (f64, f64), c: (f64, f64)| -> Option<(f64, f64, f64)> {
+                    let d = 2.0 * (a.0 * (b.1 - c.1) + b.0 * (c.1 - a.1) + c.0 * (a.1 - b.1));
+                    if d.abs() < 1e-10 { return None; }
+                    let (a2, b2, c2) = (a.0 * a.0 + a.1 * a.1, b.0 * b.0 + b.1 * b.1, c.0 * c.0 + c.1 * c.1);
+                    let ux = (a2 * (b.1 - c.1) + b2 * (c.1 - a.1) + c2 * (a.1 - b.1)) / d;
+                    let uy = (a2 * (c.0 - b.0) + b2 * (a.0 - c.0) + c2 * (b.0 - a.0)) / d;
+                    let r2 = (ux - a.0).powi(2) + (uy - a.1).powi(2);
+                    Some((ux, uy, r2))
+                };
+                for i in 0..(n - 3) {
+                    let pt = points[i];
+                    let mut bad: Vec<bool> = tris.iter().map(|&(a, b, c)| {
+                        circum(points[a], points[b], points[c])
+                            .map(|(ux, uy, r2)| (pt.0 - ux).powi(2) + (pt.1 - uy).powi(2) < r2)
+                            .unwrap_or(false)
+                    }).collect();
+                    let mut edges: std::collections::HashMap<(usize, usize), usize> = std::collections::HashMap::new();
+                    for (ti, &(a, b, c)) in tris.iter().enumerate() {
+                        if !bad[ti] { continue; }
+                        for &(e0, e1) in &[(a, b), (b, c), (c, a)] {
+                            let key = if e0 < e1 { (e0, e1) } else { (e1, e0) };
+                            *edges.entry(key).or_default() += 1;
+                        }
+                    }
+                    let boundary: Vec<(usize, usize)> = edges.into_iter()
+                        .filter(|(_, cnt)| *cnt == 1)
+                        .map(|(e, _)| e).collect();
+                    let mut ti = 0;
+                    tris.retain(|_| { let keep = !bad[ti]; ti += 1; keep });
+                    for (a, b) in boundary {
+                        tris.push((a, b, i));
+                    }
+                }
+                // remove triangles touching the super-triangle
+                tris.retain(|&(a, b, c)| a < n - 3 && b < n - 3 && c < n - 3);
+                let out: Vec<Value> = tris.into_iter().map(|(a, b, c)|
+                    Value::List(im::vector![
+                        Value::List(im::vector![Value::Float(points[a].0), Value::Float(points[a].1)]),
+                        Value::List(im::vector![Value::Float(points[b].0), Value::Float(points[b].1)]),
+                        Value::List(im::vector![Value::Float(points[c].0), Value::Float(points[c].1)]),
+                    ])
+                ).collect();
+                Ok(Some(Value::List(out.into_iter().collect())))
+            }
+            "wfc" => {
+                // wfc(sample_canvas, w, h) — wave-function collapse lite:
+                // learn 4-dir adjacency rules from a sample, generate a new
+                // w×h canvas by lowest-entropy collapse.
+                let (sample, w, h) = match (args.get(0), args.get(1), args.get(2)) {
+                    (Some(Value::Dict(d)), Some(Value::Int(w)), Some(Value::Int(h)))
+                        => (d.clone(), *w as usize, *h as usize),
+                    _ => return Err("wfc(sample, w, h) expects a canvas + 2 ints".into()),
+                };
+                let Some(Value::List(srows)) = sample.get("cells") else { return Err("wfc: sample needs cells".into()) };
+                let (sw, sh) = (srows.get(0).and_then(|r| if let Value::List(r) = r { Some(r.len()) } else { None }).unwrap_or(0), srows.len());
+                // learn adjacency: allowed[dir][tile] -> set of allowed neighbors
+                let mut allowed: std::collections::HashMap<(usize, String), std::collections::HashSet<String>> =
+                    std::collections::HashMap::new();
+                for sy in 0..sh {
+                    for sx in 0..sw {
+                        if let (Value::List(r), Some(Value::Str(tile))) = (&srows[sy], r_tile(&srows, sx, sy)) {
+                            let tile = tile.to_string();
+                            for (dir, (dx, dy)) in [(0usize, (0i64, -1i64)), (1, (0, 1)), (2, (-1, 0)), (3, (1, 0))] {
+                                let (nx, ny) = (sx as i64 + dx, sy as i64 + dy);
+                                if nx < 0 || ny < 0 || nx >= sw as i64 || ny >= sh as i64 { continue; }
+                                if let Some(Value::Str(n_tile)) = r_tile(&srows, nx as usize, ny as usize) {
+                                    allowed.entry((dir, tile.clone()))
+                                        .or_default()
+                                        .insert(n_tile.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+                // wave[x][y] = set of possible tiles
+                let all_tiles: Vec<String> = allowed.values().flatten().cloned()
+                    .chain(allowed.keys().map(|(_, t)| t.clone()))
+                    .collect::<std::collections::HashSet<_>>().into_iter().collect();
+                if all_tiles.is_empty() { return Err("wfc: no tiles learned".into()) }
+                let mut wave: Vec<Vec<std::collections::HashSet<String>>> =
+                    vec![vec![all_tiles.iter().cloned().collect(); w]; h];
+                let mut done: Vec<Vec<bool>> = vec![vec![false; w]; h];
+                let mut rng = self.rng_state;
+                let mut next = || {
+                    rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17;
+                    (rng % 1_000_000) as f64 / 1_000_000.0
+                };
+                for _ in 0..w * h {
+                    // pick lowest-entropy un-done cell
+                    let mut best: Option<(usize, usize, usize)> = None;
+                    for y in 0..h { for x in 0..w {
+                        if !done[y][x] && wave[y][x].len() > 0 {
+                            let e = wave[y][x].len();
+                            if best.map(|b| e < b.2).unwrap_or(true) { best = Some((x, y, e)); }
+                        }
+                    }}
+                    let Some((cx, cy, _)) = best else { break };
+                    // collapse to a random option
+                    let opts: Vec<String> = wave[cy][cx].iter().cloned().collect();
+                    let pick = opts[(next() * opts.len() as f64) as usize].clone();
+                    wave[cy][cx] = [pick.clone()].into_iter().collect();
+                    done[cy][cx] = true;
+                    // propagate: neighbors must be in allowed[dir][pick]
+                    for (dir, (dx, dy)) in [(0usize, (0i64, -1i64)), (1, (0, 1)), (2, (-1, 0)), (3, (1, 0))] {
+                        let (nx, ny) = (cx as i64 + dx, cy as i64 + dy);
+                        if nx < 0 || ny < 0 || nx >= w as i64 || ny >= h as i64 { continue; }
+                        let (nx, ny) = (nx as usize, ny as usize);
+                        if let Some(allowed_set) = allowed.get(&(dir, pick.clone())) {
+                            wave[ny][nx].retain(|t| allowed_set.contains(t));
+                        }
+                    }
+                }
+                let cells: im::Vector<Value> = wave.iter().map(|row|
+                    Value::List(row.iter().map(|s| {
+                        let first = s.iter().next().cloned().unwrap_or_else(|| " ".to_string());
+                        Value::Str(first.into())
+                    }).collect())
+                ).collect();
+                self.rng_state = rng;
+                let mut d = im::HashMap::new();
+                d.insert("w".to_string(), Value::Int(w as i64));
+                d.insert("h".to_string(), Value::Int(h as i64));
+                d.insert("cells".to_string(), Value::List(cells));
+                Ok(Some(Value::Dict(d)))
+            }
+            // === game state: Value-typed 2D grid ===
+            "grid_new" => {
+                let (w, h) = match (args.get(0), args.get(1)) {
+                    (Some(Value::Int(w)), Some(Value::Int(h))) => (*w as usize, *h as usize),
+                    _ => return Err("grid_new(w, h) expects 2 ints".into()),
+                };
+                let row: im::Vector<Value> = (0..w).map(|_| Value::Null).collect();
+                let cells: im::Vector<Value> = (0..h).map(|_| Value::List(row.clone())).collect();
+                let mut d = im::HashMap::new();
+                d.insert("w".to_string(), Value::Int(w as i64));
+                d.insert("h".to_string(), Value::Int(h as i64));
+                d.insert("cells".to_string(), Value::List(cells));
+                Ok(Some(Value::Dict(d)))
+            }
+            "grid_get" => {
+                let (d, x, y) = match (args.get(0), args.get(1), args.get(2)) {
+                    (Some(Value::Dict(d)), Some(Value::Int(x)), Some(Value::Int(y)))
+                        => (d, *x as usize, *y as usize),
+                    _ => return Err("grid_get(g, x, y) expects dict + 2 ints".into()),
+                };
+                let Some(Value::List(rows)) = d.get("cells") else { return Err("grid: no cells".into()) };
+                match rows.get(y).and_then(|r| if let Value::List(r) = r { r.get(x) } else { None }) {
+                    Some(v) => Ok(Some(v.clone())),
+                    None => Ok(Some(Value::Null)),
+                }
+            }
+            "grid_set" => {
+                let (d, x, y, v) = match (args.get(0), args.get(1), args.get(2), args.get(3)) {
+                    (Some(Value::Dict(d)), Some(Value::Int(x)), Some(Value::Int(y)), Some(v))
+                        => (d.clone(), *x as usize, *y as usize, v.clone()),
+                    _ => return Err("grid_set(g, x, y, v) expects dict + 2 ints + value".into()),
+                };
+                let Some(Value::List(rows)) = d.get("cells") else { return Err("grid: no cells".into()) };
+                if y >= rows.len() { return Ok(Some(Value::Dict(d))); }
+                let mut rows2 = rows.clone();
+                if let Value::List(r) = &rows[y] {
+                    let mut nr = r.clone();
+                    if x < nr.len() { nr[x] = v; }
+                    rows2[y] = Value::List(nr);
+                }
+                let mut d2 = d.clone();
+                d2.insert("cells".to_string(), Value::List(rows2));
+                Ok(Some(Value::Dict(d2)))
+            }
+            "grid_neighbors" => {
+                // grid_neighbors(g, x, y, diag?) — in-bounds cells as [x, y, value]
+                let (d, x0, y0, diag) = match (args.get(0), args.get(1), args.get(2), args.get(3)) {
+                    (Some(Value::Dict(d)), Some(Value::Int(x)), Some(Value::Int(y)), dg)
+                        => (d, *x, *y, matches!(dg, Some(Value::Bool(true)))),
+                    _ => return Err("grid_neighbors(g, x, y, diag?) expects dict + 2 ints + bool".into()),
+                };
+                let (w, h) = (d.get("w").and_then(|v| if let Value::Int(w) = v { Some(*w) } else { None }),
+                              d.get("h").and_then(|v| if let Value::Int(h) = v { Some(*h) } else { None }));
+                let (Some(w), Some(h)) = (w, h) else { return Err("grid: missing w/h".into()) };
+                let Some(Value::List(rows)) = d.get("cells") else { return Err("grid: no cells".into()) };
+                let dirs: &[(i64, i64)] = if diag {
+                    &[(0,-1),(0,1),(-1,0),(1,0),(-1,-1),(1,-1),(-1,1),(1,1)]
+                } else { &[(0,-1),(0,1),(-1,0),(1,0)] };
+                let out: Vec<Value> = dirs.iter()
+                    .map(|(dx, dy)| (x0 + dx, y0 + dy))
+                    .filter(|(x, y)| *x >= 0 && *y >= 0 && *x < w && *y < h)
+                    .map(|(x, y)| {
+                        let v = rows.get(y as usize)
+                            .and_then(|r| if let Value::List(r) = r { r.get(x as usize) } else { None })
+                            .cloned().unwrap_or(Value::Null);
+                        Value::List(im::vector![Value::Int(x), Value::Int(y), v])
+                    })
+                    .collect();
+                Ok(Some(Value::List(out.into_iter().collect())))
             }
             "dist_stats" => {
                 // dist_stats(fn, trials) — mean/stddev/min/max over n samples
