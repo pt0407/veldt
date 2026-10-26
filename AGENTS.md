@@ -1173,3 +1173,5 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   the strict linter on every buffer — IDE squiggles for all
   ~91 checks (severity 2, anchored at fn-def lines). The
   Gardener's static analysis is live in the editor.
+- [Devin] veldt check - : stdin lint — editors/agents pipe
+  unsaved buffers or generated source, no temp file needed.
