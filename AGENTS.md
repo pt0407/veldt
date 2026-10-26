@@ -1075,3 +1075,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   strict checks. New: match on a transitive-container var —
   the scrutinee is a list/struct literal through an alias
   chain.
+- [Devin] Lint batch 51 (HEAD post-let-trans-const): ~82
+  strict checks. New: let a = b where b is bound to a
+  literal through c — the let propagates a constant
+  through two hops.
