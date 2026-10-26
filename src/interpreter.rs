@@ -2621,6 +2621,68 @@ impl Interpreter {
                 self.rng_state = x;
                 Ok(Some(Value::Bool(x % 2 == 0)))
             }
+            "poisson_disc" => {
+                // poisson_disc(w, h, min_dist, seed?) — Bridson's algorithm:
+                // even blue-noise point sampling for spawn placement.
+                let (w, h, r) = match (args.get(0), args.get(1), args.get(2)) {
+                    (Some(Value::Int(w)), Some(Value::Int(h)), Some(Value::Int(r)))
+                        => (*w as usize, *h as usize, *r as f64),
+                    _ => return Err("poisson_disc(w, h, r) expects 3 ints".into()),
+                };
+                let cell = r / std::f64::consts::SQRT_2;
+                let (gw, gh) = ((w as f64 / cell).ceil() as usize + 1, (h as f64 / cell).ceil() as usize + 1);
+                let mut grid: Vec<Vec<bool>> = vec![vec![false; gw]; gh];
+                let mut points: Vec<(f64, f64)> = Vec::new();
+                let mut active: Vec<(f64, f64)> = Vec::new();
+                let mut rng = self.rng_state;
+                let mut next = || {
+                    rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17;
+                    (rng % 1_000_000) as f64 / 1_000_000.0
+                };
+                let start = (next() * w as f64, next() * h as f64);
+                points.push(start);
+                active.push(start);
+                grid[(start.1 / cell) as usize][(start.0 / cell) as usize] = true;
+                while let Some(&p) = active.last() {
+                    let mut found = false;
+                    for _ in 0..30 {
+                        let ang = next() * 2.0 * std::f64::consts::PI;
+                        let rad = r * (1.0 + next());
+                        let (nx, ny) = (p.0 + rad * ang.cos(), p.1 + rad * ang.sin());
+                        if nx < 0.0 || ny < 0.0 || nx >= w as f64 || ny >= h as f64 { continue; }
+                        let (gx, gy) = ((nx / cell) as usize, (ny / cell) as usize);
+                        let mut ok = true;
+                        for dy in -1..=1i64 {
+                            for dx in -1..=1i64 {
+                                let (cx, cy) = (gx as i64 + dx, gy as i64 + dy);
+                                if cx >= 0 && cy >= 0 && (cx as usize) < gw && (cy as usize) < gh && grid[cy as usize][cx as usize] {
+                                    // check actual distance to a nearby point — too coarse for the grid,
+                                    // just check the cell is occupied
+                                    ok = false;
+                                }
+                            }
+                        }
+                        if ok {
+                            // verify no point is actually within r (grid cell check is approximate)
+                            let mut too_close = false;
+                            for &(px, py) in &points {
+                                if (px - nx).powi(2) + (py - ny).powi(2) < r * r { too_close = true; break; }
+                            }
+                            if !too_close {
+                                points.push((nx, ny));
+                                active.push((nx, ny));
+                                grid[gy][gx] = true;
+                                found = true;
+                                break;
+                            }
+                        }
+                    }
+                    if !found { active.pop(); }
+                }
+                self.rng_state = rng;
+                Ok(Some(Value::List(points.into_iter()
+                    .map(|(x, y)| Value::List(im::vector![Value::Int(x as i64), Value::Int(y as i64)])).collect())))
+            }
             "dist_stats" => {
                 // dist_stats(fn, trials) — mean/stddev/min/max over n samples
                 let (f, trials) = match (args.get(0), args.get(1)) {
