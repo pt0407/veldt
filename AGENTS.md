@@ -623,3 +623,8 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   tautology (x>0 || x<0 always-true, x>0 && x<0 always-false —
   taut_cmp walks the condition in if + while arms). ~27 lint
   checks; every numeric surface visualizes shape + delta.
+- [Devin] Probe pass-rate spark (HEAD post-badbcf0): stats
+  --family's probe pass rate shows a per-probe shape spark —
+  which probes are hard vs easy at a glance, not just the
+  overall 40/40 count. Every distribution/rate/count surface
+  in veldt now visualizes its shape.
