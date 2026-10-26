@@ -1186,3 +1186,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   repair+healer-merge on sick variants (previously only
   triggered inside the grow flow). First run healed 4 sick
   play_game variants.
+- [Devin] repair_dead_lets: second mechanical pass — drops
+  `let x = <pure>` never used later (call-free RHS only, any
+  Assign/For/destructure/mention blocks removal). Chained
+  into heal() + check --garden --fix. Unit-tested.
