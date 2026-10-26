@@ -583,3 +583,10 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   distribution sparks (sorted values → the shape of the
   spread). Every numeric distribution in the dashboard now
   shows its shape at a glance, not just min/avg/peak.
+- [Devin] Distribution-spark coverage COMPLETE (HEAD post-c85aab6):
+  every numeric distribution in the stats --family dashboard now
+  shows its shape via spark() — fitness/size/age/usage/efficiency/
+  trial_score/lifespan/args/born/last_used/parents/niches/fit_rate/
+  usage_rate/size_rate + birth/death/usage timelines. Min/avg/peak
+  alone used to hide bimodality and outliers; the spark makes the
+  shape visible at a glance.
