@@ -456,6 +456,7 @@ fn help_intent() -> AgentResponse {
          • \"what's stale\" · \"forgotten\" — dormant variants\n\
          • \"dead code\" — dead-code-removal variants\n\
          • \"who's winning\" · \"best fib\" — fitness leaderboard\n\
+         • \"what's proven\" · \"production-ready\" — deployment subset\n\
          • \"surprise me\" — plant a random new species\n\
          • \"run this\" · \"evolve 5\" · \"tend\" · \"prune x#N\" · \"what's alive?\"\n\
          Known species: fib, factorial, prime, count primes, nth prime, gcd, lcm, power, sort, quicksort, reverse, palindrome, sum, mean, max, min, fizzbuzz, collatz, evens, doubles, vowels, digits, leapyear, clamp, words, dedupe, anagram, sqrt, parallel."
