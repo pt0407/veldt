@@ -337,7 +337,35 @@ fn main() {
                 eprintln!("Error loading veldt: {}", e);
                 process::exit(1);
             }
-            print_stats(&veldt);
+            if args.iter().any(|a| a == "--json") {
+                let mut total = 0usize;
+                let (mut healthy, mut sick, mut dying) = (0usize, 0usize, 0usize);
+                let (mut seed, mut estab, mut canon) = (0usize, 0usize, 0usize);
+                for vs in veldt.functions.values() {
+                    for e in vs {
+                        total += 1;
+                        match e.health {
+                            Health::Healthy => healthy += 1,
+                            Health::Sick(_) => sick += 1,
+                            Health::Dying => dying += 1,
+                        }
+                        match e.trust {
+                            veldt::Trust::Seedling => seed += 1,
+                            veldt::Trust::Established => estab += 1,
+                            veldt::Trust::Canonical => canon += 1,
+                        }
+                    }
+                }
+                println!("{}", serde_json::json!({
+                    "lineages": veldt.functions.len(), "variants": total,
+                    "healthy": healthy, "sick": sick, "dying": dying,
+                    "seedling": seed, "established": estab, "canonical": canon,
+                    "probes": veldt.probes.values().map(|v| v.len()).sum::<usize>(),
+                    "deaths": veldt.obituaries.len(), "runs": veldt.run_count,
+                }));
+            } else {
+                print_stats(&veldt);
+            }
         }
         "bench" => {
             let mut veldt = veldt::Veldt::new();
@@ -571,7 +599,13 @@ fn print_usage() {
   veldt export [file]          Export the garden to a JSON file
   veldt import <file>          Import a garden JSON file
   veldt run --trace <file>     Trace every executed statement
-  veldt run --evolve <file>    Run 1 evolve cycle after the program");
+  veldt run --evolve <file>    Run 1 evolve cycle after the program
+  veldt run --sandbox <file>   Run with all side-effect caps denied
+  veldt fuzz <name>|--all      Boundary-corpus sweep; divergences become probes
+  veldt absorb                 Convert live call traces into probes
+  veldt tournament <url>       Pull pool, trial merged families, push winners
+  veldt diff <a#n> <b#n>       Show two variants' bodies side by side
+  veldt stats                  Garden census + trust-ladder distribution");
     println!("  veldt visual                 Open visual ecosystem viewer in browser");
 }
 
@@ -897,10 +931,19 @@ fn start_repl() {
                     }
                     ":garden" => { let _ = veldt.load(); veldt.print_lineage(
                         veldt.functions.keys().next().map(|s| s.as_str()).unwrap_or("(none)")); }
+                    ":stats" => { let _ = veldt.load(); print_stats(&veldt); }
+                    ":absorb" => { let _ = veldt.load();
+                        veldt.merge_traces(&interp.traces);
+                        absorb_traces(None); }
+                    _ if trimmed.starts_with(":fuzz ") => {
+                        let _ = veldt.load(); fuzz_family(trimmed[6..].trim());
+                    }
                     ":help" | _ => {
                         println!(":help  this help"); println!(":quit  exit");
                         println!(":load <file>  run a file in this session");
-                        println!(":garden  show first lineage"); println!("exprs print their value");
+                        println!(":garden  show first lineage · :stats census");
+                        println!(":fuzz <name> boundary sweep · :absorb traces->probes");
+                        println!("exprs print their value");
                     }
                 }
                 continue;
