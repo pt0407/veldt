@@ -3312,9 +3312,13 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
                     && !b.iter().any(|s| stmt_mentions(s, evar)) {
                     out.push(format!("catch variable {} never used — prefix with _", evar));
                 }
+                if b.is_empty() { out.push("empty catch — errors swallowed silently".into()); }
                 lint_block(a, out); lint_block(b, out);
             }
-            Stmt::Match(_, arms, els) => {
+            Stmt::Match(scrut, arms, els) => {
+                if matches!(scrut, Expr::Int(_) | Expr::Str(_) | Expr::Bool(_) | Expr::Null) {
+                    out.push("match on a literal — deterministic, use if or remove".into());
+                }
                 if arms.is_empty() { out.push("match with no arms — dead statement".into()); }
                 // _ arm before a non-_ arm — the later arm is unreachable
                 let wild = arms.iter().position(|(p, _)|
