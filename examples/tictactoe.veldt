@@ -1,0 +1,84 @@
+# tictactoe.veldt — std:balance end-to-end:
+# a heuristic AI (win-now / block / random) vs pure random over 100 games.
+
+grow fn winner(b: list) test winner([0,0,0,0,0,0,0,0,0]) == null {
+    let lines = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]]
+    let i = 0
+    while i < lines.len() {
+        let l = lines[i]
+        let a = b[l[0]]
+        if a != 0 and a == b[l[1]] and a == b[l[2]] { return a }
+        i = i + 1
+    }
+    return null
+}
+
+# find a winning/blocking move for `me` (or null)
+grow fn find_move(b: list, me: int) test find_move([0,0,0,0,0,0,0,0,0], 1) == null {
+    let lines = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]]
+    let other = 3 - me
+    let i = 0
+    while i < lines.len() {
+        let l = lines[i]
+        let a = b[l[0]]
+        let c = b[l[1]]
+        let d = b[l[2]]
+        # two of mine + one empty = winning move
+        if a == me and c == me and d == 0 { return l[2] }
+        if a == me and d == me and c == 0 { return l[1] }
+        if c == me and d == me and a == 0 { return l[0] }
+        i = i + 1
+    }
+    # block the opponent
+    i = 0
+    while i < lines.len() {
+        let l = lines[i]
+        let a = b[l[0]]
+        let c = b[l[1]]
+        let d = b[l[2]]
+        if a == other and c == other and d == 0 { return l[2] }
+        if a == other and d == other and c == 0 { return l[1] }
+        if c == other and d == other and a == 0 { return l[0] }
+        i = i + 1
+    }
+    return null
+}
+
+grow fn heuristic_move(b: list, me: int) test heuristic_move([0,0,0,0,0,0,0,0,0], 1) >= 0 {
+    let m = find_move(b, me)
+    if m != null { return m }
+    let empties = []
+    let i = 0
+    while i < 9 { if b[i] == 0 { empties.append(i) } i = i + 1 }
+    if empties.is_empty() { return -1 }
+    return empties[rand_range(0, empties.len() - 1)]
+}
+
+grow fn play_game(_: int) test play_game(0) >= 0 {
+    let b = [0,0,0,0,0,0,0,0,0]
+    let turn = 1
+    let moves = 0
+    while winner(b) == null and moves < 9 {
+        let i = -1
+        if turn == 1 {
+            i = heuristic_move(b, 1)
+        } else {
+            let empties = []
+            let j = 0
+            while j < 9 { if b[j] == 0 { empties.append(j) } j = j + 1 }
+            i = empties[rand_range(0, empties.len() - 1)]
+        }
+        if i < 0 { moves = 9 }
+        else {
+            b[i] = turn
+            turn = 3 - turn
+            moves = moves + 1
+        }
+    }
+    let w = winner(b)
+    if w == null { return 0 }
+    return w
+}
+
+let wins = balance_test(fn() { return play_game(0) }, 100, fn(w) { return w == 1 })
+print("heuristic(X) vs random(O): X win-rate = " + wins)
