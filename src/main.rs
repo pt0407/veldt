@@ -566,6 +566,25 @@ fn main() {
                 }
                 println!("=== The Veldt (fitness >= {}) ===", min);
                 filtered.print_garden(sick_only, healthy_only);
+            } else if let Some(spec) = args.iter().position(|a| a == "--min_fitness_fam")
+                .and_then(|p| args.get(p + 1)).cloned() {
+                // --min_fitness_fam <name:min> — variants in this family with fitness >= min
+                let (fam, min_f) = spec.split_once(':')
+                    .and_then(|(n, s)| s.parse::<f64>().ok().map(|m| (n.to_string(), m)))
+                    .unwrap_or((spec.clone(), 0.0));
+                let mut filtered = veldt::Veldt::new();
+                filtered.probes = veldt.probes.clone();
+                filtered.obituaries = veldt.obituaries.clone();
+                filtered.run_count = veldt.run_count;
+                filtered.garden_path = veldt.garden_path.clone();
+                if let Some(vs) = veldt.functions.get(&fam) {
+                    let keep: Vec<_> = vs.iter()
+                        .filter(|e| e.fitness >= min_f)
+                        .cloned().collect();
+                    if !keep.is_empty() { filtered.functions.insert(fam.clone(), keep); }
+                }
+                println!("=== The Veldt ({} fitness >= {}) ===", fam, min_f);
+                filtered.print_garden(sick_only, healthy_only);
             } else if let Some(spec) = args.iter().position(|a| a == "--no_calls_fam")
                 .and_then(|p| args.get(p + 1)).cloned() {
                 // --no_calls_fam <name:builtin> — variants in this family that DON'T call this builtin
