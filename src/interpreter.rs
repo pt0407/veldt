@@ -2443,6 +2443,90 @@ impl Interpreter {
                 Ok(Some(Value::List(hull.into_iter()
                     .map(|(x, y)| Value::List(im::vector![Value::Float(x), Value::Float(y)])).collect())))
             }
+            "fbm" => {
+                // fbm(x, y, octaves) — fractal Brownian motion: octaves of
+                // noise2, halving amplitude, doubling frequency. In [-1,1]-ish.
+                let (x, y, octaves) = (num_at(args, 0)?, num_at(args, 1)?,
+                    args.get(2).and_then(|v| if let Value::Int(i) = v { Some(*i as usize) } else { None }).unwrap_or(4));
+                let hash = |ix: i64, iy: i64| -> f64 {
+                    let mut n = ix.wrapping_mul(374761393).wrapping_add(iy.wrapping_mul(668265263));
+                    n = (n ^ (n >> 13)).wrapping_mul(1274126177);
+                    ((n ^ (n >> 16)) as u64 & 0xffffff) as f64 / 0xffffff as f64
+                };
+                let s = |t: f64| t * t * (3.0 - 2.0 * t);
+                let noise = |x: f64, y: f64| -> f64 {
+                    let (ix, iy) = (x.floor() as i64, y.floor() as i64);
+                    let (fx, fy) = (x - x.floor(), y - y.floor());
+                    let (a, b, c, d) = (hash(ix, iy), hash(ix + 1, iy), hash(ix, iy + 1), hash(ix + 1, iy + 1));
+                    a + (b - a) * s(fx) + (c - a) * s(fy) + (a - b - c + d) * s(fx) * s(fy)
+                };
+                let (mut total, mut amp, mut freq, mut max) = (0f64, 1f64, 1f64, 0f64);
+                for _ in 0..octaves {
+                    total += noise(x * freq, y * freq) * amp;
+                    max += amp;
+                    amp *= 0.5;
+                    freq *= 2.0;
+                }
+                Ok(Some(Value::Float(if max > 0.0 { total / max } else { 0.0 })))
+            }
+            "canvas_circle" => {
+                // canvas_circle(c, cx, cy, r, ch) — midpoint circle
+                let (d, cx, cy, r, ch) = match (args.get(0), args.get(1), args.get(2), args.get(3), args.get(4)) {
+                    (Some(Value::Dict(d)), Some(Value::Int(cx)), Some(Value::Int(cy)),
+                     Some(Value::Int(r)), Some(Value::Str(ch)))
+                        => (d.clone(), *cx, *cy, *r, ch.clone()),
+                    _ => return Err("canvas_circle(c, cx, cy, r, ch) expects dict + 3 ints + str".into()),
+                };
+                let Some(Value::List(rows)) = d.get("cells") else { return Err("canvas: no cells".into()) };
+                let mut rows2 = rows.clone();
+                let (w, h) = (rows.get(0).and_then(|r| if let Value::List(r) = r { Some(r.len()) } else { None }), rows.len());
+                let Some(w) = w else { return Err("canvas: missing w".into()) };
+                let (mut x, mut y, mut err) = (-r, 0i64, 2 - 2 * r);
+                loop {
+                    for (px, py) in [(cx + x, cy + y), (cx - y, cy - x), (cx - x, cy - y), (cx + y, cy + x),
+                                     (cx + x, cy - y), (cx - y, cy + x), (cx - x, cy + y), (cx + y, cy - x)] {
+                        if px >= 0 && py >= 0 && (px as usize) < w && (py as usize) < h {
+                            if let Value::List(r) = &rows2[py as usize] {
+                                let mut nr = r.clone();
+                                nr[px as usize] = Value::Str(ch.clone());
+                                rows2[py as usize] = Value::List(nr);
+                            }
+                        }
+                    }
+                    if x >= 0 { break; }
+                    let r_err = err;
+                    if r_err <= y { err += { y += 1; y * 2 + 1 }; }
+                    if r_err > x || err > y { err += { x += 1; x * 2 + 1 }; }
+                }
+                let mut d2 = d.clone();
+                d2.insert("cells".to_string(), Value::List(rows2));
+                Ok(Some(Value::Dict(d2)))
+            }
+            "canvas_rect" => {
+                // canvas_rect(c, x, y, w, h, ch, fill?) — rect outline or filled
+                let (d, x0, y0, w, h, ch, fill) = match (args.get(0), args.get(1), args.get(2), args.get(3), args.get(4), args.get(5), args.get(6)) {
+                    (Some(Value::Dict(d)), Some(Value::Int(x)), Some(Value::Int(y)),
+                     Some(Value::Int(w)), Some(Value::Int(h)), Some(Value::Str(ch)), f)
+                        => (d.clone(), *x as usize, *y as usize, *w as usize, *h as usize, ch.clone(),
+                            matches!(f, Some(Value::Bool(true)))),
+                    _ => return Err("canvas_rect(c, x, y, w, h, ch, fill?) expects dict + 4 ints + str + bool".into()),
+                };
+                let Some(Value::List(rows)) = d.get("cells") else { return Err("canvas: no cells".into()) };
+                let mut rows2 = rows.clone();
+                for yy in y0..(y0 + h).min(rows2.len()) {
+                    if let Value::List(r) = &rows2[yy] {
+                        let mut nr = r.clone();
+                        for xx in x0..(x0 + w).min(nr.len()) {
+                            let edge = xx == x0 || xx == x0 + w - 1 || yy == y0 || yy == y0 + h - 1;
+                            if fill || edge { nr[xx] = Value::Str(ch.clone()); }
+                        }
+                        rows2[yy] = Value::List(nr);
+                    }
+                }
+                let mut d2 = d.clone();
+                d2.insert("cells".to_string(), Value::List(rows2));
+                Ok(Some(Value::Dict(d2)))
+            }
             "dist_stats" => {
                 // dist_stats(fn, trials) — mean/stddev/min/max over n samples
                 let (f, trials) = match (args.get(0), args.get(1)) {
