@@ -1163,3 +1163,9 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   the shape score's 27 unreachable warnings carry. Runs before
   healer-merge in heal(), unit-tested. The diagnose->repair
   half of the lint loop: birth-gate + adopt-gate + heal-fix.
+- [Devin] check --garden --fix shipped + RAN: mechanical
+  dead-tail repair on every variant. Garden census dropped
+  372 -> 97 warnings (fib 246 -> 16, score 65 -> 0). All
+  repaired variants re-trial healthy. The lint loop is fully
+  closed: report (check --garden/stats --lint) -> gate
+  (evolve birth + adopt --lint) -> repair (--fix/heal).
