@@ -155,3 +155,33 @@ fn jit_loop_variant_matches_vm() {
     assert_eq!(get_i(&i, "rr"), get_vm(&v, "rr"),
         "iterative fib diverged: JIT'd loop body wrong");
 }
+
+/// Smoke coverage: every example in examples/ runs to completion
+/// under --vm (exit 0). Nondeterministic ones (rand/time) are
+/// checked for exit success, not output equality.
+#[test]
+fn vm_all_examples_run() {
+    let veldt = env!("CARGO_BIN_EXE_veldt");
+    let mut failures = Vec::new();
+    for entry in std::fs::read_dir("examples").unwrap() {
+        let p = entry.unwrap().path();
+        if p.extension().and_then(|e| e.to_str()) != Some("veldt") {
+            continue;
+        }
+        // skip examples that need stdin/args/serve-loop
+        let name = p.file_name().unwrap().to_str().unwrap();
+        if matches!(name, "web_server.veldt") { continue; }
+        let out = std::process::Command::new(veldt)
+            .args(["run", p.to_str().unwrap(), "--vm",
+                   "--steps", "500000000"])
+            .output().expect("spawn veldt --vm");
+        if !out.status.success() {
+            failures.push(format!(
+                "{}: {}", name,
+                String::from_utf8_lossy(&out.stderr)
+                    .lines().last().unwrap_or("?")));
+        }
+    }
+    assert!(failures.is_empty(),
+        "examples failing under --vm:\n{}", failures.join("\n"));
+}
