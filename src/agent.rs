@@ -246,7 +246,7 @@ pub fn respond(task: &str, editor_source: &str, veldt: &mut Veldt) -> AgentRespo
             return family_intent(&words, veldt);
         }
     }
-    if has(&["attention", "triage", "weakest", "worst", "risky", "riskiest", "what needs", "needs work", "struggling"]) {
+    if has(&["attention", "triage", "weakest", "worst", "what needs", "needs work", "struggling"]) {
         return triage_intent(veldt);
     }
     if has(&["compare", "diff", "difference between", "vs", "versus"]) {
@@ -324,6 +324,9 @@ pub fn respond(task: &str, editor_source: &str, veldt: &mut Veldt) -> AgentRespo
     }
     if has(&["proven", "production", "production-ready", "deployment", "stable", "safe to use"]) {
         return proven_intent(veldt);
+    }
+    if has(&["experimental", "untested", "unstable", "risky"]) {
+        return risky_intent(veldt);
     }
     if has(&["obituar", "why did", "why'd"]) || hasw(&["deaths", "died", "dead"]) {
         return obituary_intent(&words, veldt);
@@ -1431,6 +1434,30 @@ fn proven_intent(veldt: &Veldt) -> AgentResponse {
             _ => "",
         };
         text.push_str(&format!("  {}#{} — {:.2} {}\n", n, e.id, e.fitness, t));
+    }
+    plain(&text)
+}
+
+/// Risky — "experimental" / "untested" — sick/dying or seedling variants.
+fn risky_intent(veldt: &Veldt) -> AgentResponse {
+    use crate::veldt::Trust;
+    let mut rows: Vec<(&String, &FunctionEntry)> = veldt.functions.iter()
+        .flat_map(|(n, vs)| vs.iter().filter_map(move |e|
+            if !matches!(e.health, Health::Healthy)
+                || matches!(e.trust, Trust::Seedling) {
+                Some((n, e))
+            } else { None })).collect();
+    rows.sort_by(|a, b| a.1.fitness.partial_cmp(&b.1.fitness)
+        .unwrap_or(std::cmp::Ordering::Equal));
+    if rows.is_empty() {
+        return plain("Nothing risky — every variant is healthy + established.");
+    }
+    let total: usize = veldt.functions.values().map(|v| v.len()).sum();
+    let mut text = format!("Risky ({} of {} variants):\n", rows.len(), total);
+    for (n, e) in rows.iter().take(10) {
+        let tag = if matches!(e.trust, Trust::Seedling) { "seedling" }
+            else { "unhealthy" };
+        text.push_str(&format!("  {}#{} — {:.2} ({})\n", n, e.id, e.fitness, tag));
     }
     plain(&text)
 }
