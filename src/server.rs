@@ -51,6 +51,7 @@ pub async fn start_server(port: u16) {
         .route("/api/trend", get(trend))
         .route("/api/sources", get(sources))
         .route("/api/fitness", get(fitness))
+        .route("/api/health", get(health))
         .route("/api/run", post(run_program))
         .route("/api/evolve", post(evolve))
         .route("/api/clear", post(clear_veldt))
@@ -298,6 +299,24 @@ async fn fitness() -> Json<serde_json::Value> {
         .partial_cmp(&a["fitness"].as_f64().unwrap_or(0.0))
         .unwrap_or(std::cmp::Ordering::Equal));
     Json(serde_json::json!({"fitness": fit_data}))
+}
+
+async fn health() -> Json<serde_json::Value> {
+    let mut veldt = veldt::Veldt::new();
+    if veldt.load().is_err() {
+        return Json(serde_json::json!({"error": "garden load failed"}));
+    }
+    let mut healthy = 0usize; let mut sick = 0usize; let mut dying = 0usize;
+    for vs in veldt.functions.values() {
+        for e in vs {
+            match e.health {
+                crate::veldt::Health::Healthy => healthy += 1,
+                crate::veldt::Health::Sick(_) => sick += 1,
+                crate::veldt::Health::Dying => dying += 1,
+            }
+        }
+    }
+    Json(serde_json::json!({"healthy": healthy, "sick": sick, "dying": dying}))
 }
 
 #[derive(Deserialize)]
