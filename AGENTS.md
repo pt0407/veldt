@@ -551,3 +551,11 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   risky ("what's risky" → sick/dying OR seedling — the flip).
   risky/riskiest removed from triage's triggers so they route
   here. ~35 intents — the inspection surface is exhaustive.
+- [Devin] check --strict lint batch 2 + agent intents 6
+  (HEAD post-7c24f26): lint gained — identical if branches,
+  bool-comparison (x == true / x != false via bool_cmp walker),
+  let x = x self-assignment, empty match body. Agent gained
+  best ("who's winning" → peak-per-family leaderboard), proven
+  ("what's proven" → healthy + established/canonical), risky
+  ("what's risky" → sick/dying OR seedling — the flip of
+  proven). ~35 intents — the inspection surface is exhaustive.
