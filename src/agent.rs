@@ -247,6 +247,9 @@ pub fn respond(task: &str, editor_source: &str, veldt: &mut Veldt) -> AgentRespo
     if hasw(&["show", "explain", "source", "inspect"]) || has(&["what does", "look like"]) {
         return show_intent(&words, veldt);
     }
+    if hasw(&["why"]) && !has(&["obituar", "why did", "why'd"]) {
+        return why_intent(&words, veldt);
+    }
     if has(&["obituar", "why did", "why'd"]) || hasw(&["deaths", "died", "dead"]) {
         return obituary_intent(&words, veldt);
     }
@@ -788,6 +791,64 @@ fn test_intent(words: &[&str], veldt: &mut Veldt) -> AgentResponse {
         reply: format!("Trials done: {}/{} variants of {} are healthy.", healthy, events.len(), name),
         code: None, ran: false, output: None, success: None, events,
     }
+}
+
+/// "why is X sick" / "why does Y fail" — for a LIVE variant, show
+/// which probes it fails (expected vs actual output), which niches
+/// it owns, and whether it's being outcompeted.
+fn why_intent(words: &[&str], veldt: &mut Veldt) -> AgentResponse {
+    let Some((name, id_opt)) = words.iter().find_map(|w| {
+        let (n, i) = if w.contains('#') {
+            let mut it = w.splitn(2, '#');
+            (it.next()?.to_string(), it.next().and_then(|s| s.parse::<u32>().ok()))
+        } else { ((*w).to_string(), None) };
+        veldt.functions.get(n.as_str()).map(|_| (n, i))
+    }) else {
+        return plain("Why what? \"why score#3\" or \"why is pure sick\" — I'll show its failing probes.");
+    };
+    let vs = &veldt.functions[&name];
+    let e = match id_opt {
+        Some(id) => vs.iter().find(|v| v.id == id),
+        None => vs.iter().max_by(|a, b| a.fitness.partial_cmp(&b.fitness).unwrap_or(std::cmp::Ordering::Equal)),
+    };
+    let Some(e) = e else {
+        return plain(&format!("No variant {}#{}", name, id_opt.unwrap_or(0)));
+    };
+    let mut text = format!("{}#{} — fitness {:.2}  |  trust: {:?}  |  health: {:?}\n",
+        name, e.id, e.fitness, e.trust, e.health);
+    // which probes does it fail?
+    let probes = veldt.probes.get(&name).map(|p| p.as_slice()).unwrap_or(&[]);
+    let mut interp = crate::interpreter::Interpreter::new();
+    interp.caps = crate::interpreter::Caps::sandboxed();
+    veldt.load_into_interpreter(&mut interp);
+    let mut fails = Vec::new();
+    for p in probes {
+        let args: Vec<crate::interpreter::Value> = p.args.iter()
+            .filter_map(|a| serde_json::from_str(a).ok()).collect();
+        if args.len() != p.args.len() { continue; }
+        if let Ok(out) = interp.call_function(&name, Some(e.id), args) {
+            let got = serde_json::to_string(&out).unwrap_or_default();
+            if got != p.expected {
+                fails.push(format!("  probe {} — expected {}, got {}", p.niche, p.expected, got));
+            }
+        } else {
+            fails.push(format!("  probe {} — ERROR (crashes on this input)", p.niche));
+        }
+    }
+    if fails.is_empty() {
+        text.push_str("passes every probe — no failures on record\n");
+    } else {
+        text.push_str(&format!("{} failing probe(s):\n{}\n", fails.len(), fails.join("\n")));
+    }
+    // niche ownership — which signatures it doesn't win
+    if !e.niche_scores.is_empty() {
+        let weak: Vec<_> = e.niche_scores.iter().filter(|(_, s)| **s < 1.0).collect();
+        if !weak.is_empty() {
+            text.push_str(&format!("weak niches: {}\n",
+                weak.iter().map(|(n, s)| format!("{} {:.0}%", n, **s * 100.0)).collect::<Vec<_>>().join(", ")));
+        }
+    }
+    plain(&text)
 }
 
 fn obituary_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
