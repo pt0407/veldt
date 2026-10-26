@@ -249,6 +249,11 @@ pub fn respond(task: &str, editor_source: &str, veldt: &mut Veldt) -> AgentRespo
     if has(&["attention", "triage", "weakest", "worst", "risky", "riskiest", "what needs", "needs work", "struggling"]) {
         return triage_intent(veldt);
     }
+    if has(&["compare", "diff", "difference between", "vs", "versus"]) {
+        if words.iter().any(|w| w.contains('#')) {
+            return compare_intent(&words, veldt);
+        }
+    }
     if has(&["garden", "status", "alive", "what's growing", "what is growing", "what have you", "ecosystem"]) {
         return status_intent(veldt);
     }
@@ -664,6 +669,57 @@ fn triage_intent(veldt: &Veldt) -> AgentResponse {
     text.push_str("  weakest per family:");
     for (n, e) in weakest.iter().take(5) {
         text.push_str(&format!(" {}#{}({:.2})", n, e.id, e.fitness));
+    }
+    plain(&text)
+}
+
+/// Compare two variants — "compare fib#1 fib#2" shows the differing lines.
+fn compare_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
+    let refs: Vec<(String, u32)> = words.iter().filter_map(|w| {
+        let (n, i) = w.split_once('#')?;
+        i.parse::<u32>().ok().map(|id| (n.to_string(), id))
+    }).collect();
+    if refs.len() < 2 {
+        return plain("Compare what? e.g. \"compare fib#1 fib#2\".");
+    }
+    let (name_a, id_a) = &refs[0];
+    let (name_b, id_b) = &refs[1];
+    if name_a != name_b {
+        return plain("Comparison works inside one lineage — both refs must share a name.");
+    }
+    let vs = match veldt.functions.get(name_a) {
+        Some(v) => v,
+        None => return plain(&format!("No lineage called '{}'.", name_a)),
+    };
+    let ea = match vs.iter().find(|e| e.id == *id_a) {
+        Some(e) => e,
+        None => return plain(&format!("{}#{} isn't in the garden.", name_a, id_a)),
+    };
+    let eb = match vs.iter().find(|e| e.id == *id_b) {
+        Some(e) => e,
+        None => return plain(&format!("{}#{} isn't in the garden.", name_b, id_b)),
+    };
+    let sa = crate::fmt::format_program(&ea.body);
+    let sb = crate::fmt::format_program(&eb.body);
+    let la: std::collections::HashSet<&str> = sa.lines()
+        .map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
+    let lb: std::collections::HashSet<&str> = sb.lines()
+        .map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
+    let only_a: Vec<&str> = sa.lines().filter(|l| {
+        let t = l.trim(); !t.is_empty() && !lb.contains(t)
+    }).collect();
+    let only_b: Vec<&str> = sb.lines().filter(|l| {
+        let t = l.trim(); !t.is_empty() && !la.contains(t)
+    }).collect();
+    let mut text = format!("{}#{} (fit {:.2}) vs {}#{} (fit {:.2})\n",
+        name_a, id_a, ea.fitness, name_b, id_b, eb.fitness);
+    if only_a.is_empty() && only_b.is_empty() {
+        text.push_str("  identical — no differing lines");
+    } else {
+        for l in &only_a { text.push_str(&format!("  - {}\n", l.trim())); }
+        for l in &only_b { text.push_str(&format!("  + {}\n", l.trim())); }
+        text.push_str(&format!("  {} lines only in #{}, {} only in #{}",
+            only_a.len(), id_a, only_b.len(), id_b));
     }
     plain(&text)
 }
