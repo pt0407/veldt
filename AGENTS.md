@@ -49,6 +49,12 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] JIT UPDATE 21: veldt serve --vm — prefer_vm
+  on the server session garden so every code-run defaults to the
+  fast engine. That's the last surface — CLI + API + session all
+  have a fast-engine route now. Remaining: specialization
+  (inline scalar ops when the Value tag is provable — needs a
+  tagged repr; helpers can't beat their own dispatch otherwise).
 - [Devin/main-side] JIT UPDATE 20: /api/call {"vm": true} —
   direct garden-fn calls route through jit_call (native when
   compiled). Every API surface now has a fast-engine route:
