@@ -73,7 +73,7 @@ impl std::fmt::Display for Value {
 
 #[derive(Clone)]
 pub struct FunctionDef {
-    pub params: Vec<Param>,
+    pub params: Rc<Vec<Param>>, // Rc — per-call clone was cloning every param
     pub body: Rc<Vec<Stmt>>, // Rc — per-call clone was cloning the whole AST
 }
 
@@ -314,7 +314,7 @@ impl Interpreter {
                     id,
                     fitness: 1.0,
                     def: FunctionDef {
-                        params: params.clone(),
+                        params: Rc::new(params.clone()),
                         body: Rc::new(body.clone()),
                     },
                 };
@@ -399,7 +399,7 @@ impl Interpreter {
                 // The caller also collects them for garden planting.
                 if let GrowItem::Fn(name, params, body, _tests) = item {
                     let def = FunctionDef {
-                        params: params.clone(),
+                        params: Rc::new(params.clone()),
                         body: Rc::new(body.clone()),
                     };
                     let variant = FunctionVariant { id: 1, fitness: 1.0, def };
@@ -1061,9 +1061,9 @@ impl Interpreter {
         // Log usage for veldt tracking
         self.usage_log.push((name.to_string(), chosen_id));
 
-        // Create new scope
+        // Create new scope — capacity hint skips the rehash allocs
         let old_vars = self.vars.clone();
-        self.vars = Rc::new(RefCell::new(HashMap::new()));
+        self.vars = Rc::new(RefCell::new(HashMap::with_capacity(params.len() + 4)));
 
         // Bind params
         if args.len() != params.len() {

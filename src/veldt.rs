@@ -1,5 +1,6 @@
 // The Veldt ecosystem — where code lives, ages, competes, and dies
 
+use std::rc::Rc;
 use crate::ast::*;
 use crate::interpreter::{FunctionVariant, FunctionDef, Interpreter, Value};
 use serde::{Deserialize, Serialize};
@@ -238,7 +239,7 @@ impl Veldt {
                         id: entry.id,
                         fitness: entry.fitness,
                         def: FunctionDef {
-                            params: entry.params.clone(),
+                            params: Rc::new(entry.params.clone()),
                             body: std::rc::Rc::new(entry.body.clone()),
                         },
                     };
@@ -645,6 +646,8 @@ impl Veldt {
                 .max_by(|a, b| a.fitness.partial_cmp(&b.fitness)
                     .unwrap_or(std::cmp::Ordering::Equal))
                 .map(|e| e.id);
+            let peak = variants.iter().map(|e| e.fitness)
+                .fold(f64::NEG_INFINITY, f64::max);
             for entry in variants {
                 let show = if sick_only {
                     matches!(entry.health, Health::Sick(_) | Health::Dying)
@@ -660,8 +663,10 @@ impl Veldt {
                         Health::Dying => "dying".into(),
                     };
                     let marker = if Some(entry.id) == best_id { " *" } else { "" };
-                    println!("  {}#{}{} — {} | age: {} | lifespan: {:.1} | usage: {} | fitness: {:.2}",
-                        name, entry.id, marker, health_str, entry.age, entry.lifespan, entry.usage_count, entry.fitness);
+                    let bar = "█".repeat(
+                        ((entry.fitness / peak.max(f64::EPSILON)) * 6.0).round() as usize);
+                    println!("  {}#{}{} — {} | age: {} | lifespan: {:.1} | usage: {} | fitness: {:.2} {}",
+                        name, entry.id, marker, health_str, entry.age, entry.lifespan, entry.usage_count, entry.fitness, bar);
                     func_count += 1;
                 }
             }
@@ -687,6 +692,8 @@ impl Veldt {
             Some(variants) => {
                 println!("Lineage: {} ({} variant{})", name, variants.len(),
                     if variants.len() == 1 { "" } else { "s" });
+                let peak = variants.iter().map(|e| e.fitness)
+                    .fold(f64::NEG_INFINITY, f64::max);
                 for entry in variants {
                     let health_str = match &entry.health {
                         Health::Healthy => "healthy".to_string(),
@@ -704,8 +711,10 @@ impl Veldt {
                     let eff_str = if entry.efficiency > 0.0 {
                         format!(" | eff: {:.2}x", entry.efficiency)
                     } else { String::new() };
-                    println!("  {}#{}{}{} — {} | age: {} | usage: {} | fitness: {:.2}{} | born: {}",
-                        name, entry.id, marker, trust_str, health_str, entry.age, entry.usage_count, entry.fitness, eff_str, entry.origin);
+                    let bar = "█".repeat(
+                        ((entry.fitness / peak.max(f64::EPSILON)) * 6.0).round() as usize);
+                    println!("  {}#{}{}{} — {} | age: {} | usage: {} | fitness: {:.2} {}{} | born: {}",
+                        name, entry.id, marker, trust_str, health_str, entry.age, entry.usage_count, entry.fitness, bar, eff_str, entry.origin);
                 }
             }
             None => println!("Lineage '{}' not found in veldt", name),
@@ -760,6 +769,174 @@ fn serialize_value(val: &Value) -> String {
 
 pub(crate) fn deserialize_value(s: &str) -> Result<Value, String> {
     serde_json::from_str(s).map_err(|e| e.to_string())
+}
+
+/// Evaluate a `field op value` clause against a variant — the
+/// garden --filter / evolve --filter query language.
+/// fields: fitness age usage size args lifespan last_used niches
+///         health trust origin calls
+/// ops: > < >= <= == != ~ (contains)
+pub fn variant_matches(e: &FunctionEntry, clause: &str) -> bool {
+    variant_matches_in(e, "", clause)
+}
+
+/// Evaluate a clause against a variant inside a named family —
+/// the `family` field matches the family name.
+pub fn variant_matches_in(e: &FunctionEntry, family: &str, clause: &str) -> bool {
+    // `!`/`not` prefix negates the clause
+    let (negate, clause) = if let Some(c) = clause.strip_prefix('!') {
+        (true, c.trim_start())
+    } else if let Some(c) = clause.strip_prefix("not ") {
+        (true, c)
+    } else { (false, clause) };
+
+    let parts: Vec<&str> = clause.split_whitespace().collect();
+    if parts.len() < 3 { return false; }
+    let (field, op, val) = (parts[0], parts[1], parts[2..].join(" "));
+
+    let num_val = val.parse::<f64>().ok();
+    let field_num: Option<f64> = match field {
+        "fitness" => Some(e.fitness),
+        "age" => Some(e.age as f64),
+        "usage" => Some(e.usage_count as f64),
+        "size" => Some(crate::fmt::format_program(&e.body).len() as f64),
+        "args" => Some(e.params.len() as f64),
+        "lifespan" => Some(e.lifespan),
+        "last_used" => Some(e.last_used as f64),
+        "niches" => Some(e.niche_scores.len() as f64),
+        "born" => Some(e.born as f64),
+        "trial_score" => Some(e.trial_score),
+        "efficiency" => Some(e.efficiency),
+        "parents" => Some(e.parents.len() as f64),
+        "healing" => Some(e.healing_attempts.len() as f64),
+        _ => None,
+    };
+    if let (Some(fv), Some(v)) = (field_num, num_val) {
+        let r = match op {
+            ">" => fv > v, "<" => fv < v,
+            ">=" => fv >= v, "<=" => fv <= v,
+            "==" => (fv - v).abs() < f64::EPSILON,
+            "!=" => (fv - v).abs() >= f64::EPSILON,
+            _ => false,
+        };
+        return if negate { !r } else { r };
+    }
+
+    let r = match field {
+        _ if field.starts_with("niche:") => {
+            // niche:<name> — per-niche score query: niche:int:big > 0.5
+            let niche = &field[6..];
+            let score = e.niche_scores.get(niche).copied().unwrap_or(0.0);
+            match (op, num_val) {
+                (">", Some(v)) => score > v, ("<", Some(v)) => score < v,
+                (">=", Some(v)) => score >= v, ("<=", Some(v)) => score <= v,
+                ("==", Some(v)) => (score - v).abs() < f64::EPSILON,
+                ("!=", Some(v)) => (score - v).abs() >= f64::EPSILON,
+                _ => false,
+            }
+        }
+        "family" => {
+            match op { "==" => family == val, "!=" => family != val, "~" => family.contains(&val), _ => false }
+        }
+        "sick_err" => {
+            // variants whose Sick error contains the substring
+            if let Health::Sick(err) = &e.health {
+                match op { "~" => err.contains(&val), "==" => *err == val, _ => false }
+            } else { false }
+        }
+        "health" => {
+            let h = match &e.health {
+                Health::Healthy => "healthy",
+                Health::Sick(_) => "sick",
+                Health::Dying => "dying",
+            };
+            match op { "==" => h == val, "!=" => h != val, _ => false }
+        }
+        "trust" => {
+            let t = match e.trust {
+                Trust::Seedling => "seedling",
+                Trust::Established => "established",
+                Trust::Canonical => "canonical",
+                _ => "unknown",
+            };
+            match op { "==" => t == val, "!=" => t != val, _ => false }
+        }
+        "origin" => {
+            match op { "~" => e.origin.contains(&val), "==" => e.origin == val, _ => false }
+        }
+        "calls" => {
+            let src = crate::fmt::format_program(&e.body);
+            match op { "~" => src.contains(&val), _ => false }
+        }
+        _ => false,
+    };
+    if negate { !r } else { r }
+}
+
+/// Sort a family's variants by a named field — the garden --sort DSL.
+/// fields: fitness age usage size args lifespan last_used niches
+///         fit_rate usage_rate size_rate efficiency niche_score id
+///         origin health trust (desc for numerics, asc for id/origin/health/trust)
+pub fn sort_variants(vs: &mut Vec<FunctionEntry>, field: &str) {
+    vs.sort_by(|a, b| {
+        let ord = match field {
+            "fitness" => b.fitness.partial_cmp(&a.fitness),
+            "age" => Some(b.age.cmp(&a.age)),
+            "usage" => Some(b.usage_count.cmp(&a.usage_count)),
+            "size" => Some(crate::fmt::format_program(&b.body).len()
+                .cmp(&crate::fmt::format_program(&a.body).len())),
+            "args" => Some(b.params.len().cmp(&a.params.len())),
+            "lifespan" => b.lifespan.partial_cmp(&a.lifespan),
+            "last_used" => Some(b.last_used.cmp(&a.last_used)),
+            "niches" => Some(b.niche_scores.len().cmp(&a.niche_scores.len())),
+            "fit_rate" => (b.fitness / (b.age as f64 + 1.0))
+                .partial_cmp(&(a.fitness / (a.age as f64 + 1.0))),
+            "usage_rate" => (b.usage_count as f64 / (b.age as f64 + 1.0))
+                .partial_cmp(&(a.usage_count as f64 / (a.age as f64 + 1.0))),
+            "size_rate" => (crate::fmt::format_program(&b.body).len() as f64 / (b.age as f64 + 1.0))
+                .partial_cmp(&(crate::fmt::format_program(&a.body).len() as f64 / (a.age as f64 + 1.0))),
+            "efficiency" => (b.fitness / (crate::fmt::format_program(&b.body).len() as f64 + 1.0))
+                .partial_cmp(&(a.fitness / (crate::fmt::format_program(&a.body).len() as f64 + 1.0))),
+            "niche_score" => {
+                let ascore = a.niche_scores.values().sum::<f64>() / a.niche_scores.len().max(1) as f64;
+                let bscore = b.niche_scores.values().sum::<f64>() / b.niche_scores.len().max(1) as f64;
+                bscore.partial_cmp(&ascore)
+            }
+            _ if field.starts_with("niche:") => {
+                // niche:<name> — sort by per-niche score
+                let niche = &field[6..];
+                let ascore = a.niche_scores.get(niche).copied().unwrap_or(0.0);
+                let bscore = b.niche_scores.get(niche).copied().unwrap_or(0.0);
+                bscore.partial_cmp(&ascore)
+            }
+            "id" => Some(a.id.cmp(&b.id)),
+            "born" => Some(b.born.cmp(&a.born)),
+            "trial_score" => b.trial_score.partial_cmp(&a.trial_score),
+            "efficiency" => b.efficiency.partial_cmp(&a.efficiency),
+            "parents" => Some(b.parents.len().cmp(&a.parents.len())),
+            "healing" => Some(b.healing_attempts.len().cmp(&a.healing_attempts.len())),
+            "origin" => Some(a.origin.cmp(&b.origin)),
+            "health" => {
+                let h = |e: &FunctionEntry| match &e.health {
+                    Health::Healthy => 0,
+                    Health::Sick(_) => 1,
+                    Health::Dying => 2,
+                };
+                Some(h(a).cmp(&h(b)))
+            }
+            "trust" => {
+                let t = |e: &FunctionEntry| match e.trust {
+                    Trust::Canonical => 0,
+                    Trust::Established => 1,
+                    Trust::Seedling => 2,
+                    _ => 3,
+                };
+                Some(t(a).cmp(&t(b)))
+            }
+            _ => return std::cmp::Ordering::Equal,
+        };
+        ord.unwrap_or(std::cmp::Ordering::Equal)
+    });
 }
 
 #[cfg(test)]

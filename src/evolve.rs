@@ -11,6 +11,12 @@ pub struct Evolver {
     /// Falls back to mechanical mutation when unconfigured or when
     /// the model returns unparseable code.
     pub llm: bool,
+    /// Variant-level filter expression — only breed from variants
+    /// matching every &&-clause (the garden --filter DSL).
+    pub filter: Option<String>,
+    /// Sort the candidate pool by a variant field before selection
+    /// — the garden --sort DSL applied to the breeding order.
+    pub sort: Option<String>,
 }
 
 impl Evolver {
@@ -19,7 +25,7 @@ impl Evolver {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_nanos() as u64)
             .unwrap_or(42);
-        Evolver { rng_seed: seed, llm: false }
+        Evolver { rng_seed: seed, llm: false, filter: None, sort: None }
     }
 
     /// Deterministic evolution: same seed + same garden = same outcomes.
@@ -57,25 +63,61 @@ impl Evolver {
 
         for cycle in 1..=cycles {
             events.push(EvolutionEvent::CycleStart(cycle));
+            let pre = veldt.functions.values().flatten()
+                .map(|e| e.fitness).fold(f64::NEG_INFINITY, f64::max);
 
             let budget = 10 + (veldt.run_count * 2);
             let mut spent = 0;
 
             // Collect candidates: healthy functions with tests, sorted by usage (high usage = important)
+            let or_groups: Vec<Vec<String>> = self.filter.as_ref()
+                .map(|f| f.split("||")
+                    .map(|g| g.split("&&").map(|s| s.trim().to_string()).collect())
+                    .collect())
+                .unwrap_or_default();
             let candidates: Vec<(String, u32)> = veldt.functions.iter()
                 .filter(|(name, _)| only.map(|n| n == name.as_str()).unwrap_or(true))
                 .flat_map(|(name, variants)| {
                     variants.iter()
-                        .filter(|e| matches!(e.health, Health::Healthy) && !e.tests.is_empty())
+                        .filter(|e| matches!(e.health, Health::Healthy) && !e.tests.is_empty()
+                            && (or_groups.is_empty() || or_groups.iter().any(|g|
+                                g.iter().all(|c| crate::veldt::variant_matches_in(e, name, c)))))
                         .map(|e| (name.clone(), e.id))
                         .collect::<Vec<_>>()
                 })
                 .collect();
 
+            // --sort <field> — order the candidate pool by a variant field
+            let mut candidates = candidates;
+            if let Some(field) = &self.sort {
+                let key = |name: &str, id: u32| -> f64 {
+                    veldt.functions.get(name)
+                        .and_then(|vs| vs.iter().find(|e| e.id == id))
+                        .map(|e| match field.as_str() {
+                            "fitness" => e.fitness,
+                            "age" => e.age as f64,
+                            "usage" => e.usage_count as f64,
+                            "size" => crate::fmt::format_program(&e.body).len() as f64,
+                            "args" => e.params.len() as f64,
+                            "lifespan" => e.lifespan,
+                            "last_used" => e.last_used as f64,
+                            "niches" => e.niche_scores.len() as f64,
+                            "fit_rate" => e.fitness / (e.age as f64 + 1.0),
+                            "usage_rate" => e.usage_count as f64 / (e.age as f64 + 1.0),
+                            _ => 0.0,
+                        })
+                        .unwrap_or(0.0)
+                };
+                candidates.sort_by(|(na, ia), (nb, ib)| {
+                    key(nb, *ib).partial_cmp(&key(na, *ia))
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+            }
+
             if candidates.is_empty() {
                 events.push(EvolutionEvent::NoCandidates);
                 events.push(EvolutionEvent::CycleEnd {
-                    cycle, mutations: 0, births: 0, deaths: 0,
+                    cycle, mutations: 0, births: 0, deaths: 0, delta: 0.0,
                 });
                 continue;
             }
@@ -216,6 +258,7 @@ impl Evolver {
                     healthy,
                     score: new_entry.trial_score,
                     fitness: new_entry.fitness,
+                    parent_fitness: entry.fitness,
                 });
 
                 if healthy {
@@ -235,11 +278,14 @@ impl Evolver {
                 });
             }
 
+            let post = veldt.functions.values().flatten()
+                .map(|e| e.fitness).fold(f64::NEG_INFINITY, f64::max);
             events.push(EvolutionEvent::CycleEnd {
                 cycle,
                 mutations,
                 births,
                 deaths: obituaries.len(),
+                delta: post - pre,
             });
         }
 
@@ -1073,16 +1119,16 @@ fn now_ts() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub enum EvolutionEvent {
     CycleStart(usize),
     NoCandidates,
     ProbeGenerated { name: String, niche: String },
     CloneRejected { name: String },
     Mutate { name: String, parent_id: u32, new_id: u32, desc: String },
-    Trial { name: String, id: u32, healthy: bool, score: f64, fitness: f64 },
+    Trial { name: String, id: u32, healthy: bool, score: f64, fitness: f64, parent_fitness: f64 },
     Death { name: String, id: u32, cause: String },
-    CycleEnd { cycle: usize, mutations: usize, births: usize, deaths: usize },
+    CycleEnd { cycle: usize, mutations: usize, births: usize, deaths: usize, delta: f64 },
 }
 
 impl EvolutionEvent {
@@ -1099,9 +1145,10 @@ impl EvolutionEvent {
             Self::Mutate { name, parent_id, new_id, desc } => {
                 format!("  [MUTATE] {}#{} → {}#{} ({})", name, parent_id, name, new_id, desc)
             }
-            Self::Trial { name, id, healthy, score, fitness } => {
+            Self::Trial { name, id, healthy, score, fitness, parent_fitness } => {
                 if *healthy {
-                    format!("  [TRIAL]  {}#{} — healthy (score: {:.2}, fitness: {:.2})", name, id, score, fitness)
+                    format!("  [TRIAL]  {}#{} — healthy (score: {:.2}, fitness: {:.2}, Δ {:+.2})",
+                        name, id, score, fitness, fitness - parent_fitness)
                 } else {
                     format!("  [TRIAL]  {}#{} — sick (failed trial)", name, id)
                 }
@@ -1109,9 +1156,9 @@ impl EvolutionEvent {
             Self::Death { name, id, cause } => {
                 format!("  [CULL]   {}#{} died — {}", name, id, cause)
             }
-            Self::CycleEnd { cycle, mutations, births, deaths } => {
-                format!("[EVOLVE] Cycle {} complete: {} mutations, {} births, {} deaths",
-                    cycle, mutations, births, deaths)
+            Self::CycleEnd { cycle, mutations, births, deaths, delta } => {
+                format!("[EVOLVE] Cycle {} complete: {} mutations, {} births, {} deaths  Δ {:+.2}",
+                    cycle, mutations, births, deaths, delta)
             }
         }
     }

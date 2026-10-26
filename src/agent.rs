@@ -10,7 +10,7 @@ use crate::health::HealthChecker;
 use crate::interpreter::Interpreter;
 use crate::lexer::Lexer;
 use crate::parser::Parser;
-use crate::veldt::{Health, Veldt};
+use crate::veldt::{FunctionEntry, Health, Veldt};
 use serde::Serialize;
 
 #[derive(Serialize, Debug)]
@@ -241,6 +241,72 @@ pub fn respond(task: &str, editor_source: &str, veldt: &mut Veldt) -> AgentRespo
         let (report, _) = bench_report(veldt);
         return plain(&report);
     }
+    if has(&["stats", "stat", "how is", "how's", "doing", "health of", "tell me about", "about"]) {
+        if find_lineage(&words, veldt).is_some() {
+            return family_intent(&words, veldt);
+        }
+    }
+    if has(&["attention", "triage", "weakest", "worst", "what needs", "needs work", "struggling"]) {
+        return triage_intent(veldt);
+    }
+    if has(&["compare", "diff", "difference between", "vs", "versus"]) {
+        if words.iter().any(|w| w.contains('#')) {
+            return compare_intent(&words, veldt);
+        }
+    }
+    if has(&["coverage", "covered", "tested", "probes", "test suite", "test coverage"]) {
+        return coverage_intent(&words, veldt);
+    }
+    if has(&["lineage", "parents", "children", "ancestry", "descended", "born from", "family tree"]) {
+        if words.iter().any(|w| w.contains('#') || veldt.functions.contains_key(w.split('#').next().unwrap_or(w))) {
+            return lineage_intent(&words, veldt);
+        }
+    }
+    if has(&["most used", "hot", "hottest", "busiest", "workload", "usage"]) {
+        return usage_intent(&words, veldt);
+    }
+    if has(&["fastest", "most efficient", "efficient", "speed", "performant"]) {
+        return efficiency_intent(&words, veldt);
+    }
+    if has(&["canonical", "trust", "trusted", "trust levels", "established"]) {
+        return trust_intent(&words, veldt);
+    }
+    if has(&["oldest", "newest", "youngest", "eldest", "age of", "how old"]) {
+        return age_intent(&words, veldt);
+    }
+    if has(&["niche", "niches", "gap", "gaps", "uncovered", "not tested", "missing coverage"]) {
+        return niche_intent(&words, veldt);
+    }
+    if has(&["history", "what changed", "recent changes", "mutations", "what happened", "latest"]) {
+        return history_intent(&words, veldt);
+    }
+    if has(&["turnover", "churn", "birth rate", "death rate", "mortality"]) {
+        return turnover_intent(&words, veldt);
+    }
+    if has(&["pressure", "rivals", "competition", "who competes", "selection"]) {
+        return pressure_intent(&words, veldt);
+    }
+    if has(&["healing", "heal", "recovering", "recovery", "being fixed"]) {
+        return healing_intent(&words, veldt);
+    }
+    if has(&["where did", "origin", "origins", "sources", "bred from", "mutation source", "made of"]) {
+        return sources_intent(&words, veldt);
+    }
+    if has(&["growing", "aging", "past lifespan", "lifecycle", "over the hill", "still young"]) {
+        return lifecycle_intent(&words, veldt);
+    }
+    if has(&["biggest", "smallest", "largest", "size", "how big", "compact", "bloated"]) {
+        return size_intent(&words, veldt);
+    }
+    if has(&["siblings", "cousins", "related", "same parents", "brothers", "sisters"]) {
+        if words.iter().any(|w| w.contains('#')) {
+            return siblings_intent(&words, veldt);
+        }
+    }
+    if has(&["stale", "forgotten", "dormant", "unused", "not called", "idle"]) {
+        return stale_intent(veldt);
+    }
+    // (dead-code check moved before obituary — "dead code" is not a death query)
     if has(&["garden", "status", "alive", "what's growing", "what is growing", "what have you", "ecosystem"]) {
         return status_intent(veldt);
     }
@@ -249,6 +315,24 @@ pub fn respond(task: &str, editor_source: &str, veldt: &mut Veldt) -> AgentRespo
     }
     if hasw(&["why"]) && !has(&["obituar", "why did", "why'd"]) {
         return why_intent(&words, veldt);
+    }
+    if has(&["dead code", "deadcode", "unreachable", "stripped"]) {
+        return dead_intent(veldt);
+    }
+    if has(&["best", "winner", "winning", "strongest", "fittest", "leaderboard", "top variant"]) {
+        return best_intent(&words, veldt);
+    }
+    if has(&["proven", "production", "production-ready", "deployment", "stable", "safe to use"]) {
+        return proven_intent(veldt);
+    }
+    if has(&["experimental", "untested", "unstable", "risky"]) {
+        return risky_intent(veldt);
+    }
+    if has(&["verify", "verified", "agree", "consistent", "divergence", "same result"]) {
+        return verify_intent(&words, veldt);
+    }
+    if has(&["trend", "trajectory", "improving", "getting better", "progress"]) {
+        return trend_intent(veldt);
     }
     if has(&["obituar", "why did", "why'd"]) || hasw(&["deaths", "died", "dead"]) {
         return obituary_intent(&words, veldt);
@@ -360,6 +444,31 @@ fn help_intent() -> AgentResponse {
          • \"test fib\" — re-trial every variant\n\
          • \"adopt fib#2\" — favor a variant in dispatch\n\
          • \"obituaries\" — recent deaths\n\
+         • \"stats fib\" · \"how is fib doing\" — per-family dashboard\n\
+         • \"what needs attention\" — triage sick/dying/weakest\n\
+         • \"compare fib#1 fib#2\" — differing lines\n\
+         • \"coverage for fib\" · \"what's tested\" — probe coverage\n\
+         • \"fib#145 parents\" · \"fib lineage\" — genealogy\n\
+         • \"most used fib\" · \"hot functions\" — workload leaders\n\
+         • \"fastest fib\" · \"most efficient\" — speed ranking\n\
+         • \"fib trust\" · \"what's canonical\" — trust levels\n\
+         • \"newest fib\" · \"oldest\" — age-sorted variants\n\
+         • \"fib niche gaps\" · \"uncovered\" — niche coverage\n\
+         • \"what changed\" · \"mutations\" — recent births + deaths\n\
+         • \"fib turnover\" · \"churn\" — birth/death rate + causes\n\
+         • \"fib pressure\" · \"selection\" — rivalry + σ spread\n\
+         • \"who's healing\" — the recovery log\n\
+         • \"where did fib come from\" · \"sources\" — origin breakdown\n\
+         • \"who's growing\" · \"aging\" — lifecycle split\n\
+         • \"smallest fib\" · \"biggest\" — code-size ranking\n\
+         • \"fib#216 siblings\" — shared-parent variants\n\
+         • \"what's stale\" · \"forgotten\" — dormant variants\n\
+         • \"dead code\" — dead-code-removal variants\n\
+         • \"who's winning\" · \"best fib\" — fitness leaderboard\n\
+         • \"what's proven\" · \"production-ready\" — deployment subset\n\
+         • \"what's risky\" · \"experimental\" — untested + unstable\n\
+         • \"verify fib\" — do the variants agree on inputs?\n\
+         • \"fitness trend\" · \"improving\" — the trajectory + verdict\n\
          • \"surprise me\" — plant a random new species\n\
          • \"run this\" · \"evolve 5\" · \"tend\" · \"prune x#N\" · \"what's alive?\"\n\
          Known species: fib, factorial, prime, count primes, nth prime, gcd, lcm, power, sort, quicksort, reverse, palindrome, sum, mean, max, min, fizzbuzz, collatz, evens, doubles, vowels, digits, leapyear, clamp, words, dedupe, anagram, sqrt, parallel."
@@ -574,6 +683,822 @@ fn find_lineage<'a>(words: &[&'a str], veldt: &Veldt) -> Option<String> {
         }
     }
     None
+}
+
+/// Per-family drill-down — the dashboard summary for one lineage.
+fn family_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
+    let name = match find_lineage(words, veldt) {
+        Some(n) => n,
+        None => return plain("Which family? e.g. \"stats fib\" or \"how is fib doing\"."),
+    };
+    let vs = match veldt.functions.get(&name) {
+        Some(v) if !v.is_empty() => v,
+        _ => return plain(&format!("No lineage called '{}' lives in the garden.", name)),
+    };
+    let healthy = vs.iter().filter(|e| matches!(e.health, Health::Healthy)).count();
+    let sick = vs.iter().filter(|e| matches!(e.health, Health::Sick(_))).count();
+    let dying = vs.len() - healthy - sick;
+    let canon = vs.iter().filter(|e| matches!(e.trust, crate::veldt::Trust::Canonical)).count();
+    let estab = vs.iter().filter(|e| matches!(e.trust, crate::veldt::Trust::Established)).count();
+    let peak = vs.iter().map(|e| e.fitness).fold(f64::NEG_INFINITY, f64::max);
+    let avg = vs.iter().map(|e| e.fitness).sum::<f64>() / vs.len() as f64;
+    let probes = veldt.probes.get(&name).map(|p| p.len()).unwrap_or(0);
+    let deaths = veldt.obituaries.iter().filter(|o| o.name == name).count();
+    let traces = veldt.traces.get(&name).map(|t| t.len()).unwrap_or(0);
+    let mut niches: Vec<&String> = vs.iter()
+        .flat_map(|e| e.niche_scores.keys()).collect();
+    niches.sort(); niches.dedup();
+    let mut origins: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for e in vs.iter() {
+        *origins.entry(e.origin.split(' ').next().unwrap_or("seed")).or_insert(0) += 1;
+    }
+    let champ = veldt.get_fittest_variant(&name).map(|e| e.id).unwrap_or(0);
+    let weak = vs.iter().min_by(|a, b| a.fitness.partial_cmp(&b.fitness)
+        .unwrap_or(std::cmp::Ordering::Equal)).map(|e| e.id).unwrap_or(0);
+    let mut text = format!("{} — {} variants ({} healthy, {} sick, {} dying)\n",
+        name, vs.len(), healthy, sick, dying);
+    text.push_str(&format!("  fitness: peak {:.2} avg {:.2} | champion #{} weakest #{}\n",
+        peak, avg, champ, weak));
+    text.push_str(&format!("  trust: {} canonical, {} established, {} seedling\n",
+        canon, estab, vs.len() - canon - estab));
+    text.push_str(&format!("  {} probes, {} traces, {} deaths\n", probes, traces, deaths));
+    if !niches.is_empty() {
+        text.push_str(&format!("  niches: {}\n", niches.iter().map(|n| n.as_str())
+            .collect::<Vec<_>>().join(", ")));
+    }
+    text.push_str(&format!("  origins: {}", origins.iter()
+        .map(|(o, c)| format!("{}×{}", o, c)).collect::<Vec<_>>().join(", ")));
+    plain(&text)
+}
+
+/// Triage — the variants that need attention across the whole garden.
+fn triage_intent(veldt: &Veldt) -> AgentResponse {
+    let mut sick: Vec<(&String, &FunctionEntry)> = Vec::new();
+    let mut dying: Vec<(&String, &FunctionEntry)> = Vec::new();
+    let mut weakest: Vec<(&String, &FunctionEntry)> = Vec::new();
+    for (name, vs) in &veldt.functions {
+        for e in vs {
+            if matches!(e.health, Health::Sick(_)) { sick.push((name, e)); }
+            if matches!(e.health, Health::Dying) { dying.push((name, e)); }
+        }
+        if let Some(w) = vs.iter().min_by(|a, b| a.fitness.partial_cmp(&b.fitness)
+            .unwrap_or(std::cmp::Ordering::Equal)) {
+            weakest.push((name, w));
+        }
+    }
+    if sick.is_empty() && dying.is_empty() {
+        return plain("Nothing needs attention — the garden is healthy.");
+    }
+    let mut text = String::from("Triage:\n");
+    for (n, e) in &dying {
+        text.push_str(&format!("  DYING {}#{}\n", n, e.id));
+    }
+    for (n, e) in sick.iter().take(10) {
+        let err = match &e.health { Health::Sick(m) => m.as_str(), _ => "" };
+        text.push_str(&format!("  sick {}#{} — {}\n", n, e.id, err));
+    }
+    if sick.len() > 10 {
+        text.push_str(&format!("  ... {} more sick\n", sick.len() - 10));
+    }
+    weakest.sort_by(|a, b| a.1.fitness.partial_cmp(&b.1.fitness)
+        .unwrap_or(std::cmp::Ordering::Equal));
+    text.push_str("  weakest per family:");
+    for (n, e) in weakest.iter().take(5) {
+        text.push_str(&format!(" {}#{}({:.2})", n, e.id, e.fitness));
+    }
+    plain(&text)
+}
+
+/// Compare two variants — "compare fib#1 fib#2" shows the differing lines.
+fn compare_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
+    let refs: Vec<(String, u32)> = words.iter().filter_map(|w| {
+        let (n, i) = w.split_once('#')?;
+        i.parse::<u32>().ok().map(|id| (n.to_string(), id))
+    }).collect();
+    if refs.len() < 2 {
+        return plain("Compare what? e.g. \"compare fib#1 fib#2\".");
+    }
+    let (name_a, id_a) = &refs[0];
+    let (name_b, id_b) = &refs[1];
+    if name_a != name_b {
+        return plain("Comparison works inside one lineage — both refs must share a name.");
+    }
+    let vs = match veldt.functions.get(name_a) {
+        Some(v) => v,
+        None => return plain(&format!("No lineage called '{}'.", name_a)),
+    };
+    let ea = match vs.iter().find(|e| e.id == *id_a) {
+        Some(e) => e,
+        None => return plain(&format!("{}#{} isn't in the garden.", name_a, id_a)),
+    };
+    let eb = match vs.iter().find(|e| e.id == *id_b) {
+        Some(e) => e,
+        None => return plain(&format!("{}#{} isn't in the garden.", name_b, id_b)),
+    };
+    let sa = crate::fmt::format_program(&ea.body);
+    let sb = crate::fmt::format_program(&eb.body);
+    let la: std::collections::HashSet<&str> = sa.lines()
+        .map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
+    let lb: std::collections::HashSet<&str> = sb.lines()
+        .map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
+    let only_a: Vec<&str> = sa.lines().filter(|l| {
+        let t = l.trim(); !t.is_empty() && !lb.contains(t)
+    }).collect();
+    let only_b: Vec<&str> = sb.lines().filter(|l| {
+        let t = l.trim(); !t.is_empty() && !la.contains(t)
+    }).collect();
+    let mut text = format!("{}#{} (fit {:.2}) vs {}#{} (fit {:.2})\n",
+        name_a, id_a, ea.fitness, name_b, id_b, eb.fitness);
+    if only_a.is_empty() && only_b.is_empty() {
+        text.push_str("  identical — no differing lines");
+    } else {
+        for l in &only_a { text.push_str(&format!("  - {}\n", l.trim())); }
+        for l in &only_b { text.push_str(&format!("  + {}\n", l.trim())); }
+        text.push_str(&format!("  {} lines only in #{}, {} only in #{}",
+            only_a.len(), id_a, only_b.len(), id_b));
+    }
+    plain(&text)
+}
+
+/// Coverage — probe/test coverage for one family or the whole garden.
+fn coverage_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
+    if let Some(name) = find_lineage(words, veldt) {
+        // scoped — this family's probes + which niches they target
+        let probes = veldt.probes.get(&name).map(|p| p.as_slice()).unwrap_or(&[]);
+        let vs = match veldt.functions.get(&name) {
+            Some(v) if !v.is_empty() => v,
+            _ => return plain(&format!("No lineage called '{}'.", name)),
+        };
+        let mut niche_counts: std::collections::HashMap<&str, usize> =
+            std::collections::HashMap::new();
+        for p in probes { *niche_counts.entry(p.niche.as_str()).or_insert(0) += 1; }
+        let covered: std::collections::HashSet<&String> = vs.iter()
+            .flat_map(|e| e.niche_scores.keys()).collect();
+        let mut text = format!("{} — {} probes, {} niches covered\n",
+            name, probes.len(), covered.len());
+        let mut sorted: Vec<(&str, usize)> = niche_counts.iter()
+            .map(|(n, c)| (*n, *c)).collect();
+        sorted.sort_by(|a, b| b.1.cmp(&a.1));
+        for (n, c) in sorted.iter().take(8) {
+            text.push_str(&format!("  {} — {} probes\n", n, c));
+        }
+        let gaps: Vec<&&String> = covered.iter()
+            .filter(|n| !niche_counts.contains_key(n.as_str())).collect();
+        if !gaps.is_empty() {
+            text.push_str(&format!("  gaps: {}", gaps.iter().map(|n| n.as_str())
+                .collect::<Vec<_>>().join(", ")));
+        }
+        return plain(&text);
+    }
+    // global — total probes, families covered, niche distribution
+    let total: usize = veldt.probes.values().map(|p| p.len()).sum();
+    let mut niche_hist: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    for p in veldt.probes.values() {
+        for pr in p { *niche_hist.entry(pr.niche.clone()).or_insert(0) += 1; }
+    }
+    let mut text = format!("{} probes across {} families\n", total, veldt.probes.len());
+    let mut sorted: Vec<(&String, usize)> = niche_hist.iter()
+        .map(|(n, c)| (n, *c)).collect();
+    sorted.sort_by(|a, b| b.1.cmp(&a.1));
+    for (n, c) in sorted.iter().take(8) {
+        text.push_str(&format!("  {} — {}\n", n, c));
+    }
+    plain(&text)
+}
+
+/// Lineage — "who are fib#145's parents" or "fib lineage" (the breeding map).
+fn lineage_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
+    if let Some((name, Some(id))) = parse_variant_ref(words) {
+        // one variant — parents + children
+        let vs = match veldt.functions.get(&name) {
+            Some(v) => v,
+            None => return plain(&format!("No lineage called '{}'.", name)),
+        };
+        let e = match vs.iter().find(|e| e.id == id) {
+            Some(e) => e,
+            None => return plain(&format!("{}#{} isn't in the garden.", name, id)),
+        };
+        let mut text = format!("{}#{} — {}\n", name, id, e.origin);
+        text.push_str(&format!("  parents: {}\n",
+            if e.parents.is_empty() { "none (seed)".into() }
+            else { e.parents.iter().map(|p| format!("#{}", p))
+                .collect::<Vec<_>>().join(", ") }));
+        let children: Vec<u32> = vs.iter()
+            .filter(|v| v.parents.contains(&e.id)).map(|v| v.id).collect();
+        text.push_str(&format!("  children: {}",
+            if children.is_empty() { "none".into() }
+            else { children.iter().map(|c| format!("#{}", c))
+                .collect::<Vec<_>>().join(", ") }));
+        return plain(&text);
+    }
+    if let Some(name) = find_lineage(words, veldt) {
+        // family — the breeding map (parents → children)
+        let vs = match veldt.functions.get(&name) {
+            Some(v) => v,
+            None => return plain(&format!("No lineage called '{}'.", name)),
+        };
+        let mut text = format!("{} lineage — {} variants\n", name, vs.len());
+        for e in vs {
+            text.push_str(&format!("  #{} ← {} ({})\n", e.id,
+                if e.parents.is_empty() { "seed".into() }
+                else { e.parents.iter().map(|p| format!("#{}", p))
+                    .collect::<Vec<_>>().join(", ") },
+                e.origin));
+        }
+        return plain(&text);
+    }
+    plain("Whose lineage? e.g. \"fib#145 parents\" or \"fib lineage\".")
+}
+
+/// Usage — the workload leaders (variants by usage_count).
+fn usage_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
+    if let Some(name) = find_lineage(words, veldt) {
+        let vs = match veldt.functions.get(&name) {
+            Some(v) => v,
+            None => return plain(&format!("No lineage called '{}'.", name)),
+        };
+        let mut sorted: Vec<&FunctionEntry> = vs.iter().collect();
+        sorted.sort_by(|a, b| b.usage_count.cmp(&a.usage_count));
+        let total: u64 = vs.iter().map(|e| e.usage_count).sum();
+        let mut text = format!("{} — {} total calls\n", name, total);
+        for e in sorted.iter().take(5) {
+            text.push_str(&format!("  #{} — {} calls (fit {:.2})\n",
+                e.id, e.usage_count, e.fitness));
+        }
+        return plain(&text);
+    }
+    let mut all: Vec<(&String, &FunctionEntry)> = veldt.functions.iter()
+        .flat_map(|(n, vs)| vs.iter().map(move |e| (n, e))).collect();
+    all.sort_by(|a, b| b.1.usage_count.cmp(&a.1.usage_count));
+    let mut text = String::from("Hottest variants:\n");
+    for (n, e) in all.iter().take(8) {
+        text.push_str(&format!("  {}#{} — {} calls\n", n, e.id, e.usage_count));
+    }
+    plain(&text)
+}
+
+/// Efficiency — the speed leaders (variants by efficiency = fitness/size).
+fn efficiency_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
+    if let Some(name) = find_lineage(words, veldt) {
+        let vs = match veldt.functions.get(&name) {
+            Some(v) => v,
+            None => return plain(&format!("No lineage called '{}'.", name)),
+        };
+        let mut sorted: Vec<&FunctionEntry> = vs.iter().collect();
+        sorted.sort_by(|a, b| b.efficiency.partial_cmp(&a.efficiency)
+            .unwrap_or(std::cmp::Ordering::Equal));
+        let mut text = format!("{} — efficiency ranking\n", name);
+        for e in sorted.iter().take(5) {
+            text.push_str(&format!("  #{} — {:.4} eff (fit {:.2})\n",
+                e.id, e.efficiency, e.fitness));
+        }
+        return plain(&text);
+    }
+    let mut all: Vec<(&String, &FunctionEntry)> = veldt.functions.iter()
+        .flat_map(|(n, vs)| vs.iter().map(move |e| (n, e))).collect();
+    all.sort_by(|a, b| b.1.efficiency.partial_cmp(&a.1.efficiency)
+        .unwrap_or(std::cmp::Ordering::Equal));
+    let mut text = String::from("Most efficient variants:\n");
+    for (n, e) in all.iter().take(8) {
+        text.push_str(&format!("  {}#{} — {:.4} eff (fit {:.2})\n",
+            n, e.id, e.efficiency, e.fitness));
+    }
+    plain(&text)
+}
+
+/// Trust — "what's canonical" / "trust levels" — scoped or global.
+fn trust_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
+    use crate::veldt::Trust;
+    let tag = |e: &FunctionEntry| match e.trust {
+        Trust::Canonical => "canonical",
+        Trust::Established => "established",
+        Trust::Seedling => "seedling",
+    };
+    if let Some(name) = find_lineage(words, veldt) {
+        let vs = match veldt.functions.get(&name) {
+            Some(v) => v,
+            None => return plain(&format!("No lineage called '{}'.", name)),
+        };
+        let mut text = format!("{} — trust levels\n", name);
+        for e in vs {
+            text.push_str(&format!("  #{} — {} (fit {:.2})\n", e.id, tag(e), e.fitness));
+        }
+        return plain(&text);
+    }
+    let canon: Vec<(&String, &FunctionEntry)> = veldt.functions.iter()
+        .flat_map(|(n, vs)| vs.iter().filter_map(move |e|
+            if matches!(e.trust, Trust::Canonical) { Some((n, e)) } else { None })).collect();
+    let estab: usize = veldt.functions.values().flatten()
+        .filter(|e| matches!(e.trust, Trust::Established)).count();
+    let seed: usize = veldt.functions.values().flatten()
+        .filter(|e| matches!(e.trust, Trust::Seedling)).count();
+    let mut text = format!("Trust: {} canonical, {} established, {} seedling\n",
+        canon.len(), estab, seed);
+    for (n, e) in &canon {
+        text.push_str(&format!("  {}#{} — canonical (fit {:.2})\n", n, e.id, e.fitness));
+    }
+    plain(&text)
+}
+
+/// Age — "oldest variants" / "newest fib" — scoped or global.
+fn age_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
+    let want_newest = words.iter().any(|w| matches!(*w, "newest" | "youngest"));
+    if let Some(name) = find_lineage(words, veldt) {
+        let vs = match veldt.functions.get(&name) {
+            Some(v) => v,
+            None => return plain(&format!("No lineage called '{}'.", name)),
+        };
+        let mut sorted: Vec<&FunctionEntry> = vs.iter().collect();
+        if want_newest {
+            sorted.sort_by(|a, b| a.age.cmp(&b.age));
+        } else {
+            sorted.sort_by(|a, b| b.age.cmp(&a.age));
+        }
+        let mut text = format!("{} — by age\n", name);
+        for e in sorted.iter().take(5) {
+            text.push_str(&format!("  #{} — {} runs (fit {:.2})\n",
+                e.id, e.age, e.fitness));
+        }
+        return plain(&text);
+    }
+    let mut all: Vec<(&String, &FunctionEntry)> = veldt.functions.iter()
+        .flat_map(|(n, vs)| vs.iter().map(move |e| (n, e))).collect();
+    if want_newest {
+        all.sort_by(|a, b| a.1.age.cmp(&b.1.age));
+    } else {
+        all.sort_by(|a, b| b.1.age.cmp(&a.1.age));
+    }
+    let label = if want_newest { "Newest" } else { "Oldest" };
+    let mut text = format!("{} variants:\n", label);
+    for (n, e) in all.iter().take(8) {
+        text.push_str(&format!("  {}#{} — {} runs\n", n, e.id, e.age));
+    }
+    plain(&text)
+}
+
+/// Niches — "niche gaps" / "uncovered" — coverage map per family or global.
+fn niche_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
+    if let Some(name) = find_lineage(words, veldt) {
+        let vs = match veldt.functions.get(&name) {
+            Some(v) => v,
+            None => return plain(&format!("No lineage called '{}'.", name)),
+        };
+        // niche -> (avg score, how many variants cover it)
+        let mut map: std::collections::HashMap<&str, (f64, usize)> =
+            std::collections::HashMap::new();
+        for e in vs {
+            for (n, s) in &e.niche_scores {
+                let ent = map.entry(n.as_str()).or_insert((0.0, 0));
+                ent.0 += s; ent.1 += 1;
+            }
+        }
+        let mut text = format!("{} — {} niches\n", name, map.len());
+        let mut sorted: Vec<(&str, (f64, usize))> = map.iter()
+            .map(|(n, (s, c))| (*n, (*s, *c))).collect();
+        sorted.sort_by(|a, b| (a.1.0 / a.1.1.max(1) as f64)
+            .partial_cmp(&(b.1.0 / b.1.1.max(1) as f64))
+            .unwrap_or(std::cmp::Ordering::Equal));
+        for (n, (sum, count)) in &sorted {
+            let avg = sum / (*count).max(1) as f64;
+            let flag = if avg < 1.0 { " ← gap" }
+                       else if *count < vs.len() { " ← partial" }
+                       else { "" };
+            text.push_str(&format!("  {} — avg {:.2} ({}/{} vars){}\n",
+                n, avg, count, vs.len(), flag));
+        }
+        return plain(&text);
+    }
+    // global — niche coverage across the garden
+    let mut all: std::collections::HashMap<String, (f64, usize)> =
+        std::collections::HashMap::new();
+    for vs in veldt.functions.values() {
+        for e in vs {
+            for (n, s) in &e.niche_scores {
+                let ent = all.entry(n.clone()).or_insert((0.0, 0));
+                ent.0 += s; ent.1 += 1;
+            }
+        }
+    }
+    let mut text = format!("{} niches across the garden\n", all.len());
+    let mut sorted: Vec<(&String, (f64, usize))> = all.iter()
+        .map(|(n, (s, c))| (n, (*s, *c))).collect();
+    sorted.sort_by(|a, b| (a.1.0 / a.1.1.max(1) as f64)
+        .partial_cmp(&(b.1.0 / b.1.1.max(1) as f64))
+        .unwrap_or(std::cmp::Ordering::Equal));
+    for (n, (sum, count)) in sorted.iter().take(10) {
+        text.push_str(&format!("  {} — avg {:.2} ({} entries)\n",
+            n, sum / (*count).max(1) as f64, count));
+    }
+    plain(&text)
+}
+
+/// History — "what changed" — recent births + deaths across the garden.
+fn history_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
+    // scoped to a family if one is named
+    let scoped = find_lineage(words, veldt);
+    // collect events: (timestamp, "born name#id origin" | "died name#id cause")
+    let mut events: Vec<(u64, String)> = Vec::new();
+    for (n, vs) in &veldt.functions {
+        if let Some(f) = &scoped { if n != f { continue; } }
+        for e in vs {
+            events.push((e.born, format!("born {}#{} — {}", n, e.id, e.origin)));
+        }
+    }
+    for o in &veldt.obituaries {
+        if let Some(f) = &scoped { if o.name != *f { continue; } }
+        events.push((o.timestamp, format!("died {}#{} — {}", o.name, o.id, o.cause_of_death)));
+    }
+    events.sort_by(|a, b| b.0.cmp(&a.0)); // newest first
+    if events.is_empty() {
+        return plain("No history yet — the garden is still a seedbed.");
+    }
+    let mut text = if let Some(f) = &scoped {
+        format!("{} — recent events\n", f)
+    } else {
+        String::from("Recent garden events\n")
+    };
+    for (_, ev) in events.iter().take(12) {
+        text.push_str(&format!("  {}\n", ev));
+    }
+    plain(&text)
+}
+
+/// Turnover — births vs deaths per family ("churn", "mortality").
+fn turnover_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
+    if let Some(name) = find_lineage(words, veldt) {
+        let born = veldt.functions.get(&name).map(|v| v.len()).unwrap_or(0);
+        let died = veldt.obituaries.iter().filter(|o| o.name == name).count();
+        let rate = if born + died > 0 { died as f64 / (born + died) as f64 } else { 0.0 };
+        let mut text = format!("{} — {} alive, {} died (turnover {:.0}%)\n",
+            name, born, died, rate * 100.0);
+        let mut causes: std::collections::HashMap<&str, usize> =
+            std::collections::HashMap::new();
+        for o in veldt.obituaries.iter().filter(|o| o.name == name) {
+            *causes.entry(o.cause_of_death.as_str()).or_insert(0) += 1;
+        }
+        for (c, n) in causes {
+            text.push_str(&format!("  {} — {}\n", c, n));
+        }
+        return plain(&text);
+    }
+    let mut rows: Vec<(&String, usize, usize)> = veldt.functions.iter()
+        .map(|(n, vs)| {
+            let died = veldt.obituaries.iter().filter(|o| o.name == *n).count();
+            (n, vs.len(), died)
+        }).collect();
+    rows.sort_by(|a, b| (b.2 as f64 / (b.1 + b.2).max(1) as f64)
+        .partial_cmp(&(a.2 as f64 / (a.1 + a.2).max(1) as f64))
+        .unwrap_or(std::cmp::Ordering::Equal));
+    let mut text = String::from("Turnover (alive | dead | rate):\n");
+    for (n, alive, dead) in rows.iter().take(8) {
+        let rate = if alive + dead > 0 { *dead as f64 / (alive + dead) as f64 } else { 0.0 };
+        text.push_str(&format!("  {} — {} | {} | {:.0}%\n", n, alive, dead, rate * 100.0));
+    }
+    plain(&text)
+}
+
+/// Pressure — fitness spread + rivals per family ("selection pressure").
+fn pressure_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
+    let pressure_of = |vs: &[FunctionEntry]| -> (f64, usize) {
+        if vs.len() < 2 { return (0.0, 0); }
+        let mean = vs.iter().map(|e| e.fitness).sum::<f64>() / vs.len() as f64;
+        let sd = (vs.iter().map(|e| (e.fitness - mean).powi(2)).sum::<f64>()
+            / vs.len() as f64).sqrt();
+        (sd, vs.len() - 1)
+    };
+    if let Some(name) = find_lineage(words, veldt) {
+        let vs = match veldt.functions.get(&name) {
+            Some(v) => v,
+            None => return plain(&format!("No lineage called '{}'.", name)),
+        };
+        let (sd, rivals) = pressure_of(vs);
+        let peak = vs.iter().map(|e| e.fitness).fold(f64::NEG_INFINITY, f64::max);
+        let label = if sd < 0.01 { "tight" } else if sd < 0.1 { "moderate" } else { "loose" };
+        let mut text = format!("{} — {} rivals, σ {:.4} ({} pressure, peak {:.2})\n",
+            name, rivals, sd, label, peak);
+        let mut sorted: Vec<&FunctionEntry> = vs.iter().collect();
+        sorted.sort_by(|a, b| b.fitness.partial_cmp(&a.fitness)
+            .unwrap_or(std::cmp::Ordering::Equal));
+        for e in sorted.iter().take(5) {
+            text.push_str(&format!("  #{} — {:.2}\n", e.id, e.fitness));
+        }
+        return plain(&text);
+    }
+    let mut rows: Vec<(&String, f64, usize)> = veldt.functions.iter()
+        .map(|(n, vs)| { let (sd, r) = pressure_of(vs); (n, sd, r) }).collect();
+    rows.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+    let mut text = String::from("Selection pressure (tightest first):\n");
+    for (n, sd, r) in rows.iter().take(8) {
+        text.push_str(&format!("  {} — σ {:.4} ({} rivals)\n", n, sd, r));
+    }
+    plain(&text)
+}
+
+/// Healing — "who's healing" — variants with healing attempts logged.
+fn healing_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
+    let scoped = find_lineage(words, veldt);
+    let scoped_ref = &scoped;
+    let mut rows: Vec<(&String, &FunctionEntry)> = veldt.functions.iter()
+        .flat_map(|(n, vs)| vs.iter().filter_map(move |e|
+            if !e.healing_attempts.is_empty()
+                && scoped_ref.as_ref().map(|f| f == n).unwrap_or(true) {
+                Some((n, e))
+            } else { None })).collect();
+    if rows.is_empty() {
+        return plain("Nobody's healing — no healing attempts logged.");
+    }
+    rows.sort_by(|a, b| b.1.healing_attempts.len().cmp(&a.1.healing_attempts.len()));
+    let mut text = String::from("Healing log:\n");
+    for (n, e) in rows.iter().take(10) {
+        let state = if matches!(e.health, Health::Healthy) { "recovered" } else { "still sick" };
+        text.push_str(&format!("  {}#{} — {} attempts, {} (last: {})\n",
+            n, e.id, e.healing_attempts.len(), state,
+            e.healing_attempts.last().map(|s| s.as_str()).unwrap_or("")));
+    }
+    plain(&text)
+}
+
+/// Sources — "where did fib come from" / "mutation sources" — origin breakdown.
+fn sources_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
+    let scoped = find_lineage(words, veldt);
+    // origin-prefix -> (count, sum fitness)
+    let mut map: std::collections::HashMap<String, (usize, f64)> =
+        std::collections::HashMap::new();
+    for (n, vs) in &veldt.functions {
+        if let Some(f) = &scoped { if n != f { continue; } }
+        for e in vs {
+            let src = e.origin.split(' ').next().unwrap_or("seed").to_string();
+            let ent = map.entry(src).or_insert((0, 0.0));
+            ent.0 += 1; ent.1 += e.fitness;
+        }
+    }
+    if map.is_empty() {
+        return plain("No variants to report on.");
+    }
+    let mut sorted: Vec<(String, usize, f64)> = map.iter()
+        .map(|(s, (c, f))| (s.clone(), *c, *f / (*c).max(1) as f64)).collect();
+    sorted.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+    let mut text = if let Some(f) = &scoped {
+        format!("{} — mutation sources\n", f)
+    } else {
+        String::from("Mutation sources (best avg fitness first)\n")
+    };
+    for (src, count, avg) in sorted {
+        text.push_str(&format!("  {} — {} variants, avg fit {:.2}\n", src, count, avg));
+    }
+    plain(&text)
+}
+
+/// Lifecycle — "who's growing" / "aging" — age vs lifespan split.
+fn lifecycle_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
+    let scoped = find_lineage(words, veldt);
+    let scoped_ref = &scoped;
+    let want_aging = words.iter().any(|w|
+        matches!(*w, "aging" | "old" | "over" | "past"));
+    let mut rows: Vec<(&String, &FunctionEntry)> = veldt.functions.iter()
+        .flat_map(|(n, vs)| vs.iter().filter_map(move |e|
+            if scoped_ref.as_ref().map(|f| f == n).unwrap_or(true)
+                && ((e.age as f64) < e.lifespan) != want_aging {
+                Some((n, e))
+            } else { None })).collect();
+    rows.sort_by(|a, b| b.1.age.cmp(&a.1.age));
+    let label = if want_aging { "Aging (past lifespan)" } else { "Growing (within lifespan)" };
+    if rows.is_empty() {
+        return plain(&format!("{} — none.", label));
+    }
+    let mut text = format!("{}:\n", label);
+    for (n, e) in rows.iter().take(10) {
+        text.push_str(&format!("  {}#{} — age {} (lifespan {:.0})\n",
+            n, e.id, e.age, e.lifespan));
+    }
+    if rows.len() > 10 {
+        text.push_str(&format!("  ... {} more\n", rows.len() - 10));
+    }
+    plain(&text)
+}
+
+/// Size — "biggest fib" / "smallest code" — code-size ranking.
+fn size_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
+    let scoped = find_lineage(words, veldt);
+    let want_big = words.iter().any(|w| matches!(*w, "biggest" | "largest" | "bloated"));
+    let size_of = |e: &FunctionEntry| crate::fmt::format_program(&e.body).len();
+    if let Some(name) = &scoped {
+        let vs = match veldt.functions.get(name) {
+            Some(v) => v,
+            None => return plain(&format!("No lineage called '{}'.", name)),
+        };
+        let mut sorted: Vec<&FunctionEntry> = vs.iter().collect();
+        if want_big {
+            sorted.sort_by_key(|e| std::cmp::Reverse(size_of(e)));
+        } else {
+            sorted.sort_by_key(|e| size_of(e));
+        }
+        let mut text = format!("{} — by code size ({} first)\n",
+            name, if want_big { "largest" } else { "smallest" });
+        for e in sorted.iter().take(5) {
+            text.push_str(&format!("  #{} — {} chars (fit {:.2})\n",
+                e.id, size_of(e), e.fitness));
+        }
+        return plain(&text);
+    }
+    let mut all: Vec<(&String, &FunctionEntry)> = veldt.functions.iter()
+        .flat_map(|(n, vs)| vs.iter().map(move |e| (n, e))).collect();
+    if want_big {
+        all.sort_by_key(|(_, e)| std::cmp::Reverse(size_of(e)));
+    } else {
+        all.sort_by_key(|(_, e)| size_of(e));
+    }
+    let label = if want_big { "Largest" } else { "Smallest" };
+    let mut text = format!("{} variants:\n", label);
+    for (n, e) in all.iter().take(8) {
+        text.push_str(&format!("  {}#{} — {} chars (fit {:.2})\n",
+            n, e.id, size_of(e), e.fitness));
+    }
+    plain(&text)
+}
+
+/// Siblings — "fib#216 siblings" — variants sharing a parent.
+fn siblings_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
+    let (name, id) = match parse_variant_ref(words) {
+        Some((n, Some(i))) => (n, i),
+        _ => return plain("Whose siblings? e.g. \"fib#216 siblings\"."),
+    };
+    let vs = match veldt.functions.get(&name) {
+        Some(v) => v,
+        None => return plain(&format!("No lineage called '{}'.", name)),
+    };
+    let e = match vs.iter().find(|e| e.id == id) {
+        Some(e) => e,
+        None => return plain(&format!("{}#{} isn't in the garden.", name, id)),
+    };
+    if e.parents.is_empty() {
+        return plain(&format!("{}#{} is a seed — no parents, no siblings.", name, id));
+    }
+    let sibs: Vec<&FunctionEntry> = vs.iter()
+        .filter(|v| v.id != e.id
+            && v.parents.iter().any(|p| e.parents.contains(p)))
+        .collect();
+    let mut text = format!("{}#{} — parents {:?}\n", name, id, e.parents);
+    if sibs.is_empty() {
+        text.push_str("  no siblings — only child");
+    } else {
+        for s in &sibs {
+            let shared: Vec<u32> = s.parents.iter()
+                .filter(|p| e.parents.contains(p)).copied().collect();
+            text.push_str(&format!("  #{} (fit {:.2}) — shared parents {:?}\n",
+                s.id, s.fitness, shared));
+        }
+    }
+    plain(&text)
+}
+
+/// Stale — "forgotten" / "dormant" — variants by runs-since-last-call.
+fn stale_intent(veldt: &Veldt) -> AgentResponse {
+    let mut rows: Vec<(&String, &FunctionEntry, u64)> = veldt.functions.iter()
+        .flat_map(|(n, vs)| vs.iter().map(move |e|
+            (n, e, veldt.run_count.saturating_sub(e.last_used)))).collect();
+    rows.sort_by(|a, b| b.2.cmp(&a.2));
+    let active = rows.iter().take(10).filter(|(_, _, s)| *s == 0).count();
+    if rows.iter().all(|(_, _, s)| *s == 0) {
+        return plain("Nothing is stale — every variant was called this run.");
+    }
+    let mut text = String::from("Stalest variants (runs since last call):\n");
+    for (n, e, stale) in rows.iter().take(8) {
+        text.push_str(&format!("  {}#{} — {} runs stale (fit {:.2})\n",
+            n, e.id, stale, e.fitness));
+    }
+    text.push_str(&format!("({}/{} variants called this run)", active, rows.len()));
+    plain(&text)
+}
+
+/// Dead — variants born from dead-code-removal mutations.
+fn dead_intent(veldt: &Veldt) -> AgentResponse {
+    let mut rows: Vec<(&String, &FunctionEntry)> = veldt.functions.iter()
+        .flat_map(|(n, vs)| vs.iter().filter_map(move |e|
+            if e.origin.contains("dead") { Some((n, e)) } else { None })).collect();
+    if rows.is_empty() {
+        return plain("No dead-code-removal variants in the garden.");
+    }
+    rows.sort_by(|a, b| b.1.fitness.partial_cmp(&a.1.fitness)
+        .unwrap_or(std::cmp::Ordering::Equal));
+    let mut text = format!("{} dead-code-removal variants:\n", rows.len());
+    for (n, e) in rows.iter().take(8) {
+        text.push_str(&format!("  {}#{} — fit {:.2} ({})\n", n, e.id, e.fitness, e.origin));
+    }
+    plain(&text)
+}
+
+/// Best — "who's winning" / "leaderboard" — fitness ranking.
+fn best_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
+    if let Some(name) = find_lineage(words, veldt) {
+        let vs = match veldt.functions.get(&name) {
+            Some(v) => v,
+            None => return plain(&format!("No lineage called '{}'.", name)),
+        };
+        let mut sorted: Vec<&FunctionEntry> = vs.iter().collect();
+        sorted.sort_by(|a, b| b.fitness.partial_cmp(&a.fitness)
+            .unwrap_or(std::cmp::Ordering::Equal));
+        let mut text = format!("{} — fitness leaderboard\n", name);
+        for e in sorted.iter().take(3) {
+            text.push_str(&format!("  #{} — {:.2} ({})\n", e.id, e.fitness, e.origin));
+        }
+        return plain(&text);
+    }
+    // global — peak variant per family
+    let mut rows: Vec<(&String, &FunctionEntry)> = veldt.functions.iter()
+        .filter_map(|(n, vs)| vs.iter()
+            .max_by(|a, b| a.fitness.partial_cmp(&b.fitness)
+                .unwrap_or(std::cmp::Ordering::Equal)).map(|e| (n, e)))
+        .collect();
+    rows.sort_by(|a, b| b.1.fitness.partial_cmp(&a.1.fitness)
+        .unwrap_or(std::cmp::Ordering::Equal));
+    let mut text = String::from("Garden leaderboard (peak per family):\n");
+    for (n, e) in rows.iter().take(8) {
+        text.push_str(&format!("  {}#{} — {:.2}\n", n, e.id, e.fitness));
+    }
+    plain(&text)
+}
+
+/// Proven — "what's proven" / "production-ready" — healthy + established/canonical.
+fn proven_intent(veldt: &Veldt) -> AgentResponse {
+    use crate::veldt::Trust;
+    let mut rows: Vec<(&String, &FunctionEntry)> = veldt.functions.iter()
+        .flat_map(|(n, vs)| vs.iter().filter_map(move |e|
+            if matches!(e.health, Health::Healthy)
+                && matches!(e.trust, Trust::Established | Trust::Canonical) {
+                Some((n, e))
+            } else { None })).collect();
+    rows.sort_by(|a, b| b.1.fitness.partial_cmp(&a.1.fitness)
+        .unwrap_or(std::cmp::Ordering::Equal));
+    let total: usize = veldt.functions.values().map(|v| v.len()).sum();
+    if rows.is_empty() {
+        return plain("Nothing is proven yet — the garden is still experimental.");
+    }
+    let mut text = format!("Proven ({} of {} variants):\n", rows.len(), total);
+    for (n, e) in rows.iter().take(10) {
+        let t = match e.trust {
+            Trust::Canonical => "canonical",
+            Trust::Established => "established",
+            _ => "",
+        };
+        text.push_str(&format!("  {}#{} — {:.2} {}\n", n, e.id, e.fitness, t));
+    }
+    plain(&text)
+}
+
+/// Risky — "experimental" / "untested" — sick/dying or seedling variants.
+fn risky_intent(veldt: &Veldt) -> AgentResponse {
+    use crate::veldt::Trust;
+    let mut rows: Vec<(&String, &FunctionEntry)> = veldt.functions.iter()
+        .flat_map(|(n, vs)| vs.iter().filter_map(move |e|
+            if !matches!(e.health, Health::Healthy)
+                || matches!(e.trust, Trust::Seedling) {
+                Some((n, e))
+            } else { None })).collect();
+    rows.sort_by(|a, b| a.1.fitness.partial_cmp(&b.1.fitness)
+        .unwrap_or(std::cmp::Ordering::Equal));
+    if rows.is_empty() {
+        return plain("Nothing risky — every variant is healthy + established.");
+    }
+    let total: usize = veldt.functions.values().map(|v| v.len()).sum();
+    let mut text = format!("Risky ({} of {} variants):\n", rows.len(), total);
+    for (n, e) in rows.iter().take(10) {
+        let tag = if matches!(e.trust, Trust::Seedling) { "seedling" }
+            else { "unhealthy" };
+        text.push_str(&format!("  {}#{} — {:.2} ({})\n", n, e.id, e.fitness, tag));
+    }
+    plain(&text)
+}
+
+/// Verify — "verify fib" — run the domain-verification, report divergence.
+fn verify_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
+    let name = match find_lineage(words, veldt) {
+        Some(n) => n,
+        None => return plain("Verify which family? e.g. \"verify fib\"."),
+    };
+    match crate::verify_family_find_divergent(&name) {
+        Some(id) => plain(&format!(
+            "{} — variant #{} diverges on a sampled input. The family doesn't agree.", name, id)),
+        None => plain(&format!(
+            "{} — all variants agree on sampled inputs. Verified.", name)),
+    }
+}
+
+/// Trend — "fitness trend" / "improving" — the garden's fitness trajectory.
+fn trend_intent(veldt: &Veldt) -> AgentResponse {
+    let h = &veldt.fitness_history;
+    if h.len() < 2 {
+        return plain("Not enough fitness history to trend — keep evolving.");
+    }
+    let first = h.first().unwrap();
+    let last = h.last().unwrap();
+    let arrow = if last > first { "↑" } else if last < first { "↓" } else { "→" };
+    let verdict = if last > first { "the garden is improving" }
+        else if last < first { "the garden is declining — maybe tend it" }
+        else { "holding steady" };
+    plain(&format!("Fitness trend: {:.2} → {:.2} {}  {}\n{} over {} runs.",
+        first, last, arrow, crate::spark(h), verdict, h.len()))
 }
 
 /// Parse a bare word that looks like a function name (optionally name#N).
@@ -1003,17 +1928,17 @@ print("@N@(97) = " + @N@(97))
 
 // === Code generation ===
 
-struct Template {
-    keywords: &'static [&'static str],
-    canonical: &'static str,
-    desc: &'static str,
+pub struct Template {
+    pub keywords: &'static [&'static str],
+    pub canonical: &'static str,
+    pub desc: &'static str,
     // canonical names of garden lineages this one calls — planted first if absent
-    needs: &'static [&'static str],
+    pub needs: &'static [&'static str],
     // Veldt source with @N@ as the function-name placeholder
-    make: &'static str,
+    pub make: &'static str,
 }
 
-fn catalog() -> Vec<Template> {
+pub fn catalog() -> Vec<Template> {
     vec![
         Template {
             keywords: &["fib", "fibonacci"],
@@ -2050,6 +2975,7 @@ fn extract_name(words: &[&str]) -> Option<String> {
 // garden (temp dir — never touches the user's) and times each stage,
 // then times canned intents. `veldt bench` and "benchmark" both hit this.
 
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct BenchRow {
     pub name: String,
     pub ms: u128,
@@ -2099,10 +3025,20 @@ pub fn bench_report(veldt: &Veldt) -> (String, Vec<BenchRow>) {
         lines.push(format!("  {:<16} {:>6}ms  {:<7} trial {:.2}  ({} stage{})",
             tmpl.canonical, ms, tag, trial, stages.len(), if stages.len() == 1 { "" } else { "s" }));
     }
+    // species summary — healthy/sick/failed counts + total time
+    {
+        let total_ms: u128 = rows.iter().map(|r| r.ms).sum();
+        let healthy_n = rows.iter().filter(|r| r.healthy).count();
+        let zero_trial = rows.iter().filter(|r| r.trial <= 0.0).count();
+        let times: Vec<f64> = rows.iter().map(|r| r.ms as f64).collect();
+        lines.push(format!("species: {}/{} healthy · {} zero-trial · {}ms total  {}",
+            healthy_n, rows.len(), zero_trial, total_ms, crate::spark(&times)));
+    }
 
     // Intent latency — canned tasks against the now-populated sandbox
     lines.push(String::new());
     lines.push("Intent latency:".to_string());
+    let mut latencies = Vec::new();
     for task in [
         "what's alive?", "show fib", "test fib", "adopt fib#1", "obituaries",
         "suggest", "write a function that counts primes", "improve fib",
@@ -2110,8 +3046,11 @@ pub fn bench_report(veldt: &Veldt) -> (String, Vec<BenchRow>) {
     ] {
         let start = std::time::Instant::now();
         let _ = respond(task, "", &mut bv);
-        lines.push(format!("  {:<45} {:>6}ms", format!("\"{}\"", task), start.elapsed().as_millis()));
+        let ms = start.elapsed().as_millis();
+        latencies.push(ms as f64);
+        lines.push(format!("  {:<45} {:>6}ms", format!("\"{}\"", task), ms));
     }
+    lines.push(format!("  intent latency dist: {}", crate::spark(&latencies)));
 
     // garden state at bench end + user garden summary
     let alive: usize = bv.functions.values().map(|v| v.len()).sum();

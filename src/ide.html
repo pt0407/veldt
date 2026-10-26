@@ -725,6 +725,38 @@ async function testFamily(name) {
   renderGarden();
 }
 
+async function statsFamily(name) {
+  const res = await fetch(API + '/api/family?name=' + encodeURIComponent(name));
+  const d = await res.json();
+  if (d.error) {
+    document.getElementById('output').innerHTML =
+      '<pre style="color:#f88;margin:0">' + d.error + '</pre>';
+    return;
+  }
+  const origins = Object.entries(d.origins || {}).map(([k,v]) => `${k}×${v}`).join(', ');
+  const spark = (arr) => {
+    if (!arr || arr.length < 2) return '';
+    const lo = Math.min(...arr), hi = Math.max(...arr), bars = '▁▂▃▄▅▆▇█';
+    return arr.map(v => bars[Math.round(((v - lo) / (hi - lo || 1)) * 7)]).join('');
+  };
+  document.getElementById('output').innerHTML =
+    '<pre style="color:#8ef;margin:0">' +
+    `${name} — ${d.variants.length}v (${d.healthy}h ${d.sick}s ${d.dying}d)\n` +
+    `fitness peak ${d.peak_fitness?.toFixed(2)} avg ${d.avg_fitness?.toFixed(2)}\n` +
+    `trust ${d.canonical}c ${d.established}e ${d.seedling}s  ` +
+    `probes ${d.probes} traces ${d.traces} deaths ${d.deaths}\n` +
+    `lifecycle ${d.growing}growing ${d.aging}aging  ` +
+    `workload ${d.overworked}over ${d.underused}under\n` +
+    `diversity ${d.unique_origins}origins ${d.unique_niches}niches  ` +
+    `pressure σ${(d.fitness_stddev||0).toFixed(3)}  proven ${d.proven} risky ${d.risky}\n` +
+    `immigrants ${d.immigrants}  healed ${d.healed_healthy}/${d.healed}\n` +
+    `fitness  ${spark(d.fitness_dist)}\n` +
+    `age      ${spark(d.age_dist)}\n` +
+    `usage    ${spark(d.usage_dist)}\n` +
+    `size     ${spark(d.size_dist)}\n` +
+    `origins: ${origins}` + '</pre>';
+}
+
 async function adoptVariant(name, id) {
   const res = await fetch(API + '/api/adopt', { method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -928,6 +960,7 @@ function renderGarden() {
         <span class="meta">${lineage.variants.length}v${probeStr}</span>
         <span class="play" onclick="event.stopPropagation();testFamily('${lineage.name}')" title="re-trial all variants">⟳</span>
         <span class="play" onclick="event.stopPropagation();evolveFamily('${lineage.name}')" title="evolve this family">⇌</span>
+        <span class="play" onclick="event.stopPropagation();statsFamily('${lineage.name}')" title="family dashboard">Σ</span>
       </div>`;
 
       // Build tree: roots = no parents in-family; children attach to first parent

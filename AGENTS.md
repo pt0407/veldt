@@ -49,6 +49,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+<<<<<<< HEAD
 - [Devin/main-side] WORK LIST for the next stretch (~8h) — pick freely,
   post what you take so we don't collide:
 
@@ -71,6 +72,53 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   BLOCKED ON USER (note them):
   - brew install z3 (full SMT), hosted registry endpoint,
     cargo publish / v0.3.0 tag
+=======
+- [Devin/gardener] CONSOLIDATED: removed 86 mechanical garden flags
+  (~1530 lines) — 8 _fam sorts + 12 _fam filters + 18 name:op
+  thresholds + 9 _fam sorts + 39 min/max/count variants. All covered
+  by `--filter "family == X && field op n"` / `--sort <field>`.
+  Remaining: ergonomic shortcuts (--sick --healthy --old --best etc.),
+  family-level _count queries, lineage queries, arg-taking filters.
+  The DSL is now the primary query path — `veldt help filter` for syntax.
+- [Devin/gardener] FAMILY FIELD: `family` is now a filter-DSL field —
+  `--filter "family == fib && fitness > 1.5"` scopes to a family.
+  Works in all 14 commands + /api/filter (`variant_matches_in`
+  passes the family name). The 155+ `_fam` flags are now fully
+  covered by `family == <name> && <clause>` — consolidation
+  could remove them.
+- [Devin/gardener] SORT DSL + COMPOSE: `--sort <field>` sorts variants
+  (fields: fitness age usage size args lifespan last_used niches
+  fit_rate usage_rate size_rate efficiency niche_score id origin
+  health trust). `--filter` + `--sort` compose — `garden --filter
+  "health == healthy" --sort age` filters then sorts. Usable in
+  garden/stats/lineage/find/evolve + `/api/filter?sort=`.
+  `sort_variants` is in `veldt.rs` (shared with `variant_matches`).
+  The 155+ garden flags are now covered by the DSL — consolidation
+  could remove the mechanical `_fam` variants.
+- [Devin/gardener] FILTER DSL + FIX: `veldt garden --filter <expr>`
+  — composable variant query (`--filter "fitness > 1.5 && age < 100"`,
+  `||` for OR groups). Fields: fitness age usage size args lifespan
+  last_used niches health trust origin calls. Ops: `> < >= <= == != ~`.
+  Consolidates the 155+ garden flags into one query language.
+  Also fixed the recent field renames: `Trace.input`→`args`,
+  `output`→`result`, `timestamp`→`at`; `Probe.input`→`args`;
+  `StructEntry` uses `fields`; `Health::Sick` is now a `String`
+  (was `Vec<(input,got,want)>`); `server.rs` `veldt::Veldt`→`Veldt`.
+  The `--failing` flag now matches against the Sick error string.
+- [Devin/gardener] API SURFACE: `veldt serve` now exposes ~64
+  endpoints — the full garden-analytics surface (census, health,
+  trust, probes, niches, usage, trend, sources, fitness, bare,
+  immigrants, mutation, families, variant, heal, ages, args, sizes,
+  last_used, niche_scores, origins, deaths, selection, mutation_rate,
+  turnover, diversity, pressure, builtin_usage, champions, summary,
+  why, species, find, diff, obituary, trace, probe, family, sick,
+  vars, structs) + the action endpoints (run/evolve/fuzz/absorb/
+  tournament/swarm/play/game/call/adopt/verify/quarantine/compare/
+  lineage/obituaries/traces/check/agent/files/save/clear/prune).
+  The IDE could build a full garden dashboard on these — every
+  `veldt stats`/`veldt garden`/`veldt find`/`veldt diff`/`veldt check`
+  capability now has an API counterpart.
+>>>>>>> 75b50f9636f389a58dbecc54009cbb2329395954
 - [Devin/main-side] JIT UPDATE 5: `veldt garden --jit` — census of
   which families compile to native (currently 42%). Surfaced a real
   cranelift bug: loops back-edging to pc 0 panicked 'invalid reference
@@ -391,3 +439,300 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   v0.3.0 tag, brew, hosted pool endpoint, VELDT_LLM_KEY e2e.
   One flake note: test_evolution_creates_mutants was RNG-flaky —
   mutate_retry re-rolls no-op mutations now.
+
+- [Devin] Filter/sort DSL consolidation + stats --family dashboard
+  (all on main, HEAD=8a356bf): ~86 mechanical garden flags removed
+  (~1530 lines) — all covered by `--filter "<expr>" --sort <field>`.
+  DSL fields: family, fitness, age, usage, size, args, lifespan,
+  last_used, niches, born, trial_score, efficiency, parents, healing,
+  health, trust, origin, calls, niche:<name>, sick_err. Operators:
+  > < >= <= == != ~ (substring); && || ! / not for composition.
+  Sort: `sort_variants` in veldt.rs supports 30+ fields incl
+  niche:<name>, fit_rate, usage_rate, size_rate, efficiency,
+  niche_score. Wired into 14 commands: garden/stats/evolve/test/fuzz/
+  find/lineage/adopt/diff/verify/bench/tournament/absorb + /api/filter.
+  `stats --family <name>` = per-family dashboard (~55 sections gated
+  behind --top): leaderboard, niche matrix, origins, trust/health,
+  probes/traces/deaths, ages, usage, fitness, size, builtins, healing,
+  staleness, lifecycle, workload, source success/fitness, probe
+  niches/inputs/pass-rate, turnover, diversity, population, sick errs,
+  maturity, gaps, proven/risky, LLM count, immigrant origins,
+  fit_rate/usage_rate/size_rate, pressure, birth timeline, siblings,
+  code diversity, death causes, champion/weakest.
+  `check --strict` gained: dup fn defs, empty bodies, non-exhaustive
+  match, property-only test clauses.
+  GOTCHA: `grep "error" | head` in a build chain exits 0 on match —
+  the && chain then runs the STALE binary and commits unbuilt code.
+  Commits c556e15..50684aa were pushed uncompilable; fixed in 8a356bf.
+  Verify builds with a plain cargo build before committing.
+- [Devin] bench tooling: `veldt bench <file.veldt> [--reps N]`
+  single-workload timing; `--vm` runs the bytecode VM;
+  `--vm --compare` reports tree-walk vs vm speedup. FINDING:
+  numeric_loop tree-walk 329ms vs vm 439ms (0.75x) — the Phase 11
+  VM is slower than tree-walk here, candidate for profiling.
+  `veldt bench --json/--save F/--compare F/--filter E` for the
+  species suite (regression baselines).
+- [Devin] Inspection-surface batch (main, HEAD=6df7572):
+  `stats --family --top|--detail` = ~55-section per-family dashboard
+  (leaderboard, niche matrix, origins, trust/health, probes/traces/
+  deaths, ages, usage, fitness, size, builtins, healing, staleness,
+  trial_score, lifespan, args, niches, efficiency, born, parents,
+  turnover, diversity, population, sick errs, lifecycle, workload,
+  source success/fitness, probe niches/inputs/pass-rate, recent
+  traces/deaths, champion/weakest, fit_rate/usage_rate/size_rate,
+  pressure, birth timeline, siblings, code diversity, death causes,
+  maturity, niche gaps, proven/risky, healing success, trace rate,
+  LLM count, immigrant origins). Extracted to `print_family_detail`
+  at end of main.rs — reused by `garden --family --detail` and
+  `lineage --detail`. `stats --top [N]` = compact per-family table.
+  `/api/family?name=` returns the same aggregates as JSON (lifecycle,
+  workload, diversity, pressure, proven/risky, healing, immigrants,
+  fit_rate, death_causes + full variant records).
+  `stats --family --json` got the family extras (origins, ages,
+  traces, champion/weakest).
+  --json coverage: `evolve --json` (JSONL EvolutionEvent stream),
+  `fuzz --json` (structured divergent cases + probes_planted),
+  `diff --json` (LCS-aligned records with added/removed/shared).
+  `check --strict` gained: dup fn defs, empty bodies, non-exhaustive
+  match, property-only test clauses, dup match arms, unused struct
+  defs, nesting depth >4.
+  `veldt bench <file.veldt> [--reps N] [--vm] [--compare]` = single-
+  workload timing + engine comparison (finding: VM slower than
+  tree-walk on numeric_loop, 0.75x — profiling candidate).
+  `veldt bench --json/--save F/--compare F/--filter E` = species
+  suite + regression baselines + species summary line.
+  `garden --family` got a compact summary footer.
+- [Devin] --json sweep complete (HEAD post-173efb1): every
+  inspection + state-changing command now has machine-readable
+  output — stats, garden, lineage, evolve (JSONL events), fuzz,
+  diff, absorb, test, verify, adopt, tournament, prune, check.
+  The IDE can drive the whole garden through JSON, no text
+  parsing anywhere on the read/write surface.
+- [Devin] fn_calls perf batch (HEAD=c11811a): `FunctionDef.params`
+  → `Rc<Vec<Param>>` (was cloning every param's String+Type per
+  call — part of the ~15µs/call wall in BASELINE.md) +
+  `HashMap::with_capacity(params.len()+4)` on the call env (skips
+  growth rehash). REMAINING on that wall: `param.name.clone()`
+  String alloc per param per call — needs interned names or
+  `Rc<str>` map keys (deeper refactor across ast/veldt/interp).
+  Bench numbers are noisy on this box (570-814ms same build) —
+  treat single-run timings as directional only.
+- [Devin] Agent inspection intents (HEAD post-62c95b8): `veldt agent`
+  gained `family` ("stats fib"/"how is fib doing"/"tell me about
+  fib" → per-family dashboard summary) and `triage` ("what needs
+  attention"/"weakest"/"risky" → dying + sick-with-errors +
+  weakest-per-family). Reuses find_lineage for name extraction.
+- [Devin] Agent inspection-intent batch 2 (HEAD post-1228c17):
+  `veldt agent` now answers — lineage ("fib#145 parents"/"fib
+  lineage" → parents/children or the full breeding map), usage
+  ("most used fib"/"hot functions" → workload leaders), efficiency
+  ("fastest fib"/"most efficient" → speed ranking), trust ("fib
+  trust"/"what's canonical" → levels + canonical list), age
+  ("newest fib"/"oldest" → age-sorted). All reuse find_lineage +
+  parse_variant_ref; scoped-or-global pattern throughout. Also
+  evolve --dry-run is an alias for --dry (banner makes the
+  no-persist behavior explicit).
+- [Devin] Observability + intent batch 3 (HEAD post-0d03d49):
+  `stats --watch`, `garden --watch`, `lineage --watch` — 2s-poll
+  live re-render (clear + reload + redraw) for observing the
+  garden while evolve runs elsewhere. Fitness-trend sparkline
+  (spark() helper — last 24 history points → block chars) on
+  all three trend print sites. `check --strict` gained:
+  self-comparison (x == x via self_cmp expr walker — NaN aside,
+  always a bug), unused for-variable. Agent intents batch 3:
+  compare ("compare fib#1 fib#2"), coverage ("coverage for fib"
+  /"what's tested" — scoped probe/niche or global histogram),
+  lineage ("fib#145 parents"/"fib lineage" — variant tree or
+  full breeding map), usage ("most used fib"/"hot functions"),
+  efficiency ("fastest fib"/"most efficient"), trust ("fib
+  trust"/"what's canonical"), age ("newest fib"/"oldest").
+  evolve --dry-run alias for --dry. IDE: Σ button on the garden
+  row → /api/family dashboard (endpoint existed, UI never
+  called it before). help_intent documents all of it.
+- [Devin] Agent inspection-intent batch 4 (HEAD post-33b2126):
+  `veldt agent` gained — niche ("fib niche gaps"/"uncovered" →
+  per-niche avg + coverage count + gap/partial flags), history
+  ("what changed"/"mutations" → recent births + deaths),
+  turnover ("fib turnover"/"churn" → alive vs died + causes),
+  pressure ("fib pressure"/"selection" → rivals + fitness σ),
+  healing ("who's healing" → recovery log w/ attempt counts),
+  sources ("where did fib come from" → origin histogram +
+  per-source avg fitness), lifecycle ("who's growing"/"aging"
+  → age vs lifespan split), size ("smallest fib"/"biggest" →
+  code-size ranking). All scoped-or-global via find_lineage +
+  parse_variant_ref; documented in help_intent.
+- [Devin] Agent intent batch 5 (HEAD post-d6c9d4a): siblings
+  ("fib#216 siblings" → shared-parent variants), stale
+  ("what's stale"/"forgotten" → runs-since-last-call dormant
+  list), dead ("dead code"/"unreachable" → dead-code-removal
+  variants; checked BEFORE obituary — it's not a death query).
+  All help-documented. ~30 intents total now.
+- [Devin] Agent intent batch 5 tail (HEAD post-7b22b99): best
+  ("who's winning"/"leaderboard" → peak-per-family ranked +
+  scoped top-3). ~32 intents total — the agent answers nearly
+  every garden inspection question the CLI can ask.
+- [Devin] Agent proven/risky pair (HEAD post-857fc6b): proven
+  ("what's proven" → healthy + established/canonical) and
+  risky ("what's risky" → sick/dying OR seedling — the flip).
+  risky/riskiest removed from triage's triggers so they route
+  here. ~35 intents — the inspection surface is exhaustive.
+- [Devin] check --strict lint batch 2 + agent intents 6
+  (HEAD post-7c24f26): lint gained — identical if branches,
+  bool-comparison (x == true / x != false via bool_cmp walker),
+  let x = x self-assignment, empty match body. Agent gained
+  best ("who's winning" → peak-per-family leaderboard), proven
+  ("what's proven" → healthy + established/canonical), risky
+  ("what's risky" → sick/dying OR seedling — the flip of
+  proven). ~35 intents — the inspection surface is exhaustive.
+- [Devin] check --strict lint batch 3 + agent verify intent
+  (HEAD post-41db5eb): lint gained — identical if branches,
+  bool-comparison (x == true/false), let/assign x = x
+  self-assignment, empty match body, match arm after _
+  (unreachable), for over empty list, unused catch variable,
+  empty catch handler, match on literal scrutinee. Agent
+  gained verify ("verify fib" → do the variants agree on
+  sampled inputs? calls verify_family_find_divergent).
+- [Devin] check --strict lint batch 4 + agent trend/verify
+  (HEAD post-4457500): lint — for-var shadowing outer let.
+  Agent — verify ("verify fib" → verify_family_find_divergent),
+  trend ("fitness trend" → in-chat sparkline + verdict; spark()
+  is now pub). ~37 intents, ~20 lint checks.
+- [Devin] check --strict lint batch 4 tail (HEAD post-eea29d3):
+  if empty-then + non-empty-else, empty try, redundant return
+  at end-of-block, for-var shadowing outer let. ~23 lint
+  checks — structural, semantic, and loop-quality coverage.
+- [Devin] Sparkline coverage batch (HEAD post-5f16fba):
+  spark() reused across the stats --family detail panel —
+  birth/death/usage timelines (events-per-run) + fitness/
+  size/age/usage/efficiency/trial_score/lifespan/args
+  distribution sparks (sorted values → the shape of the
+  spread). Every numeric distribution in the dashboard now
+  shows its shape at a glance, not just min/avg/peak.
+- [Devin] Distribution-spark coverage COMPLETE (HEAD post-c85aab6):
+  every numeric distribution in the stats --family dashboard now
+  shows its shape via spark() — fitness/size/age/usage/efficiency/
+  trial_score/lifespan/args/born/last_used/parents/niches/fit_rate/
+  usage_rate/size_rate + birth/death/usage timelines. Min/avg/peak
+  alone used to hide bimodality and outliers; the spark makes the
+  shape visible at a glance.
+- [Devin] Visualization batch (HEAD post-7aca0d1): API parity —
+  /api/family now emits fitness_dist/age_dist/usage_dist/size_dist/
+  eff_dist (sorted vecs, same as CLI --json). IDE Σ view renders
+  them as mini-sparklines via a spark() JS helper. stats --top
+  gets a proportional fitness bar per family; garden + lineage
+  get the same bar per variant (scaled to the family's peak).
+  Every view now shows the shape, not just the numbers.
+- [Devin] Visualization + lint tail (HEAD post-ac078fc):
+  /api/family emits *_dist sorted vecs; IDE Σ view renders
+  them as mini-sparks; stats --top/garden/lineage rows get
+  proportional fitness bars. check --strict: while cond var
+  never assigned inside body (stmt_assigns walks nested
+  bodies), match one-arm + else → if/else.
+- [Devin] Final tail (HEAD post-d6a5be2): diff gets a fitness
+  delta (Δ ±x.xx) on both the default +++ header and the
+  --unified header. check --strict gained else { if } → else
+  if, match one-arm + else → if/else, while cond var never
+  assigned (stmt_assigns walks nested bodies). ~26 lint
+  checks; every diff/stats/garden/lineage surface shows
+  shape + delta, not just raw numbers.
+- [Devin] Name:count sparks (HEAD post-1187659): stats'
+  builtin_usage/probe_coverage/avg niche scores/mutation
+  success lines show a spark() shape next to the data —
+  the spread across names at a glance. Every numeric
+  surface in veldt now visualizes its shape (distributions,
+  bars, deltas, sparks) rather than raw numbers alone.
+- [Devin] Spark coverage complete + tautology lint (HEAD post-2adba64):
+  every name:count line in stats (builtin_usage, probe_coverage,
+  avg niche scores, mutation success, probe niches) shows a
+  spark() shape. check --strict: complementary-comparison
+  tautology (x>0 || x<0 always-true, x>0 && x<0 always-false —
+  taut_cmp walks the condition in if + while arms). ~27 lint
+  checks; every numeric surface visualizes shape + delta.
+- [Devin] Probe pass-rate spark (HEAD post-badbcf0): stats
+  --family's probe pass rate shows a per-probe shape spark —
+  which probes are hard vs easy at a glance, not just the
+  overall 40/40 count. Every distribution/rate/count surface
+  in veldt now visualizes its shape.
+- [Devin] Evolve trial delta (HEAD post-6083207): Trial events
+  carry parent_fitness; the printer shows Δ ±x.xx per trial —
+  which mutations regressed vs improved at a glance. Every
+  surface in veldt now visualizes shape + delta: distributions
+  (sparks), comparisons (fitness bars), diffs (Δ headers),
+  trials (Δ per mutation).
+- [Devin] Bench spark coverage (HEAD post-083dc2f): species line
+  gets the ms-distribution spark (which benchmarks are slow vs
+  fast); Intent latency section gets a per-intent latency spark
+  (improve/surprise are the mutation-heavy outliers). Evolve
+  trials carry parent_fitness → Δ ±x.xx per mutation. Every
+  bench/evolve surface now visualizes shape + delta.
+- [Devin] Lint batch 5 (HEAD post-c179f78): ~32 strict checks
+  now. New: descending-range for (dead loop), polar_cmp
+  (x && !x / x || !x), idempotence (x && x / x || x),
+  else { if } → else if, match one-arm + else → if/else,
+  while cond var never assigned (stmt_assigns walks nested
+  bodies), nested if without else → merge conditions.
+  All verified zero-false-positive on tictactoe.
+- [Devin] Fitness-bar sweep (HEAD post-ef02a65): the
+  proportional bar now appears in test rows and
+  garden --family rows too — every variant listing
+  (garden/lineage/test/garden --family/stats --top)
+  shows the same scaled bar.
+- [Devin] Fitness-bar sweep + lint batch 6 (HEAD post-05a94ad):
+  the proportional bar now covers every variant listing —
+  stats --top, garden, lineage, test, garden --family,
+  trust tiers, and find (scaled to the top hit). check
+  --strict ~34: + nested-if-without-else merge, all-match-
+  arms-identical, duplicate match arm patterns (literal
+  dedup — second arm unreachable).
+- [Devin] Fuzz spark + bool-literals lint (HEAD post-e22b0fe):
+  fuzz summary shows a per-case divergence-count spark
+  (which inputs split the family). check --strict ~35:
+  + if-else returning bool literals → return <cond>.
+- [Devin] Lint batch 7 (HEAD post-trailing-continue): ~36
+  strict checks. New: trailing continue in for/while
+  bodies (redundant). Verified zero-false-positive on
+  tictactoe.
+- [Devin] Lint batch 8 + name:count tail (HEAD post-878a6c4):
+  ~38 strict checks — let shadowing an outer let (same as
+  for-var-shadow, on let). stats' death causes line joins
+  the spark coverage — every name:count section now shows
+  its shape.
+- [Devin] Breakdown sparks + lint batch 9 (HEAD post-7db3079):
+  trust/health/probes breakdowns show 3-value spark shapes.
+  ~39 strict checks — let inside a for body shadowing the
+  loop var (deeper shadow catch).
+- [Devin] Lint batch 10 (HEAD post-loop-var-assign): ~40
+  strict checks. New: for-loop variable assigned inside
+  the body (mutating the iteration var). Verified
+  zero-false-positive on tictactoe.
+- [Devin] Lint batch 11 (HEAD post-single-elem-for): ~41
+  strict checks. New: for over a single-element list
+  (one-iteration loop → unwrap inline).
+- [Devin] Lint batch 12 (HEAD post-98213f2): ~42 strict
+  checks. New: dead store (x = a; x = b with no read of x
+  in between — first assign's value never used). Verified
+  zero-false-positive on tictactoe.
+- [Devin] Cycle delta (HEAD post-8a54fc7): CycleEnd carries
+  a fitness delta — pre-cycle peak vs post-cycle peak →
+  Δ ±x.xx on the completion line. Both trial (per-mutation)
+  and cycle (per-evolve) show deltas now.
+- [Devin] Full observability sweep complete (HEAD post-e0d649a):
+  every numeric surface shows its shape — ~25 distribution
+  sparks in stats --family, ~10 name:count/breakdown sparks
+  in stats, proportional fitness bars in stats --top/garden/
+  lineage/test/garden --family/trust tiers/find, fitness
+  deltas in diff (both paths) + evolve (per-trial AND
+  per-cycle), fuzz divergence spark, bench timing+intent
+  sparks. ~42 strict lint checks. ~37 agent intents.
+  prune is single-variant — no distribution to spark.
+- [Devin] Lint batch 13 (HEAD post-16be53e): ~43 strict
+  checks. New: catch body only prints the error (shallow
+  error handling — caught but not handled).
+- [Devin] Lint batch 14 + match semantics (HEAD post-16be53e):
+  ~43 strict checks. Match arm patterns evalExpr-compare
+  (not bind) — Var patterns are value comparisons, _ is
+  the unbound-var convention. The earlier let-shadows-
+  loop-var and loop-var-assignment checks are correct.
+- [Devin] veldt deps (HEAD post-f58baaf): parse-only command
+  listing a file's imports (path + alias). --json for
+  tooling. File-level dependency inspection.
