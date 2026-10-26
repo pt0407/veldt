@@ -1145,3 +1145,6 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   after return, shadowed lets, stale sentinel). 372 warnings
   / 35 variants on first run. --json for machine use. This is
   the lint→garden feedback loop — could gate adopt/promote.
+- [Devin] veldt stats --lint: garden code-health census —
+  per-family warning counts next to [verified]/[exact].
+  fib is the lint-heaviest family (246/372 warnings).
