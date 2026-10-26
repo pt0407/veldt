@@ -4823,7 +4823,10 @@ fn print_family_detail(veldt: &veldt::Veldt, fam: &String, vs: &[veldt::Function
     let total_usage = vs.iter().map(|e| e.usage_count).sum::<u64>();
     let avg_usage = total_usage as f64 / vs.len().max(1) as f64;
     let max_usage = vs.iter().map(|e| e.usage_count).max().unwrap_or(0);
-    println!("  usage: {} calls (avg {:.1}, peak {})", total_usage, avg_usage, max_usage);
+    let mut sorted_usage: Vec<f64> = vs.iter().map(|e| e.usage_count as f64).collect();
+    sorted_usage.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    println!("  usage: {} calls (avg {:.1}, peak {})  {}",
+        total_usage, avg_usage, max_usage, spark(&sorted_usage));
     // fitness distribution — min / avg / peak
     let fits: Vec<f64> = vs.iter().map(|e| e.fitness).collect();
     if !fits.is_empty() {
