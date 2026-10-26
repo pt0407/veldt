@@ -3399,6 +3399,10 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                         out.push("if condition repeats the same operand — x && x / x || x".into());
                     }
                 }
+                if a.len() == 1 && matches!(a[0], Stmt::ExprStmt(_))
+                    && b.as_ref().map(|e| e.len() == 1 && matches!(e[0], Stmt::ExprStmt(_))).unwrap_or(true) {
+                    out.push("if body is a bare expression — computed and discarded".into());
+                }
                 if b.is_none() && a.len() == 1 {
                     if let Stmt::If(_, _, inner_else) = &a[0] {
                         if inner_else.is_none() {
@@ -3433,6 +3437,9 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                 lint_block(a, out, &mut inner);
             }
             Stmt::While(cond, body) => {
+                if body.len() == 1 && matches!(body[0], Stmt::ExprStmt(_)) {
+                    out.push("loop body is a bare expression — computed and discarded".into());
+                }
                 if let Some(lit) = const_bool(cond) {
                     out.push(format!("loop on constant {} — dead or infinite", lit));
                 }
@@ -3476,6 +3483,9 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                 lint_block(body, out, &mut inner);
             }
             Stmt::For(name, iter, body) => {
+                if body.len() == 1 && matches!(body[0], Stmt::ExprStmt(_)) {
+                    out.push("loop body is a bare expression — computed and discarded".into());
+                }
                 if let Expr::List(items) = iter {
                     if items.is_empty() { out.push("for over an empty list — dead loop".into()); }
                     if items.len() == 1 { out.push("for over a single-element list — one iteration".into()); }
