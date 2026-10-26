@@ -3236,12 +3236,36 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
                 out.push(format!("fn {} has an empty body", n)),
             Stmt::Grow(GrowItem::Fn(n, _, body, _)) if body.is_empty() =>
                 out.push(format!("grow fn {} has an empty body", n)),
-            Stmt::Match(_, _, None) =>
-                out.push("match without else arm — non-exhaustive on unmatched inputs".into()),
+            Stmt::Match(_, arms, els) => {
+                if els.is_none() {
+                    out.push("match without else arm — non-exhaustive on unmatched inputs".into());
+                }
+                // duplicate arm patterns — later arm is unreachable
+                let mut seen_pats: std::collections::HashSet<String> = std::collections::HashSet::new();
+                for (pat, _) in arms {
+                    let key = format!("{:?}", pat);
+                    if !seen_pats.insert(key.clone()) {
+                        out.push(format!("match has duplicate pattern {} — later arm unreachable", key));
+                    }
+                }
+            }
             Stmt::Grow(GrowItem::Fn(n, _, _, tests))
                 if !tests.is_empty() && tests.iter().all(|t| t.expected.is_none()) =>
                 out.push(format!("grow fn {} tests are all property-only — no expected values", n)),
             _ => {}
+        }
+    }
+    // unused struct defs — declared but never instantiated/referenced
+    for s in stmts {
+        let name = match s {
+            Stmt::StructDef(n, _) | Stmt::Grow(GrowItem::Struct(n, _)) => Some(n),
+            _ => None,
+        };
+        if let Some(n) = name {
+            if !n.starts_with('_')
+                && !stmts.iter().any(|x| !std::ptr::eq(x, s) && stmt_mentions(x, n)) {
+                out.push(format!("struct {} defined but never used", n));
+            }
         }
     }
 }
