@@ -12,6 +12,13 @@ impl HealthChecker {
     /// Check a newly grown function: parse, type check, trial run.
     /// Takes a snapshot of the veldt's functions/vars/structs to avoid borrow conflicts.
     pub fn check_at_birth(entry: &mut FunctionEntry, veldt: &Veldt) {
+        Self::check_at_birth_with(entry, veldt, false)
+    }
+
+    /// use_vm: evaluate trials through the bytecode VM + JIT
+    /// (same dispatch semantics — jit_call mirrors call_function).
+    pub fn check_at_birth_with(entry: &mut FunctionEntry, veldt: &Veldt,
+                               use_vm: bool) {
         // Clone the data we need from the veldt to avoid borrow conflicts
         let functions_snapshot = veldt.functions.clone();
         let variables_snapshot = veldt.variables.clone();
@@ -20,7 +27,7 @@ impl HealthChecker {
         let probes_snapshot = veldt.probes.get(&entry.name).cloned().unwrap_or_default();
         let traces_snapshot = veldt.traces.get(&entry.name).cloned().unwrap_or_default();
 
-        let trial_result = Self::run_trial(entry, &functions_snapshot, &variables_snapshot, &structs_snapshot, &probes_snapshot, &traces_snapshot);
+        let trial_result = Self::run_trial(entry, &functions_snapshot, &variables_snapshot, &structs_snapshot, &probes_snapshot, &traces_snapshot, use_vm);
 
         match trial_result {
             TrialResult::Pass(score, steps) => {
@@ -46,14 +53,15 @@ impl HealthChecker {
                  structs: &std::collections::HashMap<String, crate::veldt::StructEntry>,
                  probes: &[crate::veldt::Probe],
                  traces: &[crate::veldt::Trace],
+                 use_vm: bool,
     ) -> TrialResult {
         let start = Instant::now();
 
         // Phase 1: author-written inline tests — must all pass
         let base = if !entry.tests.is_empty() {
-            Self::run_inline_tests(entry, functions, variables, structs, start)
+            Self::run_inline_tests(entry, functions, variables, structs, start, use_vm)
         } else {
-            Self::run_safe_defaults(entry, functions, variables, structs, start)
+            Self::run_safe_defaults(entry, functions, variables, structs, start, use_vm)
         };
 
         let (mut score, steps) = match base {
@@ -65,7 +73,7 @@ impl HealthChecker {
         // A variant that fails in some niche loses fitness there; specialists
         // can still survive by dominating their niche.
         if !probes.is_empty() {
-            let niche_scores = Self::run_probes(entry, functions, variables, structs, probes);
+            let niche_scores = Self::run_probes(entry, functions, variables, structs, probes, use_vm);
             let n_niches = niche_scores.len().max(1) as f64;
             let overall = niche_scores.values().sum::<f64>() / n_niches;
             entry.niche_scores = niche_scores;
@@ -76,7 +84,7 @@ impl HealthChecker {
         // produces results matching what users actually got earns fitness;
         // one that diverges from observed behavior loses it. Cap at 30 traces.
         if !traces.is_empty() {
-            let trace_score = Self::score_traces(entry, functions, variables, structs, traces);
+            let trace_score = Self::score_traces(entry, functions, variables, structs, traces, use_vm);
             score += trace_score * 0.4; // up to +0.4 for matching real usage
         }
 
@@ -85,7 +93,7 @@ impl HealthChecker {
         if !probes.is_empty() {
             let big: Vec<&crate::veldt::Probe> = probes.iter().filter(|p| p.scale > 0).collect();
             if !big.is_empty() {
-                let eff = Self::measure_efficiency(entry, functions, variables, structs, &big);
+                let eff = Self::measure_efficiency(entry, functions, variables, structs, &big, use_vm);
                 entry.efficiency = eff;
                 // log-scale bonus: 2x faster => +0.17, 2x slower => -0.17
                 let bonus = eff.ln().clamp(-1.0, 1.0) * 0.25;
@@ -101,10 +109,12 @@ impl HealthChecker {
                   functions: &std::collections::HashMap<String, Vec<FunctionEntry>>,
                   variables: &std::collections::HashMap<String, crate::veldt::VariableEntry>,
                   structs: &std::collections::HashMap<String, crate::veldt::StructEntry>,
-                  probes: &[crate::veldt::Probe]) -> std::collections::HashMap<String, f64> {
+                  probes: &[crate::veldt::Probe],
+                  use_vm: bool) -> std::collections::HashMap<String, f64> {
         let mut interp = Interpreter::with_step_limit(10000);
         interp.caps = crate::interpreter::Caps::sandboxed();
         Self::load_snapshot_into_interp(functions, variables, structs, &mut interp);
+        let mut vm = if use_vm { Self::mk_vm(entry, functions, variables, structs) } else { None };
         let variant = crate::interpreter::FunctionVariant {
             id: entry.id,
             fitness: entry.fitness,
@@ -127,7 +137,7 @@ impl HealthChecker {
             let expected = match expected { Ok(v) => v, Err(_) => continue };
             let e = per_niche.entry(probe.niche.clone()).or_insert((0, 0));
             e.1 += 1;
-            match interp.call_function(&entry.name, Some(entry.id), args) {
+            match Self::call_one(&mut interp, &mut vm, &entry.name, Some(entry.id), args) {
                 Ok(v) if Self::values_equal(&v, &expected) => { e.0 += 1; }
                 _ => {}
             }
@@ -141,10 +151,12 @@ impl HealthChecker {
                     functions: &std::collections::HashMap<String, Vec<FunctionEntry>>,
                     variables: &std::collections::HashMap<String, crate::veldt::VariableEntry>,
                     structs: &std::collections::HashMap<String, crate::veldt::StructEntry>,
-                    traces: &[crate::veldt::Trace]) -> f64 {
+                    traces: &[crate::veldt::Trace],
+                  use_vm: bool) -> f64 {
         let mut interp = Interpreter::with_step_limit(10000);
         interp.caps = crate::interpreter::Caps::sandboxed();
         Self::load_snapshot_into_interp(functions, variables, structs, &mut interp);
+        let mut vm = if use_vm { Self::mk_vm(entry, functions, variables, structs) } else { None };
         let variant = crate::interpreter::FunctionVariant {
             id: entry.id,
             fitness: entry.fitness,
@@ -164,7 +176,7 @@ impl HealthChecker {
                 .filter_map(|s| serde_json::from_str(s).ok()).collect();
             if args.len() != entry.params.len() { continue; }
             used += 1;
-            match interp.call_function(&entry.name, Some(entry.id), args) {
+            match Self::call_one(&mut interp, &mut vm, &entry.name, Some(entry.id), args) {
                 Ok(v) => {
                     if serde_json::to_string(&v).unwrap_or_default() == t.result { ok += 1; }
                 }
@@ -181,10 +193,12 @@ impl HealthChecker {
                           functions: &std::collections::HashMap<String, Vec<FunctionEntry>>,
                           variables: &std::collections::HashMap<String, crate::veldt::VariableEntry>,
                           structs: &std::collections::HashMap<String, crate::veldt::StructEntry>,
-                          big_probes: &[&crate::veldt::Probe]) -> f64 {
+                          big_probes: &[&crate::veldt::Probe],
+                          use_vm: bool) -> f64 {
         let mut interp = Interpreter::with_step_limit(200000);
         interp.caps = crate::interpreter::Caps::sandboxed();
         Self::load_snapshot_into_interp(functions, variables, structs, &mut interp);
+        let mut vm = if use_vm { Self::mk_vm(entry, functions, variables, structs) } else { None };
         // add this variant
         interp.functions.entry(entry.name.clone()).or_insert_with(Vec::new)
             .push(crate::interpreter::FunctionVariant {
@@ -209,18 +223,50 @@ impl HealthChecker {
                 .filter_map(|s| serde_json::from_str(s).ok()).collect();
             if args.len() != entry.params.len() { continue; }
             let before = interp.step_count;
-            let _ = interp.call_function(&entry.name, Some(entry.id), args.clone());
+            let _ = Self::call_one(&mut interp, &mut vm, &entry.name, Some(entry.id), args.clone());
             my_steps += interp.step_count - before;
             used += 1;
             if let Some(id) = incumbent_id {
                 let before = interp.step_count;
-                let _ = interp.call_function(&entry.name, Some(id), args);
+                let _ = Self::call_one(&mut interp, &mut vm, &entry.name, Some(id), args);
                 base_steps += interp.step_count - before;
             }
         }
         if used == 0 || my_steps == 0 { return 1.0; }
         if base_steps == 0 { return 1.0; }
         (base_steps as f64 / my_steps as f64).clamp(0.05, 20.0)
+    }
+
+    /// Call a variant through the VM (boxed-Value ABI path) or the
+    /// tree-walker — identical dispatch semantics either way.
+    fn call_one(interp: &mut Interpreter, vm: &mut Option<crate::vm::Vm>,
+                name: &str, id: Option<u32>, args: Vec<Value>)
+        -> Result<Value, String> {
+        match vm {
+            Some(v) => v.jit_call(name, id, args),
+            None => interp.call_function(name, id, args),
+        }
+    }
+
+    /// Build a Vm from the snapshot maps, force-including the variant
+    /// under test (load_garden skips non-Healthy entries).
+    fn mk_vm(entry: &FunctionEntry,
+             functions: &std::collections::HashMap<String, Vec<FunctionEntry>>,
+             variables: &std::collections::HashMap<String, crate::veldt::VariableEntry>,
+             structs: &std::collections::HashMap<String, crate::veldt::StructEntry>)
+        -> Option<crate::vm::Vm> {
+        let mut vv = Veldt::new();
+        vv.functions = functions.clone();
+        vv.variables = variables.clone();
+        vv.structs = structs.clone();
+        let mut e2 = entry.clone();
+        e2.health = Health::Healthy;
+        let vs = vv.functions.entry(entry.name.clone()).or_default();
+        vs.retain(|x| x.id != e2.id);
+        vs.push(e2);
+        let mut v = crate::vm::Vm::new();
+        v.load_garden(&vv).ok()?;
+        Some(v)
     }
 
     fn load_snapshot_into_interp(
@@ -260,10 +306,11 @@ impl HealthChecker {
                         functions: &std::collections::HashMap<String, Vec<FunctionEntry>>,
                         variables: &std::collections::HashMap<String, crate::veldt::VariableEntry>,
                         structs: &std::collections::HashMap<String, crate::veldt::StructEntry>,
-                        start: Instant) -> TrialResult {
+                        start: Instant, use_vm: bool) -> TrialResult {
         let mut interp = Interpreter::with_step_limit(10000);
         interp.caps = crate::interpreter::Caps::sandboxed();
         Self::load_snapshot_into_interp(functions, variables, structs, &mut interp);
+        let mut vm = if use_vm { Self::mk_vm(entry, functions, variables, structs) } else { None };
 
         // Load the function being tested
         let variant = crate::interpreter::FunctionVariant {
@@ -327,10 +374,11 @@ impl HealthChecker {
                          functions: &std::collections::HashMap<String, Vec<FunctionEntry>>,
                          variables: &std::collections::HashMap<String, crate::veldt::VariableEntry>,
                          structs: &std::collections::HashMap<String, crate::veldt::StructEntry>,
-                         start: Instant) -> TrialResult {
+                         start: Instant, use_vm: bool) -> TrialResult {
         let mut interp = Interpreter::with_step_limit(10000);
         interp.caps = crate::interpreter::Caps::sandboxed();
         Self::load_snapshot_into_interp(functions, variables, structs, &mut interp);
+        let mut vm = if use_vm { Self::mk_vm(entry, functions, variables, structs) } else { None };
 
         let variant = crate::interpreter::FunctionVariant {
             id: entry.id,
@@ -346,7 +394,7 @@ impl HealthChecker {
 
         let args: Vec<Value> = entry.params.iter().map(|p| Self::safe_default(&p.typ)).collect();
 
-        match interp.call_function(&entry.name, Some(entry.id), args) {
+        match Self::call_one(&mut interp, &mut vm, &entry.name, Some(entry.id), args) {
             Ok(_) => {
                 let elapsed = start.elapsed().as_secs_f64();
                 let steps = interp.step_count;

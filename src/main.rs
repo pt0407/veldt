@@ -4709,6 +4709,7 @@ fn absorb_traces(only: Option<&str>) -> Vec<(String, u32)> {
 
 fn test_family(name: &str) {
     let json = std::env::args().any(|a| a == "--json");
+    let use_vm = std::env::args().any(|a| a == "--vm");
     let mut veldt = veldt::Veldt::new();
     if let Err(e) = veldt.load() { eprintln!("Error loading veldt: {}", e); process::exit(1); }
     let ids: Vec<u32> = veldt.functions.get(name).map(|vs| vs.iter().map(|e| e.id).collect()).unwrap_or_default();
@@ -4727,7 +4728,7 @@ fn test_family(name: &str) {
     let mut results: Vec<serde_json::Value> = Vec::new();
     for id in ids {
         let mut e = veldt.functions[name].iter().find(|e| e.id == id).cloned().unwrap();
-        health::HealthChecker::check_at_birth(&mut e, &veldt);
+        health::HealthChecker::check_at_birth_with(&mut e, &veldt, use_vm);
         if let Some(vs) = veldt.functions.get_mut(name) {
             for v in vs.iter_mut() { if v.id == id { *v = e.clone(); break; } }
         }
