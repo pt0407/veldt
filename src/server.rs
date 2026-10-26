@@ -63,6 +63,7 @@ pub async fn start_server(port: u16) {
         .route("/api/census", get(census))
         .route("/api/args", get(args))
         .route("/api/sizes", get(sizes))
+        .route("/api/last_used", get(last_used))
         .route("/api/run", post(run_program))
         .route("/api/evolve", post(evolve))
         .route("/api/clear", post(clear_veldt))
@@ -499,6 +500,21 @@ async fn sizes() -> Json<serde_json::Value> {
         })).collect::<Vec<_>>())
         .collect();
     Json(serde_json::json!({"sizes": size_data}))
+}
+
+async fn last_used() -> Json<serde_json::Value> {
+    let mut veldt = veldt::Veldt::new();
+    if veldt.load().is_err() {
+        return Json(serde_json::json!({"error": "garden load failed"}));
+    }
+    let stale_data: Vec<serde_json::Value> = veldt.functions.iter()
+        .flat_map(|(n, vs)| vs.iter().map(|e| serde_json::json!({
+            "variant": format!("{}#{}", n, e.id),
+            "last_used": e.last_used,
+            "staleness": veldt.run_count.saturating_sub(e.last_used),
+        })).collect::<Vec<_>>())
+        .collect();
+    Json(serde_json::json!({"last_used": stale_data}))
 }
 
 #[derive(Deserialize)]
