@@ -36,6 +36,7 @@ pub async fn start_server(port: u16) {
         .route("/api/tournament", post(tournament))
         .route("/api/swarm", post(swarm))
         .route("/api/play", post(play_demo))
+        .route("/api/game", post(game_step))
         .route("/api/call", post(call_fn))
         .route("/api/adopt", post(adopt_variant))
         .route("/api/run", post(run_program))
@@ -127,6 +128,29 @@ async fn play_demo(
 }
 
 #[derive(Deserialize)]
+struct GameRequest {
+    // POST {source, ticks} — run `source` for `ticks` game_loop ticks,
+    // return the program's output. The IDE drives a live game panel.
+    source: String,
+    ticks: Option<i64>,
+}
+
+async fn game_step(
+    Json(req): Json<GameRequest>,
+) -> Json<serde_json::Value> {
+    // write the source to a temp file and run it — the game program's
+    // stdout is its canvas state.
+    let tmp = std::env::temp_dir().join(format!("veldt_game_{}.veldt", std::process::id()));
+    let src = format!("{}\n# tick limit {}\n", req.source, req.ticks.unwrap_or(0));
+    if let Err(e) = std::fs::write(&tmp, src) {
+        return Json(serde_json::json!({ "ok": false, "error": format!("temp write: {}", e) }));
+    }
+    let out = crate::run_program_capture(tmp.to_str().unwrap_or(""));
+    let _ = std::fs::remove_file(&tmp);
+    Json(serde_json::json!({ "ok": true, "output": out }))
+}
+
+#[derive(Deserialize)]
 struct SwarmRequest { url: String }
 
 async fn swarm(
@@ -168,12 +192,51 @@ async fn stats(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
             }
         }
     }
+    // histograms matching `veldt stats`
+    const BUILTINS: &[&str] = &[
+        "canvas", "grid_", "ui_", "bt_", "balance", "astar", "bfs", "los",
+        "fov", "rand", "roll", "dice", "choice", "weighted", "noise", "fbm",
+        "perlin", "poisson", "voronoi", "delaunay", "wfc", "maze", "flood",
+        "neighbor", "lerp", "clamp", "dist", "aabb", "smoothstep", "bezier",
+        "point_in_poly", "convex", "ease", "bounce", "line_points", "turn",
+        "fsm", "book", "svc_", "robot", "edge", "game_loop", "dist_stats",
+    ];
+    let mut use_count: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    let mut fit_by_source: std::collections::HashMap<String, Vec<f64>> = std::collections::HashMap::new();
+    let mut mut_rate: std::collections::HashMap<String, (usize, usize)> = std::collections::HashMap::new();
+    let mut niche_sum: std::collections::HashMap<String, (f64, usize)> = std::collections::HashMap::new();
+    for vs in v.functions.values() {
+        for e in vs {
+            let src = crate::fmt::format_program(&e.body);
+            for b in BUILTINS { if src.contains(b) { *use_count.entry(b).or_default() += 1; } }
+            let origin = e.origin.split(' ').next().unwrap_or("seed").to_string();
+            fit_by_source.entry(origin.clone()).or_default().push(e.fitness);
+            let ent = mut_rate.entry(origin).or_default();
+            if e.health == crate::veldt::Health::Healthy { ent.0 += 1; }
+            ent.1 += 1;
+            for (n, s) in &e.niche_scores {
+                let ent = niche_sum.entry(n.clone()).or_default();
+                ent.0 += s; ent.1 += 1;
+            }
+        }
+    }
     Json(serde_json::json!({
         "lineages": v.functions.len(), "variants": total,
         "healthy": healthy, "sick": sick, "dying": dying,
         "seedling": seed, "established": estab, "canonical": canon,
         "probes": v.probes.values().map(|p| p.len()).sum::<usize>(),
         "deaths": v.obituaries.len(), "runs": v.run_count,
+        "builtin_usage": use_count.iter().map(|(b, c)| serde_json::json!({b: c})).collect::<Vec<_>>(),
+        "fitness_by_source": fit_by_source.iter().map(|(s, fits)| serde_json::json!({
+            s: fits.iter().sum::<f64>() / fits.len().max(1) as f64,
+        })).collect::<Vec<_>>(),
+        "mutation_success": mut_rate.iter().map(|(s, (h, t))| serde_json::json!({
+            s: h as f64 / (*t).max(1) as f64,
+        })).collect::<Vec<_>>(),
+        "avg_niche_scores": niche_sum.iter().map(|(n, (s, c))| serde_json::json!({
+            n: s / (*c).max(1) as f64,
+        })).collect::<Vec<_>>(),
+        "probe_coverage": v.probes.iter().map(|(n, p)| serde_json::json!({n: p.len()})).collect::<Vec<_>>(),
     }))
 }
 

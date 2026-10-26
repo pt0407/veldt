@@ -882,6 +882,25 @@ fn print_stats(veldt: &veldt::Veldt) {
             .map(|(n, a)| format!("{}:{:.2}", n, a)).collect();
         println!("avg niche scores: {}", line.join(" "));
     }
+    // mutation success rate — which operators produce healthy variants
+    let mut mut_rate: std::collections::HashMap<String, (usize, usize)> =
+        std::collections::HashMap::new();
+    for vs in veldt.functions.values() {
+        for e in vs {
+            let src = e.origin.split(' ').next().unwrap_or("seed").to_string();
+            let ent = mut_rate.entry(src).or_default();
+            if e.health == Health::Healthy { ent.0 += 1; }
+            ent.1 += 1;
+        }
+    }
+    let mut rates: Vec<(String, usize, usize)> = mut_rate.into_iter()
+        .map(|(s, (h, t))| (s, h, t)).collect();
+    rates.sort_by(|a, b| b.1.cmp(&a.1).then(b.2.cmp(&a.2)));
+    if !rates.is_empty() {
+        let line: Vec<String> = rates.iter().take(8)
+            .map(|(s, h, t)| format!("{}:{}/{}", s, h, t)).collect();
+        println!("mutation success (healthy/total): {}", line.join(" "));
+    }
     // coverage line — which families carry probe mass vs bare lineages
     let bare: Vec<&String> = veldt.functions.keys()
         .filter(|n| veldt.probes.get(*n).map(|p| p.is_empty()).unwrap_or(true))
