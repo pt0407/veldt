@@ -737,7 +737,7 @@ fn serialize_value(val: &Value) -> String {
     serde_json::to_string(val).unwrap_or_else(|_| "\"null\"".into())
 }
 
-fn deserialize_value(s: &str) -> Result<Value, String> {
+pub(crate) fn deserialize_value(s: &str) -> Result<Value, String> {
     serde_json::from_str(s).map_err(|e| e.to_string())
 }
 

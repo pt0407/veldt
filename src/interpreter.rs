@@ -462,7 +462,7 @@ impl Interpreter {
         Ok(FlowControl::Normal)
     }
 
-    fn is_truthy(&self, val: &Value) -> bool {
+    pub(crate) fn is_truthy(&self, val: &Value) -> bool {
         match val {
             Value::Bool(b) => *b,
             Value::Int(n) => *n != 0,
@@ -475,6 +475,12 @@ impl Interpreter {
             Value::Closure(_, _, _) => true,
             Value::Struct(_, fields) => !fields.is_empty(),
         }
+    }
+
+    /// Public wrapper so the VM can delegate method calls through the
+    /// one canonical eval (keeps method/fast-path semantics shared).
+    pub(crate) fn eval_expr_pub(&mut self, expr: &Expr) -> Result<Value, String> {
+        self.eval_expr(expr)
     }
 
     fn eval_expr(&mut self, expr: &Expr) -> Result<Value, String> {
@@ -1267,7 +1273,7 @@ impl Interpreter {
         Ok(())
     }
 
-    fn try_builtin(&mut self, name: &str, args: &[Value]) -> Result<Option<Value>, String> {
+    pub(crate) fn try_builtin(&mut self, name: &str, args: &[Value]) -> Result<Option<Value>, String> {
         match name {
             "range" => {
                 if args.len() != 1 {

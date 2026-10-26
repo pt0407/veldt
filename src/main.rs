@@ -12,6 +12,7 @@ mod lsp;
 mod parser;
 mod server;
 mod veldt;
+mod vm;
 mod visual;
 
 use std::env;
@@ -48,8 +49,17 @@ fn main() {
                 let code = args[3..].iter().take_while(|a| a.as_str() != "--").cloned().collect::<Vec<_>>().join(" ");
                 let tmp = std::env::temp_dir().join(format!("veldt-eval-{}.veldt", std::process::id()));
                 std::fs::write(&tmp, &code).unwrap_or_else(|e| { eprintln!("eval temp write: {}", e); process::exit(1); });
-                run_program(tmp.to_str().unwrap(), args.iter().any(|a| a == "--trace"), args.iter().any(|a| a == "--evolve"));
+                if args.iter().any(|a| a == "--vm") {
+                    run_program_vm(tmp.to_str().unwrap());
+                } else {
+                    run_program(tmp.to_str().unwrap(), args.iter().any(|a| a == "--trace"), args.iter().any(|a| a == "--evolve"));
+                }
                 let _ = std::fs::remove_file(&tmp);
+            } else if args.iter().any(|a| a == "--vm") {
+                // Phase 11: bytecode VM executor (computational subset)
+                let file = args[2..].iter().find(|a| a.ends_with(".veldt"))
+                    .cloned().unwrap_or_else(|| args[2].clone());
+                run_program_vm(&file);
             } else {
                 run_program(&args[2], args.iter().any(|a| a == "--trace"), args.iter().any(|a| a == "--evolve"));
             }
@@ -727,6 +737,42 @@ impl rustyline::hint::Hinter for VeldtHelper {
 impl rustyline::highlight::Highlighter for VeldtHelper {}
 impl rustyline::validate::Validator for VeldtHelper {}
 impl rustyline::Helper for VeldtHelper {}
+
+fn run_program_vm(path: &str) {
+    // Phase 11: bytecode VM path. Same lex/parse; different executor.
+    let source = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) => { eprintln!("Error reading file '{}': {}", path, e); process::exit(1); }
+    };
+    let mut lexer = lexer::Lexer::new(&source);
+    let tokens = match lexer.tokenize() {
+        Ok(t) => t,
+        Err(e) => { eprintln!("Lex error: {}", e); process::exit(1); }
+    };
+    let mut parser = parser::Parser::new_with_lines(tokens, lexer.token_lines.clone());
+    let stmts = match parser.parse_program() {
+        Ok(s) => s,
+        Err(e) => { eprintln!("Parse error: {}", e); process::exit(1); }
+    };
+    let mut steps: u64 = 100_000_000;
+    let cli_args: Vec<String> = env::args().collect();
+    if let Some(pos) = cli_args.iter().position(|a| a == "--steps") {
+        if let Some(n) = cli_args.get(pos + 1).and_then(|s| s.parse::<u64>().ok()) {
+            steps = n;
+        }
+    }
+    let mut v = vm::Vm::new();
+    let mut garden = veldt::Veldt::new();
+    if garden.load().is_ok() {
+        if let Err(e) = v.load_garden(&garden) {
+            eprintln!("VM note: {}", e);
+        }
+    }
+    if let Err(e) = v.run(&stmts, steps) {
+        eprintln!("VM runtime error: {}", e);
+        process::exit(1);
+    }
+}
 
 fn start_repl() {
     use rustyline::DefaultEditor;
