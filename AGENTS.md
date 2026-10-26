@@ -1255,3 +1255,6 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   repair on the buffer (repair_program + fmt writeback),
   re-lints after applying. Studio squiggle->fix loop = the
   LSP quick-fix without a client.
+- [Devin] triage covers lint: 'what needs attention' flags
+  defect-carrying variants (healthy-by-trial but buggy-by-
+  inspection) alongside sick/dying/weakest.
