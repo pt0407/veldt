@@ -1958,11 +1958,18 @@ fn main() {
                 .and_then(|p| args.get(p + 1));
             let watch = args.iter().any(|a| a == "--watch");
             if watch { eprintln!("[EVOLVE] watch mode — Ctrl-C to stop"); }
+            let json_stream = args.iter().any(|a| a == "--json");
             let mut run_cycles = 0usize;
             while run_cycles < cycles || watch {
                 let events = evolver.evolve_scoped(&mut veldt, 1,
                     fam_scope.map(|s| s.as_str()));
-                for event in &events { eprintln!("{}", event.format()); }
+                for event in &events {
+                    if json_stream {
+                        println!("{}", serde_json::to_string(event).unwrap_or_default());
+                    } else {
+                        eprintln!("{}", event.format());
+                    }
+                }
                 run_cycles += 1;
                 if let Some(target) = until {
                     let peak = veldt.functions.values()

@@ -1113,7 +1113,7 @@ fn now_ts() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub enum EvolutionEvent {
     CycleStart(usize),
     NoCandidates,
