@@ -4120,6 +4120,7 @@ fn adopt_variant(target: &str) {
                          name, id);
             }
         }
+        let json = std::env::args().any(|a| a == "--json");
         if let Some(variants) = veldt.functions.get_mut(name) {
             let mut found = false;
             for v in variants.iter_mut() {
@@ -4127,8 +4128,24 @@ fn adopt_variant(target: &str) {
             }
             if found {
                 veldt.save().unwrap_or_else(|e| eprintln!("Save error: {}", e));
-                println!("Adopted {}#{} — now Canonical, dispatch prefers it", name, id);
+                if json {
+                    println!("{}", serde_json::json!({
+                        "adopted": true, "variant": format!("{}#{}", name, id),
+                        "trust": "Canonical", "verified": verify,
+                    }));
+                } else {
+                    println!("Adopted {}#{} — now Canonical, dispatch prefers it", name, id);
+                }
+            } else if json {
+                println!("{}", serde_json::json!({
+                    "adopted": false, "variant": format!("{}#{}", name, id),
+                    "reason": "not found",
+                }));
             } else { println!("{}#{} not found", name, id); }
+        } else if json {
+            println!("{}", serde_json::json!({
+                "adopted": false, "variant": name, "reason": "no lineage",
+            }));
         } else { println!("No lineage '{}'", name); }
     } else { eprintln!("Usage: veldt adopt <name#N>"); }
 }
