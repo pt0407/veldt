@@ -2475,6 +2475,12 @@ fn print_stats(veldt: &veldt::Veldt) {
                         println!("    {:<20} {}", cause, n);
                     }
                 }
+                // maturity — old+trusted vs young+seedling (the trust-age profile)
+                let old_trusted = vs.iter().filter(|e|
+                    e.age > 30 && matches!(e.trust, veldt::Trust::Established | veldt::Trust::Canonical)).count();
+                let young_seedling = vs.iter().filter(|e|
+                    e.age <= 10 && matches!(e.trust, veldt::Trust::Seedling)).count();
+                println!("  maturity: {} veteran·trusted · {} new·seedling", old_trusted, young_seedling);
             }
         }
         if veldt.fitness_history.len() >= 2 {
