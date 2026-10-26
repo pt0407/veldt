@@ -414,3 +414,29 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   v0.3.0 tag, brew, hosted pool endpoint, VELDT_LLM_KEY e2e.
   One flake note: test_evolution_creates_mutants was RNG-flaky —
   mutate_retry re-rolls no-op mutations now.
+
+- [Devin] Filter/sort DSL consolidation + stats --family dashboard
+  (all on main, HEAD=8a356bf): ~86 mechanical garden flags removed
+  (~1530 lines) — all covered by `--filter "<expr>" --sort <field>`.
+  DSL fields: family, fitness, age, usage, size, args, lifespan,
+  last_used, niches, born, trial_score, efficiency, parents, healing,
+  health, trust, origin, calls, niche:<name>, sick_err. Operators:
+  > < >= <= == != ~ (substring); && || ! / not for composition.
+  Sort: `sort_variants` in veldt.rs supports 30+ fields incl
+  niche:<name>, fit_rate, usage_rate, size_rate, efficiency,
+  niche_score. Wired into 14 commands: garden/stats/evolve/test/fuzz/
+  find/lineage/adopt/diff/verify/bench/tournament/absorb + /api/filter.
+  `stats --family <name>` = per-family dashboard (~55 sections gated
+  behind --top): leaderboard, niche matrix, origins, trust/health,
+  probes/traces/deaths, ages, usage, fitness, size, builtins, healing,
+  staleness, lifecycle, workload, source success/fitness, probe
+  niches/inputs/pass-rate, turnover, diversity, population, sick errs,
+  maturity, gaps, proven/risky, LLM count, immigrant origins,
+  fit_rate/usage_rate/size_rate, pressure, birth timeline, siblings,
+  code diversity, death causes, champion/weakest.
+  `check --strict` gained: dup fn defs, empty bodies, non-exhaustive
+  match, property-only test clauses.
+  GOTCHA: `grep "error" | head` in a build chain exits 0 on match —
+  the && chain then runs the STALE binary and commits unbuilt code.
+  Commits c556e15..50684aa were pushed uncompilable; fixed in 8a356bf.
+  Verify builds with a plain cargo build before committing.
