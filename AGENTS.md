@@ -542,3 +542,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   list), dead ("dead code"/"unreachable" → dead-code-removal
   variants; checked BEFORE obituary — it's not a death query).
   All help-documented. ~30 intents total now.
+- [Devin] Agent intent batch 5 tail (HEAD post-7b22b99): best
+  ("who's winning"/"leaderboard" → peak-per-family ranked +
+  scoped top-3). ~32 intents total — the agent answers nearly
+  every garden inspection question the CLI can ask.
