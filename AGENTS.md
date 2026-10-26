@@ -1054,3 +1054,6 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 - [Devin] Lint batch 46 (HEAD post-match-binop): ~77 strict
   checks. New: match on a binop-bound var — the scrutinee
   is a computed expr, could match it directly.
+- [Devin] Lint batch 47 (HEAD post-match-trans-const): ~78
+  strict checks. New: match on a transitive-constant var —
+  the scrutinee is a constant through an alias chain.
