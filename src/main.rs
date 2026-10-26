@@ -701,11 +701,14 @@ fn main() {
                     veldt::sort_variants(&mut vs, field);
                 }
                 println!("=== The Veldt ({}) ===", fam);
+                let peak_f = vs.iter().map(|x| x.fitness)
+                    .fold(f64::NEG_INFINITY, f64::max);
                 for e in &vs {
-                    let mark = if e.fitness == vs.iter().map(|x| x.fitness)
-                        .fold(f64::NEG_INFINITY, f64::max) { " *" } else { "" };
-                    println!("  {}#{}{} — {:?} | age: {} | fitness: {:.2} | origin: {}",
-                        fam, e.id, mark, e.health, e.age, e.fitness, e.origin);
+                    let mark = if e.fitness == peak_f { " *" } else { "" };
+                    let bar = "█".repeat(
+                        ((e.fitness / peak_f.max(f64::EPSILON)) * 6.0).round() as usize);
+                    println!("  {}#{}{} — {:?} | age: {} | fitness: {:.2} {} | origin: {}",
+                        fam, e.id, mark, e.health, e.age, e.fitness, bar, e.origin);
                 }
                 // footer — compact family summary
                 if !vs.is_empty() {
