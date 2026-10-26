@@ -4010,11 +4010,20 @@ fn absorb_traces(only: Option<&str>) -> Vec<(String, u32)> {
 }
 
 fn test_family(name: &str) {
+    let json = std::env::args().any(|a| a == "--json");
     let mut veldt = veldt::Veldt::new();
     if let Err(e) = veldt.load() { eprintln!("Error loading veldt: {}", e); process::exit(1); }
     let ids: Vec<u32> = veldt.functions.get(name).map(|vs| vs.iter().map(|e| e.id).collect()).unwrap_or_default();
-    if ids.is_empty() { println!("No variants of '{}'", name); return; }
-    println!("=== Trials for {} ===", name);
+    if ids.is_empty() {
+        if json {
+            println!("{}", serde_json::json!({"family": name, "error": "no variants"}));
+        } else {
+            println!("No variants of '{}'", name);
+        }
+        return;
+    }
+    if !json { println!("=== Trials for {} ===", name); }
+    let mut results: Vec<serde_json::Value> = Vec::new();
     for id in ids {
         let mut e = veldt.functions[name].iter().find(|e| e.id == id).cloned().unwrap();
         health::HealthChecker::check_at_birth(&mut e, &veldt);
@@ -4026,10 +4035,25 @@ fn test_family(name: &str) {
             veldt::Health::Sick(m) => format!("sick: {}", m),
             veldt::Health::Dying => "dying".into(),
         };
-        println!("  {}#{} — {} | fitness: {:.2} | niches: {:?}",
-            name, id, health, e.fitness, e.niche_scores);
+        if json {
+            results.push(serde_json::json!({
+                "id": id, "health": health, "fitness": e.fitness,
+                "niches": e.niche_scores,
+            }));
+        } else {
+            println!("  {}#{} — {} | fitness: {:.2} | niches: {:?}",
+                name, id, health, e.fitness, e.niche_scores);
+        }
     }
     veldt.save().unwrap_or_else(|e| eprintln!("Save error: {}", e));
+    if json {
+        let healthy = results.iter().filter(|r| r["health"] == "healthy").count();
+        println!("{}", serde_json::json!({
+            "family": name, "variants": results.len(),
+            "healthy": healthy, "sick": results.len() - healthy,
+            "results": results,
+        }));
+    }
 }
 
 fn adopt_variant(target: &str) {
