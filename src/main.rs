@@ -3414,9 +3414,238 @@ fn fmt_check(path: &str) {
 pub fn lint(stmts: &[ast::Stmt]) -> Vec<String> {
     use ast::*;
     let mut out = Vec::new();
+    // call-arity pass — calls to locally-defined fns with the
+    // wrong arg count are real bugs, not just style
+    let mut fns = std::collections::HashMap::new();
+    let mut rets = std::collections::HashMap::new();
+    collect_fns(stmts, &mut fns, &mut rets);
+    if fns.values().any(|a| a.is_some()) {
+        arity_block(stmts, &fns, &rets, None, &mut out);
+    }
     let mut outer = std::collections::HashSet::new();
     lint_block(stmts, &mut out, &mut outer);
     out
+}
+
+/// collect name -> param count for locally defined fns; a name
+/// defined twice with different arities is ambiguous — skipped.
+fn collect_fns(stmts: &[ast::Stmt],
+               fns: &mut std::collections::HashMap<String, Option<usize>>,
+               rets: &mut std::collections::HashMap<String, bool>) {
+    use ast::*;
+    fn record(fns: &mut std::collections::HashMap<String, Option<usize>>,
+              name: &str, arity: usize) {
+        match fns.get(name) {
+            None => { fns.insert(name.to_string(), Some(arity)); }
+            Some(Some(a)) if *a != arity => { fns.insert(name.to_string(), None); }
+            _ => {}
+        }
+    }
+    for s in stmts {
+        match s {
+            Stmt::FnDef(name, params, body) => {
+                record(fns, name, params.len());
+                rets.insert(name.clone(), block_returns_value(body));
+                collect_fns(body, fns, rets);
+            }
+            Stmt::Grow(GrowItem::Fn(name, params, body, _)) => {
+                record(fns, name, params.len());
+                rets.insert(name.clone(), block_returns_value(body));
+                collect_fns(body, fns, rets);
+            }
+            Stmt::If(_, a, b) => {
+                collect_fns(a, fns, rets);
+                if let Some(b) = b { collect_fns(b, fns, rets); }
+            }
+            Stmt::While(_, b) | Stmt::For(_, _, b) => collect_fns(b, fns, rets),
+            Stmt::Try(a, _, c) => { collect_fns(a, fns, rets); collect_fns(c, fns, rets); }
+            Stmt::Match(_, arms, els) => {
+                for (_, b) in arms { collect_fns(b, fns, rets); }
+                if let Some(b) = els { collect_fns(b, fns, rets); }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// does any statement in this block `return <expr>` — nested
+/// fn/lambda returns belong to those bodies, not this one.
+fn block_returns_value(stmts: &[ast::Stmt]) -> bool {
+    use ast::*;
+    stmts.iter().any(|s| match s {
+        Stmt::Return(Some(_)) => true,
+        Stmt::If(_, a, b) => block_returns_value(a)
+            || b.as_ref().map(|v| block_returns_value(v)).unwrap_or(false),
+        Stmt::While(_, b) | Stmt::For(_, _, b) => block_returns_value(b),
+        Stmt::Try(a, _, c) => block_returns_value(a) || block_returns_value(c),
+        Stmt::Match(_, arms, els) =>
+            arms.iter().any(|(_, b)| block_returns_value(b))
+            || els.as_ref().map(|v| block_returns_value(v)).unwrap_or(false),
+        _ => false,
+    })
+}
+
+/// walk a block flagging calls to locally-defined fns whose arg
+/// count doesn't match the definition. ctx = enclosing fn name.
+fn arity_block(stmts: &[ast::Stmt],
+               fns: &std::collections::HashMap<String, Option<usize>>,
+               rets: &std::collections::HashMap<String, bool>,
+               ctx: Option<&str>, out: &mut Vec<String>) {
+    use ast::*;
+    for s in stmts {
+        match s {
+            Stmt::Let(n, e) => {
+                // let add = ... where `add` is a defined fn — calls
+                // to add(...) inside now hit the var, not the fn
+                if fns.contains_key(n) {
+                    let msg = format!("let {} shadows fn {} — calls will hit the var", n, n);
+                    out.push(match ctx {
+                        Some(f) => format!("{}: {}", f, msg),
+                        None => msg,
+                    });
+                }
+                // let x = f() where f never `return <expr>` — binds null
+                if let Expr::Call(callee, _, _) = e {
+                    if rets.get(callee) == Some(&false) {
+                        let msg = format!("let {} = {}() — {} never returns a value (binds null)", n, callee, callee);
+                        out.push(match ctx {
+                            Some(f) => format!("{}: {}", f, msg),
+                            None => msg,
+                        });
+                    }
+                }
+                arity_expr(e, fns, rets, ctx, out);
+            }
+            Stmt::Assign(n, e) => {
+                if let Expr::Call(callee, _, _) = e {
+                    if rets.get(callee) == Some(&false) {
+                        let msg = format!("{} = {}() — {} never returns a value (binds null)", n, callee, callee);
+                        out.push(match ctx {
+                            Some(f) => format!("{}: {}", f, msg),
+                            None => msg,
+                        });
+                    }
+                }
+                arity_expr(e, fns, rets, ctx, out);
+            }
+            Stmt::Print(e) | Stmt::ExprStmt(e) | Stmt::LetDestructure(_, e) => {
+                arity_expr(e, fns, rets, ctx, out);
+            }
+            Stmt::FieldAssign(o, _, v) => {
+                arity_expr(o, fns, rets, ctx, out);
+                arity_expr(v, fns, rets, ctx, out);
+            }
+            Stmt::IndexAssign(o, i, v) => {
+                arity_expr(o, fns, rets, ctx, out);
+                arity_expr(i, fns, rets, ctx, out);
+                arity_expr(v, fns, rets, ctx, out);
+            }
+            Stmt::If(c, a, b) => {
+                arity_expr(c, fns, rets, ctx, out);
+                arity_block(a, fns, rets, ctx, out);
+                if let Some(b) = b { arity_block(b, fns, rets, ctx, out); }
+            }
+            Stmt::While(c, b) => {
+                arity_expr(c, fns, rets, ctx, out);
+                arity_block(b, fns, rets, ctx, out);
+            }
+            Stmt::For(_, it, b) => {
+                arity_expr(it, fns, rets, ctx, out);
+                arity_block(b, fns, rets, ctx, out);
+            }
+            Stmt::Return(Some(e)) => arity_expr(e, fns, rets, ctx, out),
+            Stmt::Try(a, _, c) => {
+                arity_block(a, fns, rets, ctx, out);
+                arity_block(c, fns, rets, ctx, out);
+            }
+            Stmt::Match(scrut, arms, els) => {
+                arity_expr(scrut, fns, rets, ctx, out);
+                for (p, b) in arms {
+                    arity_expr(p, fns, rets, ctx, out);
+                    arity_block(b, fns, rets, ctx, out);
+                }
+                if let Some(b) = els { arity_block(b, fns, rets, ctx, out); }
+            }
+            Stmt::FnDef(n, params, b) => {
+                for p in params {
+                    if fns.contains_key(&p.name) {
+                        out.push(format!("{}: param {} shadows fn {}", n, p.name, p.name));
+                    }
+                }
+                arity_block(b, fns, rets, Some(n), out);
+            }
+            Stmt::Grow(GrowItem::Fn(n, params, b, tests)) => {
+                for p in params {
+                    if fns.contains_key(&p.name) {
+                        out.push(format!("{}: param {} shadows fn {}", n, p.name, p.name));
+                    }
+                }
+                arity_block(b, fns, rets, Some(n), out);
+                for t in tests {
+                    arity_expr(&t.call, fns, rets, Some(n), out);
+                    if let Some(e) = &t.expected { arity_expr(e, fns, rets, Some(n), out); }
+                }
+            }
+            Stmt::Grow(GrowItem::Let(_, e)) => arity_expr(e, fns, rets, ctx, out),
+            _ => {}
+        }
+    }
+}
+
+/// recurse an expr flagging Call nodes whose callee is a locally
+/// defined fn and whose arg count doesn't match its arity.
+fn arity_expr(e: &ast::Expr,
+              fns: &std::collections::HashMap<String, Option<usize>>,
+              rets: &std::collections::HashMap<String, bool>,
+              ctx: Option<&str>, out: &mut Vec<String>) {
+    use ast::*;
+    match e {
+        Expr::Call(name, _, args) => {
+            if let Some(Some(want)) = fns.get(name) {
+                if args.len() != *want {
+                    let msg = format!("{}() wants {} args, got {}", name, want, args.len());
+                    out.push(match ctx {
+                        Some(f) => format!("{}: {}", f, msg),
+                        None => msg,
+                    });
+                }
+            }
+            for a in args { arity_expr(a, fns, rets, ctx, out); }
+        }
+        Expr::MethodCall(o, _, args) => {
+            arity_expr(o, fns, rets, ctx, out);
+            for a in args { arity_expr(a, fns, rets, ctx, out); }
+        }
+        Expr::BinOp(a, _, b) | Expr::Index(a, b) => {
+            arity_expr(a, fns, rets, ctx, out);
+            arity_expr(b, fns, rets, ctx, out);
+        }
+        Expr::UnaryOp(_, a) | Expr::FieldAccess(a, _) => arity_expr(a, fns, rets, ctx, out),
+        Expr::List(items) | Expr::Interp(items) => {
+            for i in items { arity_expr(i, fns, rets, ctx, out); }
+        }
+        Expr::StructLit(_, fields) => {
+            for (_, v) in fields { arity_expr(v, fns, rets, ctx, out); }
+        }
+        Expr::Slice(o, lo, hi) => {
+            arity_expr(o, fns, rets, ctx, out);
+            if let Some(e) = lo { arity_expr(e, fns, rets, ctx, out); }
+            if let Some(e) = hi { arity_expr(e, fns, rets, ctx, out); }
+        }
+        Expr::SafeGet(o, _, args) => {
+            arity_expr(o, fns, rets, ctx, out);
+            if let Some(args) = args {
+                for a in args { arity_expr(a, fns, rets, ctx, out); }
+            }
+        }
+        Expr::Lambda(_, body) => arity_block(body, fns, rets, ctx, out),
+        Expr::ListComp(x, _, it, cond) => {
+            arity_expr(x, fns, rets, ctx, out);
+            arity_expr(it, fns, rets, ctx, out);
+            if let Some(c) = cond { arity_expr(c, fns, rets, ctx, out); }
+        }
+        _ => {}
+    }
 }
 
 fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
@@ -3431,6 +3660,14 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
             Stmt::Grow(GrowItem::Fn(name, params, body, tests)) => {
                 if tests.is_empty() {
                     out.push(format!("grow fn {} has no test clause — no birth-check", name));
+                }
+                // test clause calls a different fn — doesn't exercise `name`
+                for t in tests {
+                    if let Expr::Call(callee, _, _) = &t.call {
+                        if callee != name {
+                            out.push(format!("grow fn {} test calls {} — doesn't exercise {}", name, callee, name));
+                        }
+                    }
                 }
                 for p in params {
                     if !p.name.starts_with('_')
@@ -3463,6 +3700,14 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                 if !name.starts_with('_') && bound.iter().any(|(_, b)| *b == name) {
                     out.push(format!("let {} shadows an outer let", name));
                 }
+                // let x = <expr reading x> with no prior binding —
+                // reads itself before it exists (bound x = x+1 is
+                // a valid shadow-rebind, so only flag unbound)
+                if !bound.iter().any(|(_, b)| *b == name)
+                    && !outer.contains(name.as_str())
+                    && expr_mentions(e, name) {
+                    out.push(format!("let {} reads {} before it's bound", name, name));
+                }
                 // let x = [v] — a 1-element list literal — could be let x = v
                 if let Expr::List(items) = e {
                     if items.len() == 1 {
@@ -3470,7 +3715,7 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                     }
                     if items.is_empty() {
                         let assigned = stmts.iter().skip(i + 1)
-                            .any(|s| stmt_assigns(s, name) || matches!(s, Stmt::ExprStmt(Expr::MethodCall(o, m, _)) if matches!(o.as_ref(), Expr::Var(v) if v == name) && m == "push"));
+                            .any(|s| stmt_grows(s, name));
                         if !assigned {
                             out.push(format!("let {} = [] — an empty list that never grows", name));
                         }
@@ -3547,6 +3792,34 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                             if n == v && matches!(pe, Expr::List(_) | Expr::StructLit(..)) {
                                 out.push(format!("let {} = {} — {} is bound to a container, could reuse", name, v, v));
                                 break;
+                            }
+                            // let a = b where b was let-bound to a binop — the let copies a computed expr
+                            if n == v && matches!(pe, Expr::BinOp(..)) {
+                                out.push(format!("let {} = {} — {} is bound to a computed expr, could reuse", name, v, v));
+                                break;
+                            }
+                            // let a = b where b was let-bound to Var(c) bound to a literal — transitive const
+                            if n == v {
+                                if let Expr::Var(w) = pe {
+                                    for (_, s2) in stmts.iter().enumerate().take(i) {
+                                        if let Stmt::Let(n2, e2) = s2 {
+                                            if n2 == w && matches!(e2, Expr::Int(_) | Expr::Str(_) | Expr::Bool(_) | Expr::Null) {
+                                                out.push(format!("let {} = {} — {} is bound to a literal through {}", name, v, v, w));
+                                                break;
+                                            }
+                                            // let a = b where b was let-bound to Var(c) bound to a call — transitive call
+                                            if n2 == w && matches!(e2, Expr::Call(..) | Expr::MethodCall(..)) {
+                                                out.push(format!("let {} = {} — {} is bound to a call through {}", name, v, v, w));
+                                                break;
+                                            }
+                                            // let a = b where b was let-bound to Var(c) bound to a binop — transitive binop
+                                            if n2 == w && matches!(e2, Expr::BinOp(..)) {
+                                                out.push(format!("let {} = {} — {} is bound to a binop through {}", name, v, v, w));
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -3751,6 +4024,8 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                 if matches!(scrut, Expr::Int(_) | Expr::Str(_) | Expr::Bool(_) | Expr::Null) {
                     out.push("match on a literal — deterministic, use if or remove".into());
                 }
+                // (duplicate arm patterns are caught by the later
+                //  exhaustive-scan pass — don't double-report)
                 // match on a let-bound literal — constant propagation
                 if let Expr::Var(v) = scrut {
                     for (_, s) in stmts.iter().enumerate().take(i) {
@@ -3766,6 +4041,42 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                             if n == v && matches!(e, Expr::Call(..) | Expr::MethodCall(..)) {
                                 out.push(format!("match on {} — bound to a call, could match the call", v));
                                 break;
+                            }
+                            if n == v && matches!(e, Expr::List(_) | Expr::StructLit(..)) {
+                                out.push(format!("match on {} — bound to a container literal", v));
+                                break;
+                            }
+                            if n == v && matches!(e, Expr::BinOp(..)) {
+                                out.push(format!("match on {} — bound to a computed expr", v));
+                                break;
+                            }
+                            // match a where a is bound to Var(b) bound to a literal — transitive const
+                            if n == v {
+                                if let Expr::Var(w) = e {
+                                    for (_, s2) in stmts.iter().enumerate().take(i) {
+                                        if let Stmt::Let(n2, e2) = s2 {
+                                            if n2 == w && matches!(e2, Expr::Int(_) | Expr::Str(_) | Expr::Bool(_) | Expr::Null) {
+                                                out.push(format!("match on {} — transitive constant through {}", v, w));
+                                                break;
+                                            }
+                                            // match a where a is bound to Var(b) bound to a call — transitive call
+                                            if n2 == w && matches!(e2, Expr::Call(..) | Expr::MethodCall(..)) {
+                                                out.push(format!("match on {} — transitive call through {}", v, w));
+                                                break;
+                                            }
+                                            // match a where a is bound to Var(b) bound to a binop — transitive binop
+                                            if n2 == w && matches!(e2, Expr::BinOp(..)) {
+                                                out.push(format!("match on {} — transitive binop through {}", v, w));
+                                                break;
+                                            }
+                                            // match a where a is bound to Var(b) bound to a container — transitive container
+                                            if n2 == w && matches!(e2, Expr::List(_) | Expr::StructLit(..)) {
+                                                out.push(format!("match on {} — transitive container through {}", v, w));
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -3827,6 +4138,11 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                                 // Var pattern bound to a container — the pattern is a list/struct
                                 if n == v && matches!(pe, Expr::List(_) | Expr::StructLit(..)) {
                                     out.push(format!("match pattern {} is bound to a container — inline it", v));
+                                    break;
+                                }
+                                // Var pattern bound to a binop — the pattern is a computed expr
+                                if n == v && matches!(pe, Expr::BinOp(..)) {
+                                    out.push(format!("match pattern {} is bound to a computed expr — inline it", v));
                                     break;
                                 }
                             }
@@ -4117,6 +4433,60 @@ fn stmt_assigns(s: &ast::Stmt, name: &str) -> bool {
             || b.iter().any(|s| stmt_assigns(s, name)),
         Stmt::Match(_, arms, els) => arms.iter().any(|(_, b)| b.iter().any(|s| stmt_assigns(s, name)))
             || els.as_ref().map(|v| v.iter().any(|s| stmt_assigns(s, name))).unwrap_or(false),
+        _ => false,
+    }
+}
+
+// does this statement grow `name` — assign to it, index/field-set it,
+// or call a mutating method (append/push/insert/extend) on it,
+// anywhere including nested bodies
+fn stmt_grows(s: &ast::Stmt, name: &str) -> bool {
+    use ast::*;
+    if stmt_assigns(s, name) { return true; }
+    match s {
+        Stmt::ExprStmt(e) | Stmt::Print(e) | Stmt::Let(_, e)
+        | Stmt::Assign(_, e) | Stmt::Return(Some(e)) => expr_grows(e, name),
+        Stmt::FieldAssign(o, _, v) | Stmt::IndexAssign(o, _, v) =>
+            expr_grows(o, name) || expr_grows(v, name),
+        Stmt::If(c, a, b) => expr_grows(c, name)
+            || a.iter().any(|s| stmt_grows(s, name))
+            || b.as_ref().map(|v| v.iter().any(|s| stmt_grows(s, name))).unwrap_or(false),
+        Stmt::While(c, b) => expr_grows(c, name)
+            || b.iter().any(|s| stmt_grows(s, name)),
+        Stmt::For(_, it, b) => expr_grows(it, name)
+            || b.iter().any(|s| stmt_grows(s, name)),
+        Stmt::Try(a, _, c) => a.iter().any(|s| stmt_grows(s, name))
+            || c.iter().any(|s| stmt_grows(s, name)),
+        Stmt::Match(scrut, arms, els) => expr_grows(scrut, name)
+            || arms.iter().any(|(_, b)| b.iter().any(|s| stmt_grows(s, name)))
+            || els.as_ref().map(|v| v.iter().any(|s| stmt_grows(s, name))).unwrap_or(false),
+        _ => false,
+    }
+}
+
+fn expr_grows(e: &ast::Expr, name: &str) -> bool {
+    use ast::*;
+    match e {
+        Expr::MethodCall(o, m, args) =>
+            (matches!(o.as_ref(), Expr::Var(v) if v == name)
+                && matches!(m.as_str(), "append" | "push" | "insert" | "extend"))
+            || expr_grows(o, name)
+            || args.iter().any(|a| expr_grows(a, name)),
+        Expr::BinOp(a, _, b) | Expr::Index(a, b) =>
+            expr_grows(a, name) || expr_grows(b, name),
+        Expr::UnaryOp(_, a) | Expr::FieldAccess(a, _) => expr_grows(a, name),
+        Expr::Call(_, _, args) => args.iter().any(|a| expr_grows(a, name)),
+        Expr::List(items) | Expr::Interp(items) =>
+            items.iter().any(|i| expr_grows(i, name)),
+        Expr::StructLit(_, fs) => fs.iter().any(|(_, v)| expr_grows(v, name)),
+        Expr::Slice(o, lo, hi) => expr_grows(o, name)
+            || lo.as_ref().map(|e| expr_grows(e, name)).unwrap_or(false)
+            || hi.as_ref().map(|e| expr_grows(e, name)).unwrap_or(false),
+        Expr::SafeGet(o, _, args) => expr_grows(o, name)
+            || args.as_ref().map(|a| a.iter().any(|e| expr_grows(e, name))).unwrap_or(false),
+        Expr::Lambda(_, b) => b.iter().any(|s| stmt_grows(s, name)),
+        Expr::ListComp(x, _, it, c) => expr_grows(x, name) || expr_grows(it, name)
+            || c.as_ref().map(|e| expr_grows(e, name)).unwrap_or(false),
         _ => false,
     }
 }

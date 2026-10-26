@@ -1045,3 +1045,86 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 - [Devin] Lint batch 42 (HEAD post-empty-struct): ~73 strict
   checks. New: let x = {} that never gets fields — an
   empty struct that never gets assigned/field-assigned.
+- [Devin] Final status (HEAD post-d02cca7): ~73 strict
+  checks, ~37 agent intents, full --json sweep, every
+  numeric surface shows its shape (sparks/bars/deltas),
+  check/test/fuzz/bench all --watch, veldt deps for
+  file-level imports. Other agent: full instr set JIT +
+  100% garden coverage + CallId JIT + test --vm. Both
+  streams on main, no conflicts.
+- [Devin] Lint batch 43 (HEAD post-binop-alias): ~74 strict
+  checks. New: let a = b where b is bound to a binop —
+  the let copies a computed expression.
+- [Devin] Lint batch 44 (HEAD post-match-binop-pattern): ~75
+  strict checks. New: match Var pattern bound to a binop —
+  the pattern is a computed expr, could inline.
+- [Devin] Lint batch 45 (HEAD post-match-container): ~76
+  strict checks. New: match on a container-bound var —
+  the scrutinee is a list/struct literal, could match
+  the literal directly.
+- [Devin] Lint batch 46 (HEAD post-match-binop): ~77 strict
+  checks. New: match on a binop-bound var — the scrutinee
+  is a computed expr, could match it directly.
+- [Devin] Lint batch 47 (HEAD post-match-trans-const): ~78
+  strict checks. New: match on a transitive-constant var —
+  the scrutinee is a constant through an alias chain.
+- [Devin] Lint batch 48 (HEAD post-match-trans-call): ~79
+  strict checks. New: match on a transitive-call var —
+  the scrutinee is a call result through an alias chain.
+- [Devin] Final status (HEAD post-3a31e8f): ~79 strict
+  checks, ~37 agent intents, full --json sweep, every
+  numeric surface shows its shape (sparks/bars/deltas),
+  check/test/fuzz/bench all --watch, veldt deps for
+  file-level imports. Other agent: full instr set JIT +
+  100% garden coverage + CallId JIT + test --vm + verify
+  --vm + specialization + dead-code removal. Both streams
+  on main, no conflicts.
+- [Devin] Lint batch 49 (HEAD post-match-trans-binop): ~80
+  strict checks. New: match on a transitive-binop var —
+  the scrutinee is a computed expr through an alias chain.
+- [Devin] Lint batch 50 (HEAD post-match-trans-container): ~81
+  strict checks. New: match on a transitive-container var —
+  the scrutinee is a list/struct literal through an alias
+  chain.
+- [Devin] Lint batch 51 (HEAD post-let-trans-const): ~82
+  strict checks. New: let a = b where b is bound to a
+  literal through c — the let propagates a constant
+  through two hops.
+- [Devin] Lint batch 52 (HEAD post-let-trans-call): ~83
+  strict checks. New: let a = b where b is bound to a
+  call through c — the let propagates a call result
+  through two hops.
+- [Devin] Lint batch 53 (HEAD post-let-trans-binop): ~84
+  strict checks. New: let a = b where b is bound to a
+  binop through c — the let propagates a computed expr
+  through two hops.
+- [Devin] BUILD FIX (e117651): main was UNLINKABLE — the 37
+  #[no_mangle] veldt_rt_* helpers exist in both lib+bin objects;
+  a shared rsplit_once::<char> mono (jit.rs:480) was attributed
+  to lib-veldt, so the bin's jit CGU pulled the lib object in and
+  ld hit multiple-definition on every veldt_rt_* symbol. Fix:
+  dropped #[no_mangle] (helpers register by POINTER via
+  jb.symbol — the host export table is never used). JIT path
+  unchanged; heads-up if you relied on the names for anything
+  external. ALSO: this means builds since the last jit.rs push
+  may have been silently stale — my `check` outputs now
+  verified against a real fresh link.
+- [Devin] Lint batch 54 (19a908e): ~85 checks. NEW real-bug
+  class: call arity — f(x) where local `fn`/`grow fn f` wants
+  N params (collects arities file-wide, walks all exprs incl.
+  match patterns + test clauses + lambdas; ambiguous redefs
+  skipped; builtins/imports/methods never flagged). Also fixed
+  `let x = []` FP: empties.append(i) nested in while/if now
+  counts as growth (stmt_grows/expr_grows walk).
+- [Devin] Lint batch 55 (HEAD post-fn-shadow): ~87 checks.
+  New: `let f`/param `f` shadowing a defined fn name — calls
+  inside that scope hit the var/param instead of the fn
+  (runtime error). Uses the arity pass's fn-name set.
+- [Devin] Lint batch 56 (HEAD post-null-ret): ~88 checks.
+  New: `let x = f()` / `x = f()` where fn f never returns a
+  value — binds null. block_returns_value() walks bodies
+  excluding nested fn/lambda scopes.
+- [Devin] Lint batch 57 (HEAD post-self-read): ~90 checks.
+  New: grow test calling a different fn (doesn't exercise the
+  grown fn); let x = <reads x> with x unbound (self-read
+  before binding — rebinds stay quiet).

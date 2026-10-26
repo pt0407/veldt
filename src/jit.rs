@@ -1517,12 +1517,10 @@ unsafe fn take_args(rt: *mut JitRt, argc: i64) -> Vec<Value> {
     tail.into_iter().rev().collect()
 }
 
-#[no_mangle]
 pub unsafe extern "C" fn veldt_rt_const(rt: *mut JitRt, k: i64) -> *mut Value {
     let v = (*(*rt).consts.add(k as usize)).clone();
     mk(rt, v)
 }
-#[no_mangle]
 pub unsafe extern "C" fn veldt_rt_clone(rt: *mut JitRt, v: *mut Value) -> *mut Value {
     if v.is_null() { return std::ptr::null_mut(); }
     mk(rt, (*v).clone())
@@ -1534,7 +1532,6 @@ fn bop(op: i64) -> crate::ast::BinOp {
         5 => Eq, 6 => Neq, 7 => Lt, 8 => Gt, 9 => Le, _ => Ge,
     }
 }
-#[no_mangle]
 pub unsafe extern "C" fn veldt_rt_binop(rt: *mut JitRt, op: i64,
     l: *mut Value, r: *mut Value) -> *mut Value {
     if l.is_null() || r.is_null() { return std::ptr::null_mut(); }
@@ -1543,7 +1540,6 @@ pub unsafe extern "C" fn veldt_rt_binop(rt: *mut JitRt, op: i64,
         Err(e) => rfail(rt, e),
     }
 }
-#[no_mangle]
 pub unsafe extern "C" fn veldt_rt_unop(rt: *mut JitRt, op: i64,
     v: *mut Value) -> *mut Value {
     if v.is_null() { return std::ptr::null_mut(); }
@@ -1554,14 +1550,12 @@ pub unsafe extern "C" fn veldt_rt_unop(rt: *mut JitRt, op: i64,
         _ => rfail(rt, "cannot negate".into()),
     }
 }
-#[no_mangle]
 pub unsafe extern "C" fn veldt_rt_logop(rt: *mut JitRt, and: i64,
     l: *mut Value, r: *mut Value) -> *mut Value {
     if l.is_null() || r.is_null() { return std::ptr::null_mut(); }
     let (tl, tr) = (crate::vm::truthy(&*l), crate::vm::truthy(&*r));
     mk(rt, Value::Bool(if and != 0 { tl && tr } else { tl || tr }))
 }
-#[no_mangle]
 pub unsafe extern "C" fn veldt_rt_inop(rt: *mut JitRt,
     l: *mut Value, r: *mut Value) -> *mut Value {
     if l.is_null() || r.is_null() { return std::ptr::null_mut(); }
@@ -1574,17 +1568,14 @@ pub unsafe extern "C" fn veldt_rt_inop(rt: *mut JitRt,
     };
     mk(rt, Value::Bool(hit))
 }
-#[no_mangle]
 pub unsafe extern "C" fn veldt_rt_truthy(v: *mut Value) -> i64 {
     if v.is_null() { return 0; }
     crate::vm::truthy(&*v) as i64
 }
-#[no_mangle]
 pub unsafe extern "C" fn veldt_rt_isnull(v: *mut Value) -> i64 {
     if v.is_null() { return 1; }
     matches!(&*v, Value::Null) as i64
 }
-#[no_mangle]
 pub unsafe extern "C" fn veldt_rt_pusharg(rt: *mut JitRt, v: *mut Value) -> i64 {
     (*(*rt).argbuf).push(v); 0
 }
@@ -1596,7 +1587,6 @@ unsafe fn argbox_ptrs(rt: *mut JitRt, argc: i64) -> Vec<*mut Value> {
     buf.truncate(keep);
     tail.into_iter().rev().collect()
 }
-#[no_mangle]
 pub unsafe extern "C" fn veldt_rt_call(rt: *mut JitRt, ni: i64,
     argc: i64) -> *mut Value {
     let name = nname(rt, ni);
@@ -1616,7 +1606,6 @@ pub unsafe extern "C" fn veldt_rt_call(rt: *mut JitRt, ni: i64,
         Err(e) => rfail(rt, e),
     }
 }
-#[no_mangle]
 pub unsafe extern "C" fn veldt_rt_callid(rt: *mut JitRt, ni: i64, vid: i64,
     argc: i64) -> *mut Value {
     let name = nname(rt, ni);
@@ -1635,7 +1624,6 @@ pub unsafe extern "C" fn veldt_rt_callid(rt: *mut JitRt, ni: i64, vid: i64,
         Err(e) => rfail(rt, e),
     }
 }
-#[no_mangle]
 pub unsafe extern "C" fn veldt_rt_method(rt: *mut JitRt, recv: *mut Value,
     ni: i64, argc: i64) -> *mut Value {
     if recv.is_null() { return std::ptr::null_mut(); }
@@ -1646,7 +1634,6 @@ pub unsafe extern "C" fn veldt_rt_method(rt: *mut JitRt, recv: *mut Value,
         Err(e) => rfail(rt, e),
     }
 }
-#[no_mangle]
 pub unsafe extern "C" fn veldt_rt_methodvar(rt: *mut JitRt,
     sp: *mut Value, ni: i64, argc: i64) -> *mut Value {
     if sp.is_null() { return std::ptr::null_mut(); }
@@ -1668,12 +1655,10 @@ pub unsafe extern "C" fn veldt_rt_methodvar(rt: *mut JitRt,
         Err(e) => rfail(rt, e),
     }
 }
-#[no_mangle]
 pub unsafe extern "C" fn veldt_rt_makelist(rt: *mut JitRt, n: i64) -> *mut Value {
     let items = take_args(rt, n);
     mk(rt, Value::List(items.into()))
 }
-#[no_mangle]
 pub unsafe extern "C" fn veldt_rt_index(rt: *mut JitRt, o: *mut Value,
     i: *mut Value) -> *mut Value {
     if o.is_null() || i.is_null() { return std::ptr::null_mut(); }
@@ -1682,7 +1667,6 @@ pub unsafe extern "C" fn veldt_rt_index(rt: *mut JitRt, o: *mut Value,
         Err(e) => rfail(rt, e),
     }
 }
-#[no_mangle]
 pub unsafe extern "C" fn veldt_rt_indexset(rt: *mut JitRt, sp: *mut Value,
     idx: *mut Value, val: *mut Value) -> i64 {
     if sp.is_null() || idx.is_null() || val.is_null() { return nok(rt, "jit set on err".into()); }
@@ -1691,7 +1675,6 @@ pub unsafe extern "C" fn veldt_rt_indexset(rt: *mut JitRt, sp: *mut Value,
         Err(e) => nok(rt, e),
     }
 }
-#[no_mangle]
 pub unsafe extern "C" fn veldt_rt_slice(rt: *mut JitRt, o: *mut Value,
     lo: *mut Value, hi: *mut Value) -> *mut Value {
     if o.is_null() || lo.is_null() || hi.is_null() { return std::ptr::null_mut(); }
@@ -1700,7 +1683,6 @@ pub unsafe extern "C" fn veldt_rt_slice(rt: *mut JitRt, o: *mut Value,
         Err(e) => rfail(rt, e),
     }
 }
-#[no_mangle]
 pub unsafe extern "C" fn veldt_rt_getfield(rt: *mut JitRt, o: *mut Value,
     ni: i64) -> *mut Value {
     if o.is_null() { return std::ptr::null_mut(); }
@@ -1713,7 +1695,6 @@ pub unsafe extern "C" fn veldt_rt_getfield(rt: *mut JitRt, o: *mut Value,
     };
     mk(rt, v)
 }
-#[no_mangle]
 pub unsafe extern "C" fn veldt_rt_makestruct(rt: *mut JitRt, ni: i64,
     n: i64) -> *mut Value {
     let mut fields = std::collections::HashMap::new();
@@ -1725,30 +1706,25 @@ pub unsafe extern "C" fn veldt_rt_makestruct(rt: *mut JitRt, ni: i64,
     }
     mk(rt, Value::Struct(nname(rt, ni), fields))
 }
-#[no_mangle]
 pub unsafe extern "C" fn veldt_rt_tostr(rt: *mut JitRt, v: *mut Value) -> *mut Value {
     if v.is_null() { return std::ptr::null_mut(); }
     mk(rt, Value::Str(format!("{}", &*v).into()))
 }
-#[no_mangle]
 pub unsafe extern "C" fn veldt_rt_print(rt: *mut JitRt, v: *mut Value) -> i64 {
     if !v.is_null() { println!("{}", &*v); }
     0
 }
-#[no_mangle]
 pub unsafe extern "C" fn veldt_rt_gget(rt: *mut JitRt, ni: i64) -> *mut Value {
     let name = nname(rt, ni);
     let v = (*(*rt).vm).globals.get(&name).cloned().unwrap_or(Value::Null);
     mk(rt, v)
 }
-#[no_mangle]
 pub unsafe extern "C" fn veldt_rt_gset(rt: *mut JitRt, ni: i64,
     v: *mut Value) -> i64 {
     if v.is_null() { return nok(rt, "jit gset on err".into()); }
     (*(*rt).vm).globals.insert(nname(rt, ni), (*v).clone());
     0
 }
-#[no_mangle]
 pub unsafe extern "C" fn veldt_rt_iternew(rt: *mut JitRt, v: *mut Value) -> i64 {
     if v.is_null() { return nok(rt, "iter on err".into()); }
     let items: Vec<Value> = match &*v {
@@ -1763,7 +1739,6 @@ pub unsafe extern "C" fn veldt_rt_iternew(rt: *mut JitRt, v: *mut Value) -> i64 
     it.push((items, 0));
     (it.len() - 1) as i64
 }
-#[no_mangle]
 pub unsafe extern "C" fn veldt_rt_iternext(rt: *mut JitRt, h: i64) -> *mut Value {
     let r = &mut *rt;
     let it = &mut *r.iters;
@@ -1772,7 +1747,6 @@ pub unsafe extern "C" fn veldt_rt_iternext(rt: *mut JitRt, h: i64) -> *mut Value
     let v = items[*i].clone(); *i += 1;
     mk(rt, v)
 }
-#[no_mangle]
 pub unsafe extern "C" fn veldt_rt_iterpop(rt: *mut JitRt, h: i64) -> i64 {
     let r = &mut *rt;
     let it = &mut *r.iters;
@@ -1781,7 +1755,6 @@ pub unsafe extern "C" fn veldt_rt_iterpop(rt: *mut JitRt, h: i64) -> i64 {
     }
     0
 }
-#[no_mangle]
 pub unsafe extern "C" fn veldt_rt_append(rt: *mut JitRt, sp: *mut Value,
     v: *mut Value) -> i64 {
     if sp.is_null() || v.is_null() { return nok(rt, "append on err".into()); }
@@ -1790,7 +1763,6 @@ pub unsafe extern "C" fn veldt_rt_append(rt: *mut JitRt, sp: *mut Value,
         _ => nok(rt, "append on non-list".into()),
     }
 }
-#[no_mangle]
 pub unsafe extern "C" fn veldt_rt_insert(rt: *mut JitRt, sp: *mut Value,
     ki: i64, v: *mut Value) -> i64 {
     if sp.is_null() || v.is_null() { return nok(rt, "insert on err".into()); }
@@ -1801,7 +1773,6 @@ pub unsafe extern "C" fn veldt_rt_insert(rt: *mut JitRt, sp: *mut Value,
         _ => nok(rt, "insert on non-dict/set".into()),
     }
 }
-#[no_mangle]
 pub unsafe extern "C" fn veldt_rt_insertdyn(rt: *mut JitRt, sp: *mut Value,
     kp: *mut Value, v: *mut Value) -> i64 {
     if sp.is_null() || kp.is_null() || v.is_null() {
@@ -1816,7 +1787,6 @@ pub unsafe extern "C" fn veldt_rt_insertdyn(rt: *mut JitRt, sp: *mut Value,
         _ => nok(rt, "insert on non-dict/set".into()),
     }
 }
-#[no_mangle]
 pub unsafe extern "C" fn veldt_rt_capture(rt: *mut JitRt,
     proto: *mut Value, nslots: i64) -> *mut Value {
     if proto.is_null() { return std::ptr::null_mut(); }
@@ -1835,7 +1805,6 @@ pub unsafe extern "C" fn veldt_rt_capture(rt: *mut JitRt,
     mk(rt, Value::Closure(params, body,
         std::rc::Rc::new(std::cell::RefCell::new(env))))
 }
-#[no_mangle]
 pub unsafe extern "C" fn veldt_rt_callvar(rt: *mut JitRt,
     sp: *mut Value, argc: i64) -> *mut Value {
     if sp.is_null() { return std::ptr::null_mut(); }
@@ -1849,28 +1818,22 @@ pub unsafe extern "C" fn veldt_rt_callvar(rt: *mut JitRt,
         _ => rfail(rt, "variable is not callable".into()),
     }
 }
-#[no_mangle]
 pub unsafe extern "C" fn veldt_rt_intbox(rt: *mut JitRt, i: i64) -> *mut Value {
     mk(rt, Value::Int(i))
 }
-#[no_mangle]
 pub unsafe extern "C" fn veldt_rt_floatbox(rt: *mut JitRt, f: f64) -> *mut Value {
     mk(rt, Value::Float(f))
 }
-#[no_mangle]
 pub unsafe extern "C" fn veldt_rt_boolbox(rt: *mut JitRt, i: i64) -> *mut Value {
     mk(rt, Value::Bool(i != 0))
 }
-#[no_mangle]
 pub unsafe extern "C" fn veldt_rt_nullbox(rt: *mut JitRt) -> *mut Value {
     mk(rt, Value::Null)
 }
-#[no_mangle]
 pub unsafe extern "C" fn veldt_rt_take_err(rt: *mut JitRt) -> *mut Value {
     let e = (*(*rt).err).take().unwrap_or_else(|| "error".into());
     mk(rt, Value::Str(e.into()))
 }
-#[no_mangle]
 pub unsafe extern "C" fn veldt_rt_fieldset(rt: *mut JitRt, sp: *mut Value,
     ni: i64, v: *mut Value) -> i64 {
     if sp.is_null() || v.is_null() { return nok(rt, "fieldset on err".into()); }
