@@ -737,7 +737,10 @@ fn print_usage() {
   veldt absorb                 Convert live call traces into probes
   veldt tournament <url>       Pull pool, trial merged families, push winners
   veldt diff <a#n> <b#n>       Show two variants' bodies side by side
-  veldt stats                  Garden census + trust-ladder distribution");
+  veldt stats                  Garden census + trust-ladder distribution
+  veldt check <file>           Parse-only validation (CI/editor gate)
+  veldt find <substr>          Local family search by name
+  veldt diff --unified a b     Interleaved LCS diff of two variants");
     println!("  veldt visual                 Open visual ecosystem viewer in browser");
 }
 
