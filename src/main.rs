@@ -566,6 +566,35 @@ fn main() {
                 }
                 println!("=== The Veldt (fitness >= {}) ===", min);
                 filtered.print_garden(sick_only, healthy_only);
+            } else if let Some(fam) = args.iter().position(|a| a == "--trust_fam")
+                .and_then(|p| args.get(p + 1)).cloned() {
+                // --trust_fam <name> — variants in this family sorted by trust
+                let mut sorted = veldt::Veldt::new();
+                sorted.probes = veldt.probes.clone();
+                sorted.obituaries = veldt.obituaries.clone();
+                sorted.run_count = veldt.run_count;
+                sorted.garden_path = veldt.garden_path.clone();
+                if let Some(vs) = veldt.functions.get(&fam) {
+                    let mut sorted_vs = vs.clone();
+                    sorted_vs.sort_by(|a, b| {
+                        let ra = match a.trust {
+                            veldt::Trust::Canonical => 3,
+                            veldt::Trust::Established => 2,
+                            veldt::Trust::Seedling => 1,
+                            _ => 0,
+                        };
+                        let rb = match b.trust {
+                            veldt::Trust::Canonical => 3,
+                            veldt::Trust::Established => 2,
+                            veldt::Trust::Seedling => 1,
+                            _ => 0,
+                        };
+                        rb.cmp(&ra)
+                    });
+                    sorted.functions.insert(fam.clone(), sorted_vs);
+                }
+                println!("=== The Veldt ({} most-trusted first) ===", fam);
+                sorted.print_garden(sick_only, healthy_only);
             } else if let Some(fam) = args.iter().position(|a| a == "--health_fam")
                 .and_then(|p| args.get(p + 1)).cloned() {
                 // --health_fam <name> — variants in this family sorted by health
