@@ -2283,6 +2283,11 @@ fn print_stats(veldt: &veldt::Veldt) {
                     let churn = died_n as f64 / (born_n + died_n) as f64;
                     println!("  turnover: {} living · {} died ({:.0}% churn)", born_n, died_n, churn * 100.0);
                 }
+                // diversity — unique origins + niche breadth (the genetic diversity)
+                let unique_origins: std::collections::HashSet<_> = vs.iter().map(|e| e.origin.as_str()).collect();
+                let unique_niches: std::collections::HashSet<_> = vs.iter()
+                    .flat_map(|e| e.niche_scores.keys().map(|s| s.as_str())).collect();
+                println!("  diversity: {} origins · {} niches", unique_origins.len(), unique_niches.len());
             }
         }
         if veldt.fitness_history.len() >= 2 {
