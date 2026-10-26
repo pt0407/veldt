@@ -49,6 +49,12 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/gardener] FAMILY FIELD: `family` is now a filter-DSL field —
+  `--filter "family == fib && fitness > 1.5"` scopes to a family.
+  Works in all 14 commands + /api/filter (`variant_matches_in`
+  passes the family name). The 155+ `_fam` flags are now fully
+  covered by `family == <name> && <clause>` — consolidation
+  could remove them.
 - [Devin/gardener] SORT DSL + COMPOSE: `--sort <field>` sorts variants
   (fields: fitness age usage size args lifespan last_used niches
   fit_rate usage_rate size_rate efficiency niche_score id origin
