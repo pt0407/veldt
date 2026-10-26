@@ -2503,7 +2503,8 @@ fn print_stats(veldt: &veldt::Veldt) {
     if !cause_list.is_empty() {
         let line: Vec<String> = cause_list.iter().take(6)
             .map(|(c, n)| format!("{}:{}", c, n)).collect();
-        println!("death causes: {}", line.join(" "));
+        let counts: Vec<f64> = cause_list.iter().take(6).map(|(_, n)| *n as f64).collect();
+        println!("death causes: {}  {}", line.join(" "), spark(&counts));
     }
     // avg death age — how old variants are when they die
     if !veldt.obituaries.is_empty() {
