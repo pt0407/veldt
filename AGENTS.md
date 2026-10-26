@@ -1251,3 +1251,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   open + debounced edits -> setModelMarkers, anchored by a
   JS warn_anchor port. Studio editor lints live now, same
   ~91 checks, no LSP needed.
+- [Devin] /api/fix + IDE Fix button: one-click dead-code
+  repair on the buffer (repair_program + fmt writeback),
+  re-lints after applying. Studio squiggle->fix loop = the
+  LSP quick-fix without a client.
