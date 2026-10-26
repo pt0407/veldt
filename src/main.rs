@@ -355,6 +355,19 @@ fn main() {
                 }));
             } else if obituaries {
                 veldt.print_obituaries();
+            } else if let Some(fam) = args.iter().position(|a| a == "--family")
+                .and_then(|p| args.get(p + 1)) {
+                // --family <name> — flat census of one lineage
+                let Some(vs) = veldt.functions.get(fam) else {
+                    eprintln!("No family '{}'", fam); process::exit(1);
+                };
+                println!("=== The Veldt ({}) ===", fam);
+                for e in vs {
+                    let mark = if e.fitness == vs.iter().map(|x| x.fitness)
+                        .fold(f64::NEG_INFINITY, f64::max) { " *" } else { "" };
+                    println!("  {}#{}{} — {:?} | age: {} | fitness: {:.2} | origin: {}",
+                        fam, e.id, mark, e.health, e.age, e.fitness, e.origin);
+                }
             } else if args.iter().any(|a| a == "--games") {
                 // --games — only families whose variants call game builtins
                 const GAME_BUILTINS: &[&str] = &[
