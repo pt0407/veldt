@@ -4218,15 +4218,21 @@ fn expr_mentions(e: &ast::Expr, name: &str) -> bool {
 
 fn watch_file(path: &str) {
     let mut last = std::fs::metadata(path).and_then(|m| m.modified()).ok();
+    let vm = std::env::args().any(|a| a == "--vm");
+    let trace = std::env::args().any(|a| a == "--trace");
     println!("watching {} (ctrl-c to stop)", path);
-    run_program(path, false, false);
+    let run = |path: &str| {
+        if vm { run_program_vm(path, false, trace) }
+        else { run_program(path, false, trace) }
+    };
+    run(path);
     loop {
         std::thread::sleep(std::time::Duration::from_millis(400));
         let now = std::fs::metadata(path).and_then(|m| m.modified()).ok();
         if now != last {
             last = now;
             println!("\n--- {} changed, rerunning ---", path);
-            run_program(path, false, false);
+            run(path);
         }
     }
 }
