@@ -1202,3 +1202,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   to parent (CloneRejected) instead of being born dirty. Live
   run culled 2 undeclared-assign mutants via the lint gate.
   The loop is complete: repair -> dedup -> lint-gate -> birth.
+- [Devin] veldt fix <file>: in-place dead-code repair —
+  repair_program across top-level + every fn body, then
+  fmt::format_program writeback. File-level counterpart of
+  check --garden --fix.
