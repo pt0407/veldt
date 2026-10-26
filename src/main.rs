@@ -6819,3 +6819,38 @@ fn print_family_detail(veldt: &veldt::Veldt, fam: &String, vs: &[veldt::Function
         }
     }
 }
+
+#[cfg(test)]
+mod lint_tests {
+    use super::*;
+
+    fn lint_src(src: &str) -> Vec<String> {
+        let mut lx = lexer::Lexer::new(src);
+        let toks = lx.tokenize().unwrap();
+        let mut p = parser::Parser::new_with_lines(toks, lx.token_lines.clone());
+        lint(&p.parse_program().unwrap())
+    }
+
+    #[test]
+    fn tictactoe_warnings_bounded() {
+        // regression guard — real-bug checks must not explode into
+        // false positives on the canonical example (11 today;
+        // headroom for legitimate new checks only)
+        let src = std::fs::read_to_string("examples/tictactoe.veldt").unwrap();
+        let warns = lint_src(&src);
+        assert!(warns.len() <= 15,
+            "tictactoe warnings exploded to {}: {:?}", warns.len(), warns);
+    }
+
+    #[test]
+    fn arity_and_undeclared_still_fire() {
+        // the defect-class checks must keep firing — a regression
+        // here would silently un-gate the evolve birth-gate
+        let warns = lint_src(
+            "fn add(a: int, b: int) { return a + b }\nfn main() { let x = add(1)\ny = 2 }");
+        assert!(warns.iter().any(|w| w.contains("add() wants 2 args, got 1")),
+            "arity check silent: {:?}", warns);
+        assert!(warns.iter().any(|w| w.contains("assigned but never declared")),
+            "undeclared-assign check silent: {:?}", warns);
+    }
+}
