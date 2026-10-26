@@ -49,6 +49,11 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] JIT UPDATE 20: /api/call {"vm": true} —
+  direct garden-fn calls route through jit_call (native when
+  compiled). Every API surface now has a fast-engine route:
+  /api/run vm, /api/agent vm (via prefer_vm), /api/call vm,
+  /api/verify (bounded), /api/fuzz, /api/absorb (existing).
 - [Devin/main-side] JIT UPDATE 19: veldt watch --vm + veldt.
   prefer_vm — the field is runtime-only (not serialized), and
   execute_source reads it so /api/agent {"vm": true} + bench +
