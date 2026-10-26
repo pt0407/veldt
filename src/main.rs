@@ -3355,6 +3355,20 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                 if let Expr::Var(v) = e {
                     if v == name { out.push(format!("let {} = {} — self-assignment, likely a typo", name, name)); }
                 }
+                // dead let init — next mention of the var is an assign, not a read
+                let next = stmts.iter().skip(i + 1)
+                    .find(|s| stmt_mentions(s, name) || matches!(s, Stmt::Assign(n, _) if n == name));
+                if matches!(next, Some(Stmt::Assign(n, _)) if n == name) {
+                    out.push(format!("let {} = <init never read> — first mention is a re-assign", name));
+                }
+                // let bound to null and never assigned — the null is the final value
+                if matches!(e, Expr::Null) {
+                    let assigned = stmts.iter().skip(i + 1)
+                        .any(|s| stmt_assigns(s, name));
+                    if !assigned {
+                        out.push(format!("let {} = null and never assigned — placeholder left null", name));
+                    }
+                }
             }
             Stmt::Assign(name, e) => {
                 if !bound.iter().any(|(_, b)| *b == name) && !outer.contains(name.as_str()) {
@@ -3393,6 +3407,10 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                         out.push("if condition repeats the same operand — x && x / x || x".into());
                     }
                 }
+                if a.len() == 1 && matches!(a[0], Stmt::ExprStmt(_))
+                    && b.as_ref().map(|e| e.len() == 1 && matches!(e[0], Stmt::ExprStmt(_))).unwrap_or(true) {
+                    out.push("if body is a bare expression — computed and discarded".into());
+                }
                 if b.is_none() && a.len() == 1 {
                     if let Stmt::If(_, _, inner_else) = &a[0] {
                         if inner_else.is_none() {
@@ -3427,6 +3445,9 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                 lint_block(a, out, &mut inner);
             }
             Stmt::While(cond, body) => {
+                if body.len() == 1 && matches!(body[0], Stmt::ExprStmt(_)) {
+                    out.push("loop body is a bare expression — computed and discarded".into());
+                }
                 if let Some(lit) = const_bool(cond) {
                     out.push(format!("loop on constant {} — dead or infinite", lit));
                 }
@@ -3470,6 +3491,9 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                 lint_block(body, out, &mut inner);
             }
             Stmt::For(name, iter, body) => {
+                if body.len() == 1 && matches!(body[0], Stmt::ExprStmt(_)) {
+                    out.push("loop body is a bare expression — computed and discarded".into());
+                }
                 if let Expr::List(items) = iter {
                     if items.is_empty() { out.push("for over an empty list — dead loop".into()); }
                     if items.len() == 1 { out.push("for over a single-element list — one iteration".into()); }

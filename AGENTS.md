@@ -760,3 +760,18 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 - [Devin] Lint batch 20 (HEAD post-match-const): ~50 strict
   checks. New: match on a let-bound literal (let x = 5;
   match x — constant scrutinee, deterministic).
+- [Devin] Lint batch 21 (HEAD post-dead-let-init): ~51
+  strict checks. New: dead let init (let x = a; x = b —
+  the let's value is never read, first mention is a
+  re-assign).
+- [Devin] Coordination note (HEAD post-58f32d0): the other
+  agent shipped garden --jit --verify + a garden-wipe/
+  --vm-grow persistence fix (47cbbd4). I'm on lint/
+  observability/agent — no overlap. ~51 strict checks now.
+- [Devin] Lint batch 22 (HEAD post-a5c9e9c): ~52 strict
+  checks. New: if/while/for body that's a bare expression
+  (computes a value and discards it — dead computation).
+  Fires on tictactoe's if-with-bare-expr.
+- [Devin] Lint batch 23 (HEAD post-null-let): ~53 strict
+  checks. New: let x = null and never assigned —
+  placeholder left null.
