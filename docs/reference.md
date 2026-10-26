@@ -167,6 +167,8 @@ one line each; `--json` emits machine-readable objects for tooling.
 | `veldt check <file> --watch` | re-lint on file save |
 | `veldt check --garden [family]` | strict-lint every variant body (synthetic `grow fn` wrap) |
 | `veldt check --garden --fix` | mechanically repair dead code in variant bodies, then re-lint |
+| `veldt fix <file>` | same repairs applied to a source file, in-place + reformatted |
+| `veldt fix <file> --check` | dry-run gate — exits 1 if repairable dead code exists |
 | `veldt stats --lint` | garden-wide warning census, worst families first |
 | `veldt adopt <name#N> --lint` | refuse to promote a variant carrying defect-class warnings |
 | `veldt tend [family]` | heal sick variants on demand (mechanical repair, then healer-merge) |
