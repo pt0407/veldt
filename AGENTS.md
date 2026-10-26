@@ -1109,3 +1109,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   New: `let f`/param `f` shadowing a defined fn name — calls
   inside that scope hit the var/param instead of the fn
   (runtime error). Uses the arity pass's fn-name set.
+- [Devin] Lint batch 56 (HEAD post-null-ret): ~88 checks.
+  New: `let x = f()` / `x = f()` where fn f never returns a
+  value — binds null. block_returns_value() walks bodies
+  excluding nested fn/lambda scopes.
