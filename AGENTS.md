@@ -447,3 +447,33 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   VM is slower than tree-walk here, candidate for profiling.
   `veldt bench --json/--save F/--compare F/--filter E` for the
   species suite (regression baselines).
+- [Devin] Inspection-surface batch (main, HEAD=6df7572):
+  `stats --family --top|--detail` = ~55-section per-family dashboard
+  (leaderboard, niche matrix, origins, trust/health, probes/traces/
+  deaths, ages, usage, fitness, size, builtins, healing, staleness,
+  trial_score, lifespan, args, niches, efficiency, born, parents,
+  turnover, diversity, population, sick errs, lifecycle, workload,
+  source success/fitness, probe niches/inputs/pass-rate, recent
+  traces/deaths, champion/weakest, fit_rate/usage_rate/size_rate,
+  pressure, birth timeline, siblings, code diversity, death causes,
+  maturity, niche gaps, proven/risky, healing success, trace rate,
+  LLM count, immigrant origins). Extracted to `print_family_detail`
+  at end of main.rs — reused by `garden --family --detail` and
+  `lineage --detail`. `stats --top [N]` = compact per-family table.
+  `/api/family?name=` returns the same aggregates as JSON (lifecycle,
+  workload, diversity, pressure, proven/risky, healing, immigrants,
+  fit_rate, death_causes + full variant records).
+  `stats --family --json` got the family extras (origins, ages,
+  traces, champion/weakest).
+  --json coverage: `evolve --json` (JSONL EvolutionEvent stream),
+  `fuzz --json` (structured divergent cases + probes_planted),
+  `diff --json` (LCS-aligned records with added/removed/shared).
+  `check --strict` gained: dup fn defs, empty bodies, non-exhaustive
+  match, property-only test clauses, dup match arms, unused struct
+  defs, nesting depth >4.
+  `veldt bench <file.veldt> [--reps N] [--vm] [--compare]` = single-
+  workload timing + engine comparison (finding: VM slower than
+  tree-walk on numeric_loop, 0.75x — profiling candidate).
+  `veldt bench --json/--save F/--compare F/--filter E` = species
+  suite + regression baselines + species summary line.
+  `garden --family` got a compact summary footer.
