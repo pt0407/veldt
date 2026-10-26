@@ -626,8 +626,12 @@ fn main() {
                 .and_then(|p| args.get(p + 1))
                 .and_then(|s| s.split_once(':')
                     .and_then(|(n, f)| Some((n.to_string(), f.parse::<f64>().ok()?))));
+            let until_healthy = args.iter().position(|a| a == "--until-healthy")
+                .and_then(|p| args.get(p + 1));
+            let watch = args.iter().any(|a| a == "--watch");
+            if watch { eprintln!("[EVOLVE] watch mode — Ctrl-C to stop"); }
             let mut run_cycles = 0usize;
-            while run_cycles < cycles {
+            while run_cycles < cycles || watch {
                 let events = evolver.evolve_scoped(&mut veldt, 1,
                     fam_scope.map(|s| s.as_str()));
                 for event in &events { eprintln!("{}", event.format()); }
@@ -649,6 +653,16 @@ fn main() {
                     if peak >= *target {
                         eprintln!("[EVOLVE] {} hit target {} (peak {:.2}) — stopping after {} cycles",
                             fam, target, peak, run_cycles);
+                        break;
+                    }
+                }
+                if let Some(fam) = until_healthy {
+                    let has_healthy = veldt.functions.get(fam)
+                        .map(|vs| vs.iter().any(|e| e.health == veldt::Health::Healthy))
+                        .unwrap_or(false);
+                    if has_healthy {
+                        eprintln!("[EVOLVE] {} has a healthy variant — stopping after {} cycles",
+                            fam, run_cycles);
                         break;
                     }
                 }
@@ -913,6 +927,52 @@ fn print_stats(veldt: &veldt::Veldt) {
         let line: Vec<String> = rates.iter().take(8)
             .map(|(s, h, t)| format!("{}:{}/{}", s, h, t)).collect();
         println!("mutation success (healthy/total): {}", line.join(" "));
+    }
+    // probe niche coverage — which input niches the probes target
+    let mut niche_count: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    for probes in veldt.probes.values() {
+        for p in probes {
+            *niche_count.entry(p.niche.clone()).or_default() += 1;
+        }
+    }
+    let mut niches: Vec<(String, usize)> = niche_count.into_iter().collect();
+    niches.sort_by(|a, b| b.1.cmp(&a.1));
+    if !niches.is_empty() {
+        let line: Vec<String> = niches.iter().take(8)
+            .map(|(n, c)| format!("{}:{}", n, c)).collect();
+        println!("probe niches: {}", line.join(" "));
+    }
+    // avg variant age — turnover: young garden = active evolution
+    let ages: Vec<u64> = veldt.functions.values()
+        .flat_map(|vs| vs.iter().map(|e| e.age)).collect();
+    if !ages.is_empty() {
+        let avg = ages.iter().sum::<u64>() / ages.len() as u64;
+        let max = ages.iter().max().unwrap_or(&0);
+        let min = ages.iter().min().unwrap_or(&0);
+        println!("variant age: avg {} ({}..{}) — {}% under 20 runs",
+            avg, min, max,
+            ages.iter().filter(|a| **a < 20).count() * 100 / ages.len());
+    }
+    // trace volume — production evidence per family
+    let mut trace_count: Vec<(&String, usize)> = veldt.traces.iter()
+        .map(|(n, t)| (n, t.len())).collect();
+    trace_count.sort_by(|a, b| b.1.cmp(&a.1));
+    if !trace_count.is_empty() {
+        let line: Vec<String> = trace_count.iter().take(8)
+            .map(|(n, c)| format!("{}:{}", n, c)).collect();
+        println!("call traces: {}", line.join(" "));
+    }
+    // usage distribution — which variants actually get called
+    let mut usage: Vec<(String, u64)> = veldt.functions.iter()
+        .flat_map(|(n, vs)| vs.iter().map(move |e| (format!("{}#{}", n, e.id), e.usage_count)))
+        .collect();
+    usage.sort_by(|a, b| b.1.cmp(&a.1));
+    let nonzero: Vec<_> = usage.into_iter().filter(|(_, u)| *u > 0).take(8).collect();
+    if !nonzero.is_empty() {
+        let line: Vec<String> = nonzero.iter()
+            .map(|(n, u)| format!("{}:{}", n, u)).collect();
+        println!("usage: {}", line.join(" "));
     }
     // fitness trend — peak per run, is the garden improving?
     if veldt.fitness_history.len() >= 2 {
