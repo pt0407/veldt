@@ -566,6 +566,33 @@ fn main() {
                 }
                 println!("=== The Veldt (fitness >= {}) ===", min);
                 filtered.print_garden(sick_only, healthy_only);
+            } else if let Some(target) = args.iter().position(|a| a == "--siblings")
+                .and_then(|p| args.get(p + 1)).cloned() {
+                // --siblings <fam#id> — variants with the same parent as this variant
+                let (fam, id) = target.split_once('#')
+                    .and_then(|(n, i)| i.parse::<u32>().ok().map(|id| (n.to_string(), id)))
+                    .unwrap_or(("".to_string(), 0));
+                let parent = veldt.functions.get(&fam)
+                    .and_then(|vs| vs.iter().find(|e| e.id == id))
+                    .map(|e| e.origin.clone());
+                match parent {
+                    Some(p) if p != "seed" => {
+                        let mut filtered = veldt::Veldt::new();
+                        filtered.probes = veldt.probes.clone();
+                        filtered.obituaries = veldt.obituaries.clone();
+                        filtered.run_count = veldt.run_count;
+                        filtered.garden_path = veldt.garden_path.clone();
+                        for (name, vs) in &veldt.functions {
+                            let keep: Vec<_> = vs.iter()
+                                .filter(|e| e.origin == p && e.id != id)
+                                .cloned().collect();
+                            if !keep.is_empty() { filtered.functions.insert(name.clone(), keep); }
+                        }
+                        println!("=== The Veldt (siblings of {}) ===", target);
+                        filtered.print_garden(sick_only, healthy_only);
+                    }
+                    _ => println!("{} has no siblings (seed or not found)", target),
+                }
             } else if let Some(parent) = args.iter().position(|a| a == "--descendants")
                 .and_then(|p| args.get(p + 1)).cloned() {
                 // --descendants <fam#id> — variants whose origin mentions this parent
