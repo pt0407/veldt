@@ -28,5 +28,5 @@ report["errors"] = errors.len()
 report["total"] = total
 
 write_file(outfile, json_stringify(report))
-print("wrote " + outfile + " — " + lines.len() + " lines, " +
-    counts.keys().len() + " groups, " + errors.len() + " errors")
+print(format("wrote %0 — %1 lines, %2 groups, %3 errors",
+    outfile, lines.len(), counts.keys().len(), errors.len()))

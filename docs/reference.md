@@ -29,8 +29,9 @@ Methods live on values: `xs.push(3)`, `s.split(",")`, `d.put(k, v)`.
 ## Strings
 
 Methods: `upper lower trim split contains replace starts_with
-ends_with len chars find` — plus `format("{0} {1}", a, b)` positional
-and `{expr}` interpolation in literals.
+ends_with len chars find` — plus `format("%0 is %1", a, b)` positional
+(`%N` indexed, `%%` literal; `{}` can't be used — `{expr}` interpolation
+fires at lex time).
 
 | `b64_encode` `b64_decode` | base64 |
 | `url_encode` `url_decode` | percent-encoding |
