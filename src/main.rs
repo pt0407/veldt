@@ -4174,7 +4174,8 @@ fn diff_variants(a: &str, b: &str) {
                     else { dp[i+1][j].max(dp[i][j+1]) };
             }
         }
-        println!("--- {}#{} (fitness {:.2})  +++ {}#{} (fitness {:.2})", an, aid, ea.fitness, bn, bid, eb.fitness);
+        println!("--- {}#{} (fitness {:.2})  +++ {}#{} (fitness {:.2})  Δ {:+.2}",
+            an, aid, ea.fitness, bn, bid, eb.fitness, eb.fitness - ea.fitness);
         let (mut i, mut j) = (0usize, 0usize);
         while i < n && j < m {
             if pa[i] == pb[j] {
