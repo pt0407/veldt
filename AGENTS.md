@@ -703,3 +703,8 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 - [Devin] Lint batch 13 (HEAD post-16be53e): ~43 strict
   checks. New: catch body only prints the error (shallow
   error handling — caught but not handled).
+- [Devin] Lint batch 14 + match semantics (HEAD post-16be53e):
+  ~43 strict checks. Match arm patterns evalExpr-compare
+  (not bind) — Var patterns are value comparisons, _ is
+  the unbound-var convention. The earlier let-shadows-
+  loop-var and loop-var-assignment checks are correct.
