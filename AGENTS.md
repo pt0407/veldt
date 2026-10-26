@@ -862,3 +862,6 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   strict checks. New: let a = b where b is let-bound to
   Var(c) — the let propagates an alias chain one level
   deeper.
+- [Devin] Lint batch 33 (HEAD post-match-alias): ~64 strict
+  checks. New: match on an alias (match a where a is
+  let-bound to Var(b) — could match b directly).
