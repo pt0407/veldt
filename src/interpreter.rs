@@ -2208,6 +2208,60 @@ impl Interpreter {
                     None => Ok(Some(Value::Null)),
                 }
             }
+            "weighted_choice" => {
+                // weighted_choice([[item, weight], ...]) — weighted random pick
+                let Value::List(items) = args.get(0).cloned().unwrap_or(Value::Null) else {
+                    return Err("weighted_choice(list) expects [[item, w], ...]".into())
+                };
+                if items.is_empty() { return Ok(Some(Value::Null)); }
+                let mut total = 0f64;
+                let mut weights = Vec::with_capacity(items.len());
+                for it in items.iter() {
+                    let Value::List(pair) = it else { return Err("weighted_choice expects [item, w] pairs".into()) };
+                    if pair.len() != 2 { return Err("weighted_choice expects [item, w] pairs".into()) }
+                    let w = match &pair[1] { Value::Int(i) => *i as f64, Value::Float(f) => *f, _ => 0.0 };
+                    weights.push(w);
+                    total += w;
+                }
+                if total <= 0.0 { return Ok(Some(Value::Null)); }
+                let mut x = self.rng_state;
+                x ^= x << 13; x ^= x >> 7; x ^= x << 17;
+                self.rng_state = x;
+                let mut roll = (x % 1_000_000) as f64 / 1_000_000.0 * total;
+                for (i, it) in items.iter().enumerate() {
+                    roll -= weights[i];
+                    if roll <= 0.0 {
+                        if let Value::List(pair) = it { return Ok(Some(pair[0].clone())); }
+                    }
+                }
+                if let Value::List(pair) = items.last().unwrap() { return Ok(Some(pair[0].clone())); }
+                Ok(Some(Value::Null))
+            }
+            "roll" => {
+                // roll("2d6+3") — dice notation: NdS+M / NdS-M / NdS
+                let Some(Value::Str(s)) = args.get(0) else { return Err("roll(str) expects dice notation".into()) };
+                let s = s.trim();
+                let Some(dpos) = s.find('d') else { return Err("roll expects NdS+M".into()) };
+                let n: i64 = s[..dpos].parse::<i64>().map_err(|_| "roll: bad dice count".to_string())?;
+                let rest = &s[dpos + 1..];
+                let (sides, modifier): (i64, i64) = if let Some(p) = rest.find('+') {
+                    (rest[..p].parse::<i64>().map_err(|_| "roll: bad sides".to_string())?,
+                     rest[p + 1..].parse::<i64>().map_err(|_| "roll: bad modifier".to_string())?)
+                } else if let Some(m) = rest.rfind('-') {
+                    (rest[..m].parse::<i64>().map_err(|_| "roll: bad sides".to_string())?,
+                     -rest[m + 1..].parse::<i64>().map_err(|_| "roll: bad modifier".to_string())?)
+                } else {
+                    (rest.parse::<i64>().map_err(|_| "roll: bad sides".to_string())?, 0i64)
+                };
+                let mut total = 0i64;
+                for _ in 0..n {
+                    let mut x = self.rng_state;
+                    x ^= x << 13; x ^= x >> 7; x ^= x << 17;
+                    self.rng_state = x;
+                    total += 1 + (x % (sides.max(1) as u64)) as i64;
+                }
+                Ok(Some(Value::Int(total + modifier)))
+            }
             "dist_stats" => {
                 // dist_stats(fn, trials) — mean/stddev/min/max over n samples
                 let (f, trials) = match (args.get(0), args.get(1)) {
