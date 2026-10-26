@@ -34,11 +34,21 @@ fn get_i(i: &Interpreter, name: &str) -> Option<Value> {
 }
 
 fn parity(src: &str, names: &[&str]) {
-    let i = interp_vars(src);
-    let v = vm_globals(src);
-    for n in names {
-        assert_eq!(get_i(&i, n), get_vm(&v, n), "var {} diverged", n);
-    }
+    // VM frames + JIT'd recursion consume far more native stack per
+    // level than the tree-walker — Rust test threads default to ~2MB
+    // vs the CLI's 8MB main stack, so fib(15)-depth recursion
+    // overflowed the harness (the CLI itself ran fine). Run the
+    // comparison on a generously-stacked thread instead.
+    let src = src.to_string();
+    let names: Vec<String> = names.iter().map(|s| s.to_string()).collect();
+    std::thread::Builder::new().stack_size(64 * 1024 * 1024)
+        .spawn(move || {
+            let i = interp_vars(&src);
+            let v = vm_globals(&src);
+            for n in &names {
+                assert_eq!(get_i(&i, n), get_vm(&v, n), "var {} diverged", n);
+            }
+        }).unwrap().join().unwrap();
 }
 
 #[test]
