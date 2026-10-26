@@ -696,6 +696,31 @@ fn watch_file(path: &str) {
     }
 }
 
+// REPL tab-completion: builtins + keywords + garden fn names.
+struct VeldtHelper { names: Vec<String> }
+
+impl rustyline::completion::Completer for VeldtHelper {
+    type Candidate = rustyline::completion::Pair;
+    fn complete(&self, line: &str, pos: usize, _c: &rustyline::Context<'_>)
+        -> rustyline::Result<(usize, Vec<rustyline::completion::Pair>)> {
+        let start = line[..pos].rfind(|c: char| !(c.is_alphanumeric() || c == '_'))
+            .map(|i| i + 1).unwrap_or(0);
+        let prefix = &line[start..pos];
+        let pairs: Vec<_> = self.names.iter()
+            .filter(|n| n.starts_with(prefix) && !prefix.is_empty())
+            .map(|n| rustyline::completion::Pair {
+                display: n.clone(), replacement: n.clone() })
+            .collect();
+        Ok((start, pairs))
+    }
+}
+impl rustyline::hint::Hinter for VeldtHelper {
+    type Hint = String;
+}
+impl rustyline::highlight::Highlighter for VeldtHelper {}
+impl rustyline::validate::Validator for VeldtHelper {}
+impl rustyline::Helper for VeldtHelper {}
+
 fn start_repl() {
     use rustyline::DefaultEditor;
     let mut veldt = veldt::Veldt::new();
@@ -704,7 +729,16 @@ fn start_repl() {
     veldt.load_into_interpreter(&mut interp);
 
     println!("veldt {} — repl. :help for commands, ctrl-d to quit", env!("CARGO_PKG_VERSION"));
-    let mut rl = DefaultEditor::new().expect("rustyline init");
+    let mut rl = rustyline::Editor::<VeldtHelper, rustyline::history::FileHistory>::new()
+        .expect("rustyline init");
+    let names: Vec<String> = ["fn","grow","let","while","for","if","else","return",
+        "match","test","try","spawn","import","print","len","push","split","join",
+        "sort","map","filter","reduce","keys","values","dict","list","range",
+        "call_best","env","args","exit","fetch","re_match","format","str","int"]
+        .iter().map(|s| s.to_string())
+        .chain(veldt.functions.keys().cloned())
+        .collect();
+    rl.set_helper(Some(VeldtHelper { names }));
     let hist = std::path::PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into()))
         .join(".veldt").join("repl_history.txt");
     let _ = rl.load_history(&hist);
