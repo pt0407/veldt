@@ -2765,6 +2765,62 @@ impl Interpreter {
                 let v = lerp(lerp(n00, n10, u), lerp(n01, n11, u), v);
                 Ok(Some(Value::Float(v)))
             }
+            "ui_inventory" => {
+                // ui_inventory(c, x, y, items, cols) — grid of item slots
+                let (d, x0, y0, items, cols) = match (args.get(0), args.get(1), args.get(2), args.get(3), args.get(4)) {
+                    (Some(Value::Dict(d)), Some(Value::Int(x)), Some(Value::Int(y)),
+                     Some(Value::List(items)), Some(Value::Int(c)))
+                        => (d.clone(), *x as usize, *y as usize, items.clone(), *c as usize),
+                    _ => return Err("ui_inventory(c, x, y, items, cols) expects dict + 2 ints + list + int".into()),
+                };
+                let Some(Value::List(rows)) = d.get("cells") else { return Err("canvas: no cells".into()) };
+                let mut rows2 = rows.clone();
+                for (i, it) in items.iter().enumerate() {
+                    let (dx, dy) = (i % cols.max(1), i / cols.max(1));
+                    let (xx, yy) = (x0 + dx * 5, y0 + dy);
+                    if yy >= rows2.len() { break; }
+                    let label = if let Value::Str(s) = it { s.chars().take(3).collect::<String>() } else { continue };
+                    let rendered = format!("[{}]", label);
+                    if let Value::List(r) = &rows2[yy] {
+                        let mut nr = r.clone();
+                        for (j, ch) in rendered.chars().enumerate() {
+                            if xx + j < nr.len() { nr[xx + j] = Value::Str(ch.to_string().into()); }
+                        }
+                        rows2[yy] = Value::List(nr);
+                    }
+                }
+                let mut d2 = d.clone();
+                d2.insert("cells".to_string(), Value::List(rows2));
+                Ok(Some(Value::Dict(d2)))
+            }
+            "ui_log" => {
+                // ui_log(c, x, y, w, h, messages) — scrolling text log, last
+                // h lines visible, clipped to w chars
+                let (d, x0, y0, w, h, msgs) = match (args.get(0), args.get(1), args.get(2), args.get(3), args.get(4), args.get(5)) {
+                    (Some(Value::Dict(d)), Some(Value::Int(x)), Some(Value::Int(y)),
+                     Some(Value::Int(w)), Some(Value::Int(h)), Some(Value::List(m)))
+                        => (d.clone(), *x as usize, *y as usize, *w as usize, *h as usize, m.clone()),
+                    _ => return Err("ui_log(c, x, y, w, h, messages) expects dict + 4 ints + list".into()),
+                };
+                let Some(Value::List(rows)) = d.get("cells") else { return Err("canvas: no cells".into()) };
+                let mut rows2 = rows.clone();
+                let start = msgs.len().saturating_sub(h);
+                for (i, m) in msgs.iter().skip(start).enumerate() {
+                    let yy = y0 + i;
+                    if yy >= rows2.len() || i >= h { break; }
+                    let text = if let Value::Str(s) = m { s.chars().take(w).collect::<String>() } else { continue };
+                    if let Value::List(r) = &rows2[yy] {
+                        let mut nr = r.clone();
+                        for (dx, ch) in text.chars().enumerate() {
+                            if x0 + dx < nr.len() { nr[x0 + dx] = Value::Str(ch.to_string().into()); }
+                        }
+                        rows2[yy] = Value::List(nr);
+                    }
+                }
+                let mut d2 = d.clone();
+                d2.insert("cells".to_string(), Value::List(rows2));
+                Ok(Some(Value::Dict(d2)))
+            }
             "dist_stats" => {
                 // dist_stats(fn, trials) — mean/stddev/min/max over n samples
                 let (f, trials) = match (args.get(0), args.get(1)) {
