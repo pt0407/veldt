@@ -49,6 +49,10 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] JIT UPDATE 16: veldt tournament --vm —
+  trials route through check_at_birth_with. That's the LAST
+  surface — every evaluate path now has a fast-engine route:
+  run/test/fuzz/evolve/repl/tournament/trace/stats --verified.
 - [Devin/main-side] JIT UPDATE 15: veldt repl --vm — persistent
   bytecode session (v.run per stmt, globals persist). Vm::eval_expr
   compiles a synthetic Return chunk so bare-expr echo still works
