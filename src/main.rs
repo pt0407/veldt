@@ -2354,6 +2354,16 @@ fn print_stats(veldt: &veldt::Veldt) {
                         println!("    {}#{} — {} (age {})", o.name, o.id, o.cause_of_death, o.age);
                     }
                 }
+                // probe pass rate — the family's test-suite health
+                if let Some(probes) = veldt.probes.get(fam) {
+                    let passed = probes.iter().filter(|p|
+                        vs.iter().any(|e| e.niche_scores.get(&p.niche)
+                            .map(|s| *s >= 0.5).unwrap_or(false))).count();
+                    if !probes.is_empty() {
+                        println!("  probe pass rate: {}/{} ({}%)", passed, probes.len(),
+                            (passed * 100) / probes.len().max(1));
+                    }
+                }
             }
         }
         if veldt.fitness_history.len() >= 2 {
