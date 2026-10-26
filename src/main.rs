@@ -718,6 +718,10 @@ fn main() {
                     println!("  — {} variants · {} healthy | {} seed {} estab {} canon | peak {:.2} | {} probes · {} deaths",
                         vs.len(), healthy, seed, estab, canon, peak, probes, deaths);
                 }
+                // --detail — the full per-family dashboard (same panel as stats --family --top)
+                if args.iter().any(|a| a == "--detail") {
+                    print_family_detail(&veldt, fam, &vs);
+                }
             } else if args.iter().any(|a| a == "--games") {
                 // --games — only families whose variants call game builtins
                 const GAME_BUILTINS: &[&str] = &[
