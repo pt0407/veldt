@@ -81,6 +81,7 @@ pub async fn start_server(port: u16) {
         .route("/api/diff", get(diff_variants))
         .route("/api/obituary", get(obituary))
         .route("/api/trace", get(trace_family))
+        .route("/api/probe", get(probe_family))
         .route("/api/run", post(run_program))
         .route("/api/evolve", post(evolve))
         .route("/api/clear", post(clear_veldt))
@@ -1346,6 +1347,23 @@ async fn trace_family(
         })).collect())
         .unwrap_or_default();
     Json(serde_json::json!({"name": req.name, "traces": tr}))
+}
+
+async fn probe_family(
+    axum::extract::Query(req): axum::extract::Query<TraceRequest>,
+) -> Json<serde_json::Value> {
+    let mut veldt = veldt::Veldt::new();
+    if veldt.load().is_err() {
+        return Json(serde_json::json!({"error": "garden load failed"}));
+    }
+    let pr: Vec<serde_json::Value> = veldt.probes.get(&req.name)
+        .map(|ps| ps.iter().map(|p| serde_json::json!({
+            "input": format!("{:?}", p.input),
+            "expected": format!("{:?}", p.expected),
+            "niche": p.niche,
+        })).collect())
+        .unwrap_or_default();
+    Json(serde_json::json!({"name": req.name, "probes": pr}))
 }
 
 // --- IDE HTML ---
