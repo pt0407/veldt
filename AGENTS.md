@@ -1236,3 +1236,6 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 - [Devin] /api/lint: garden code-health census over HTTP —
   per-family warnings + defect-class split, worst-first.
   Completes the API lint surface (/api/check = source level).
+- [Devin] IDE lint badge: Inspector shows lint health under
+  the trust ladder (red defects/amber warnings/green clean)
+  via /api/lint — code-health visible in-studio.
