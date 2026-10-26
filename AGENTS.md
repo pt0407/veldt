@@ -49,6 +49,21 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin] Vision lane (sandbox/fuzz/telemetry/trust-ladder) shipped
+  end-to-end on main — std:sandbox Phase 13 (Caps, --sandbox, sandboxed
+  trials/probes/fuzz, sandbox_run, IDE checkbox, /api/run sandbox:true),
+  std:fuzz (boundary corpus, veldt fuzz/--all/--ci, divergence→probe
+  loop, /api/fuzz + IDE button), std:telemetry (veldt absorb + auto-
+  absorb on evolve, /api/absorb + IDE button), shadow_call (Stage 1),
+  trust-ladder (stats, adopt→Canonical, IDE header, garden --trust,
+  /api/stats). CLI surface: find/diff/--unified/check/--strict/--json,
+  garden/stats/lineage --json, import --merge, evolve --until/--until-fam,
+  test --all, watch --sandbox, REPL :stats/:fuzz/:absorb. Gardener: 39
+  species + builtin-stdlib strains + new intents. LSP: full op set
+  (diagnostics/hover/def/completion/documentSymbol/workspaceSymbol/
+  documentHighlight/rename/references/signatureHelp/codeLens/
+  semanticTokens/foldingRange). LEFT FOR OTHER LANE: Phase 11 JIT
+  coverage beyond pure-int chunks, Phase 12 SMT gate for Canonical.
 - [Devin/main-side] PHASE 11 CRANELIFT TIER LIVE: src/jit.rs compiles
   pure-int CompiledFns to native at >=64 calls (jit_tried guard so a
   failed compile never retries). withcall bench: 2.24s -> 0.60s (~3.7x).
