@@ -45,6 +45,9 @@ pub enum Instr {
     GetField(u32),           // name-table idx — obj.field
     SliceGet,                // obj lo hi -> obj[lo:hi] (null bounds = open)
     ListPush(u32),           // append to list in env slot (in-place)
+    AppendVar(u32),          // env[slot].append(stack.pop()) — no delegate
+    InsertVar(u32, u32),     // dict[slot].insert(str, val) — name idx + slot
+    InsertDynVar(u32),       // dict[slot].insert(stack key, stack val)
     FieldSetVar(u32, u32),   // obj slot, field name idx — obj.f = v
     MakeStruct(u32, u32),    // name idx, field count (name,val pairs below)                // obj lo hi -> obj[lo:hi] (null bounds = open)
     MethodCallVar(u32, u32, u32), // receiver slot, method name idx, argc
@@ -368,6 +371,31 @@ impl Compiler {
                             for a in args { self.compile_expr(a)?; }
                             let ni = self.name_idx(&mangled);
                             self.emit(Instr::Call(ni, args.len() as u32));
+                            return Ok(());
+                        }
+                    }
+                }
+                // hot mutating ops on a Var compile to dedicated instrs —
+                // delegation costs an AST eval per call (list_ops was
+                // 3.4x slower). xs.append(v) and d.insert(k, v) get
+                // their own ops; everything else delegates.
+                if let Expr::Var(n) = obj.as_ref() {
+                    if let Some(&sl) = self.slots.get(n) {
+                        if m == "append" && args.len() == 1 {
+                            self.compile_expr(&args[0])?;
+                            self.emit(Instr::AppendVar(sl));
+                            return Ok(());
+                        }
+                        if m == "insert" && args.len() == 2 {
+                            if let Expr::Str(key) = &args[0] {
+                                self.compile_expr(&args[1])?;
+                                let ki = self.name_idx(key);
+                                self.emit(Instr::InsertVar(sl, ki));
+                            } else {
+                                self.compile_expr(&args[0])?;
+                                self.compile_expr(&args[1])?;
+                                self.emit(Instr::InsertDynVar(sl));
+                            }
                             return Ok(());
                         }
                     }
@@ -1133,6 +1161,41 @@ impl Vm {
                     }
                     let sname = code.names[ni as usize].clone();
                     stack.push(Value::Struct(sname, fields));
+                }
+                Instr::AppendVar(sl) => {
+                    let v = stack.pop().unwrap();
+                    let frame = frames.last_mut().unwrap();
+                    match frame.env.get_mut(sl as usize)
+                        .and_then(|o| o.as_mut()) {
+                        Some(Value::List(l)) => l.push_back(v),
+                        _ => return Err("append on non-list".into()),
+                    }
+                }
+                Instr::InsertVar(sl, ki) => {
+                    let v = stack.pop().unwrap();
+                    let k = code.names[ki as usize].clone();
+                    let frame = frames.last_mut().unwrap();
+                    match frame.env.get_mut(sl as usize)
+                        .and_then(|o| o.as_mut()) {
+                        Some(Value::Dict(d)) => { d.insert(k, v); }
+                        Some(Value::Set(st)) => { st.push(v); }
+                        _ => return Err("insert on non-dict/set".into()),
+                    }
+                }
+                Instr::InsertDynVar(sl) => {
+                    let v = stack.pop().unwrap();
+                    let k = stack.pop().unwrap();
+                    let key = match &k {
+                        Value::Str(s) => (**s).to_string(),
+                        _ => return Err("dict key must be string".into()),
+                    };
+                    let frame = frames.last_mut().unwrap();
+                    match frame.env.get_mut(sl as usize)
+                        .and_then(|o| o.as_mut()) {
+                        Some(Value::Dict(d)) => { d.insert(key, v); }
+                        Some(Value::Set(st)) => { st.push(v); }
+                        _ => return Err("insert on non-dict/set".into()),
+                    }
                 }
                 Instr::PrintOut => {
                     let v = stack.pop().unwrap();
