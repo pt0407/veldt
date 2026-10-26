@@ -1265,3 +1265,6 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   heal+repair pass ([TEND] event when work lands). Evolution
   keeps the garden clean both directions now: lint-gate on
   births, tend on the existing population.
+- [Devin] stats --lint kind tally: top warning shapes
+  (34x compound-assign, 28x loop-no-exit, 10x property-only
+  tests) — shows which repair pass pays off next.
