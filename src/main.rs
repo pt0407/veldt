@@ -1754,6 +1754,23 @@ fn main() {
             }
         }
         "bench" => {
+            // veldt bench <file.veldt> — single-workload timing (N reps)
+            if let Some(file) = args.get(2).filter(|a| a.ends_with(".veldt")) {
+                let reps: usize = args.iter().position(|a| a == "--reps")
+                    .and_then(|p| args.get(p + 1)).and_then(|s| s.parse().ok()).unwrap_or(5);
+                let mut times: Vec<u128> = Vec::new();
+                for _ in 0..reps {
+                    let t0 = std::time::Instant::now();
+                    run_program(file, false, false);
+                    times.push(t0.elapsed().as_millis());
+                }
+                let min = times.iter().min().copied().unwrap_or(0);
+                let max = times.iter().max().copied().unwrap_or(0);
+                let avg = times.iter().sum::<u128>() / times.len().max(1) as u128;
+                println!("bench {} — {} reps | min {}ms avg {}ms max {}ms",
+                    file, reps, min, avg, max);
+                return;
+            }
             let mut veldt = veldt::Veldt::new();
             if let Err(e) = veldt.load() {
                 eprintln!("Error loading veldt: {}", e);
