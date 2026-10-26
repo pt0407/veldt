@@ -1299,3 +1299,6 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   YOUR LANE: jit_recursion_result_not_sentinel fails — the
   nok() -1 sentinel leaks boxed as Int(4294967295) into
   callers; fib feeds it back into n -> unbounded recursion.
+- [Devin] bench --lint: strict-lint is FAST (0.2-2.3ms/file,
+  4.8ms garden census) — IDE debounced lint + garden --watch
+  are comfortably in budget.
