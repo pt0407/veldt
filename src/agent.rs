@@ -328,6 +328,9 @@ pub fn respond(task: &str, editor_source: &str, veldt: &mut Veldt) -> AgentRespo
     if has(&["experimental", "untested", "unstable", "risky"]) {
         return risky_intent(veldt);
     }
+    if has(&["verify", "verified", "agree", "consistent", "divergence", "same result"]) {
+        return verify_intent(&words, veldt);
+    }
     if has(&["obituar", "why did", "why'd"]) || hasw(&["deaths", "died", "dead"]) {
         return obituary_intent(&words, veldt);
     }
@@ -1461,6 +1464,20 @@ fn risky_intent(veldt: &Veldt) -> AgentResponse {
         text.push_str(&format!("  {}#{} — {:.2} ({})\n", n, e.id, e.fitness, tag));
     }
     plain(&text)
+}
+
+/// Verify — "verify fib" — run the domain-verification, report divergence.
+fn verify_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
+    let name = match find_lineage(words, veldt) {
+        Some(n) => n,
+        None => return plain("Verify which family? e.g. \"verify fib\"."),
+    };
+    match crate::verify_family_find_divergent(&name) {
+        Some(id) => plain(&format!(
+            "{} — variant #{} diverges on a sampled input. The family doesn't agree.", name, id)),
+        None => plain(&format!(
+            "{} — all variants agree on sampled inputs. Verified.", name)),
+    }
 }
 
 /// Parse a bare word that looks like a function name (optionally name#N).
