@@ -872,3 +872,6 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   strict checks. New: match on a call-bound alias — the
   scrutinee is a call result that could be matched
   directly.
+- [Devin] Lint batch 36 (HEAD post-match-lit-pattern): ~67
+  strict checks. New: match Var pattern bound to a
+  literal — the pattern is a constant, could inline.
