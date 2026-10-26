@@ -1077,6 +1077,8 @@ impl Vm {
                                         [a,b] => std::mem::transmute::<_, crate::jit::NativeF2>(p)(*a,*b),
                                         [a,b,c] => std::mem::transmute::<_, crate::jit::NativeF3>(p)(*a,*b,*c),
                                         [a,b,c,d] => std::mem::transmute::<_, crate::jit::NativeF4>(p)(*a,*b,*c,*d),
+                                        [a,b,c,d,e] => std::mem::transmute::<_, crate::jit::NativeF5>(p)(*a,*b,*c,*d,*e),
+                                        [a,b,c,d,e,f] => std::mem::transmute::<_, crate::jit::NativeF6>(p)(*a,*b,*c,*d,*e,*f),
                                         _ => -1.0,
                                     }
                                 };
@@ -1093,6 +1095,8 @@ impl Vm {
                                         [a,b] => std::mem::transmute::<_, crate::jit::NativeFn2>(p)(*a,*b),
                                         [a,b,c] => std::mem::transmute::<_, crate::jit::NativeFn3>(p)(*a,*b,*c),
                                         [a,b,c,d] => std::mem::transmute::<_, crate::jit::NativeFn4>(p)(*a,*b,*c,*d),
+                                        [a,b,c,d,e] => std::mem::transmute::<_, crate::jit::NativeFn5>(p)(*a,*b,*c,*d,*e),
+                                        [a,b,c,d,e,f] => std::mem::transmute::<_, crate::jit::NativeFn6>(p)(*a,*b,*c,*d,*e,*f),
                                         _ => -1,
                                     }
                                 };

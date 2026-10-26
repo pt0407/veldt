@@ -30,6 +30,8 @@ pub type NativeF1 = unsafe extern "C" fn(f64) -> f64;
 pub type NativeF2 = unsafe extern "C" fn(f64, f64) -> f64;
 pub type NativeF3 = unsafe extern "C" fn(f64, f64, f64) -> f64;
 pub type NativeF4 = unsafe extern "C" fn(f64, f64, f64, f64) -> f64;
+pub type NativeF5 = unsafe extern "C" fn(f64, f64, f64, f64, f64) -> f64;
+pub type NativeF6 = unsafe extern "C" fn(f64, f64, f64, f64, f64, f64) -> f64;
 pub type NativeFn5 = unsafe extern "C" fn(i64, i64, i64, i64, i64) -> i64;
 pub type NativeFn6 = unsafe extern "C" fn(i64, i64, i64, i64, i64, i64) -> i64;
 
