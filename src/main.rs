@@ -189,6 +189,26 @@ fn main() {
                 fuzz_family(&args[2]);
             }
         }
+        "check" => {
+            if args.len() < 3 {
+                eprintln!("Usage: veldt check <file.veldt>");
+                process::exit(1);
+            }
+            // parse-only — no exec; exits 1 on any lex/parse error
+            let source = std::fs::read_to_string(&args[2])
+                .unwrap_or_else(|e| { eprintln!("Error reading {}: {}", args[2], e); process::exit(1); });
+            let mut lx = lexer::Lexer::new(&source);
+            match lx.tokenize() {
+                Err(e) => { eprintln!("Lex error: {}", e); process::exit(1); }
+                Ok(toks) => {
+                    let mut p = parser::Parser::new_with_lines(toks, lx.token_lines.clone());
+                    match p.parse_program() {
+                        Err(e) => { eprintln!("Parse error: {}", e); process::exit(1); }
+                        Ok(stmts) => println!("{} — ok ({} statements)", args[2], stmts.len()),
+                    }
+                }
+            }
+        }
         "diff" => {
             if args.len() < 4 {
                 eprintln!("Usage: veldt diff <name#a> <name#b>");
