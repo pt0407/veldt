@@ -2172,6 +2172,14 @@ fn print_stats(veldt: &veldt::Veldt) {
                 let avg_usage = total_usage as f64 / vs.len().max(1) as f64;
                 let max_usage = vs.iter().map(|e| e.usage_count).max().unwrap_or(0);
                 println!("  usage: {} calls (avg {:.1}, peak {})", total_usage, avg_usage, max_usage);
+                // fitness distribution — min / avg / peak
+                let fits: Vec<f64> = vs.iter().map(|e| e.fitness).collect();
+                if !fits.is_empty() {
+                    let min = fits.iter().cloned().fold(f64::INFINITY, f64::min);
+                    let max = fits.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+                    let avg = fits.iter().sum::<f64>() / fits.len() as f64;
+                    println!("  fitness: {:.2} – {:.2} (avg {:.2})", min, max, avg);
+                }
             }
         }
         if veldt.fitness_history.len() >= 2 {
