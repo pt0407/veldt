@@ -4197,7 +4197,7 @@ fn diff_variants(a: &str, b: &str) {
         let t = l.trim();
         println!("{}{}", if t.is_empty() { " " } else if lb.contains(t) { " " } else { "-" }, l);
     }
-    println!("+++ {}#{} (fitness {:.2})", bn, bid, eb.fitness);
+    println!("+++ {}#{} (fitness {:.2})  Δ {:+.2}", bn, bid, eb.fitness, eb.fitness - ea.fitness);
     for l in sb.lines() {
         let t = l.trim();
         println!("{}{}", if t.is_empty() { " " } else if la.contains(t) { " " } else { "+" }, l);
