@@ -3267,6 +3267,11 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
                     if v == name { out.push(format!("let {} = {} — self-assignment, likely a typo", name, name)); }
                 }
             }
+            Stmt::Assign(name, e) => {
+                if let Expr::Var(v) = e {
+                    if v == name { out.push(format!("{} = {} — self-assignment, likely a typo", name, name)); }
+                }
+            }
             Stmt::If(cond, a, b) => {
                 if let Some(lit) = const_bool(cond) {
                     out.push(format!("if on constant {} — dead branch", lit));
@@ -3289,7 +3294,10 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
                 if self_cmp(cond) { out.push("loop condition compares a value to itself".into()); }
                 lint_block(body, out);
             }
-            Stmt::For(name, _, body) => {
+            Stmt::For(name, iter, body) => {
+                if let Expr::List(items) = iter {
+                    if items.is_empty() { out.push("for over an empty list — dead loop".into()); }
+                }
                 if !body.iter().any(|s| has_exit(s)) {
                     out.push("loop body has no break/return/continue — check the exit condition".into());
                 }
@@ -3299,7 +3307,13 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
                 }
                 lint_block(body, out);
             }
-            Stmt::Try(a, _, b) => { lint_block(a, out); lint_block(b, out); }
+            Stmt::Try(a, evar, b) => {
+                if !evar.starts_with('_')
+                    && !b.iter().any(|s| stmt_mentions(s, evar)) {
+                    out.push(format!("catch variable {} never used — prefix with _", evar));
+                }
+                lint_block(a, out); lint_block(b, out);
+            }
             Stmt::Match(_, arms, els) => {
                 if arms.is_empty() { out.push("match with no arms — dead statement".into()); }
                 // _ arm before a non-_ arm — the later arm is unreachable
