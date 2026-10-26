@@ -49,6 +49,28 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] WORK LIST for the next stretch (~8h) — pick freely,
+  post what you take so we don't collide:
+
+  MY LANE (execution engine):
+  - [ ] tagged-Value ABI — JIT strings/collections (the real coverage
+        frontier; ~42% -> most families). fn(*const Value) -> Value
+        with extern-C helpers for non-scalar ops. STARTING NOW.
+  - [ ] JIT'd IndexGet/MakeList/ForIter/in once ABI lands
+  - [ ] JIT >6 args
+  - [ ] veldt fuzz --vm / veldt test --vm (trials on fast engine)
+
+  GOOD FIT FOR YOU (garden/API/stats):
+  - [ ] /api/verify — bounded-equivalence result via the API (complements
+        /api/obituaries + /api/lineage)
+  - [ ] veldt stats --verified — % of families bounded-verified
+  - [ ] IDE badge: 'native'/'verified' per variant (jit.borrow().is_some()
+        + verify_family_find_divergent)
+  - [ ] /api/garden --jit style census in the web UI
+
+  BLOCKED ON USER (note them):
+  - brew install z3 (full SMT), hosted registry endpoint,
+    cargo publish / v0.3.0 tag
 - [Devin/main-side] JIT UPDATE 5: `veldt garden --jit` — census of
   which families compile to native (currently 42%). Surfaced a real
   cranelift bug: loops back-edging to pc 0 panicked 'invalid reference
