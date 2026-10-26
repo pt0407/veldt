@@ -1146,6 +1146,14 @@ pub(crate) fn boundary_value(t: &Type, i: usize) -> Option<crate::interpreter::V
             Some(Value::Str(s.into()))
         }
         Type::Bool => Some(Value::Bool(i % 2 == 0)),
+        Type::Any => match i % 6 {
+            0 => boundary_value(&Type::Int, i),
+            1 => boundary_value(&Type::Str, i),
+            2 => boundary_value(&Type::List(Box::new(Type::Int)), i),
+            3 => Some(Value::Dict(std::collections::HashMap::new().into_iter().collect())),
+            4 => boundary_value(&Type::Bool, i),
+            _ => Some(Value::Null),
+        },
         Type::List(inner) => {
             let items: Vec<Value> = match i % 5 {
                 0 => vec![],                                              // empty

@@ -403,9 +403,14 @@ fn main() {
                     evolver.set_seed(n);
                 }
             }
-            // --until F: stop early when any variant reaches fitness F
+            // --until F: stop early when any variant reaches fitness F;
+            // --until-fam name:F — scoped to one family.
             let until = args.iter().position(|a| a == "--until")
                 .and_then(|p| args.get(p + 1)).and_then(|s| s.parse::<f64>().ok());
+            let until_fam = args.iter().position(|a| a == "--until-fam")
+                .and_then(|p| args.get(p + 1))
+                .and_then(|s| s.split_once(':')
+                    .and_then(|(n, f)| Some((n.to_string(), f.parse::<f64>().ok()?))));
             let mut run_cycles = 0usize;
             while run_cycles < cycles {
                 let events = evolver.evolve(&mut veldt, 1);
@@ -418,6 +423,16 @@ fn main() {
                     if peak >= target {
                         eprintln!("[EVOLVE] target fitness {} reached (peak {:.2}) — stopping after {} cycles",
                             target, peak, run_cycles);
+                        break;
+                    }
+                }
+                if let Some((fam, target)) = &until_fam {
+                    let peak = veldt.functions.get(fam)
+                        .map(|vs| vs.iter().map(|e| e.fitness).fold(f64::NEG_INFINITY, f64::max))
+                        .unwrap_or(f64::NEG_INFINITY);
+                    if peak >= *target {
+                        eprintln!("[EVOLVE] {} hit target {} (peak {:.2}) — stopping after {} cycles",
+                            fam, target, peak, run_cycles);
                         break;
                     }
                 }
