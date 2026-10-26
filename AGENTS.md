@@ -1105,3 +1105,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   skipped; builtins/imports/methods never flagged). Also fixed
   `let x = []` FP: empties.append(i) nested in while/if now
   counts as growth (stmt_grows/expr_grows walk).
+- [Devin] Lint batch 55 (HEAD post-fn-shadow): ~87 checks.
+  New: `let f`/param `f` shadowing a defined fn name — calls
+  inside that scope hit the var/param instead of the fn
+  (runtime error). Uses the arity pass's fn-name set.
