@@ -5191,9 +5191,11 @@ fn print_family_detail(veldt: &veldt::Veldt, fam: &String, vs: &[veldt::Function
         }
     }
     if !niche_totals.is_empty() {
-        println!("  niche coverage:");
         let mut niches: Vec<_> = niche_totals.iter().collect();
         niches.sort_by(|a, b| a.0.cmp(&b.0));
+        let avgs: Vec<f64> = niches.iter().take(10)
+            .map(|(_, (t, n))| t / *n as f64).collect();
+        println!("  niche coverage: {}", spark(&avgs));
         for (niche, (total, count)) in niches.iter().take(10) {
             println!("    {:<20} avg {:.2} ({} variants)", niche, total / *count as f64, count);
         }
