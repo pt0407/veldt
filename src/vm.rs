@@ -39,6 +39,9 @@ enum Instr {
     ToStr,
     ForIter,
     ForNext(u32, u32),       // var slot, jump target
+    CaptureEnv,              // top of stack: Closure proto -> captured env
+    CallVar(u32, u32),       // slot holding Closure, argc
+    MethodCallVar(u32, u32, u32), // receiver slot, method name idx, argc
     PrintOut,
     Return,
     Halt,
@@ -48,6 +51,7 @@ struct Chunk {
     code: Vec<Instr>,
     consts: Vec<Value>,
     names: Vec<String>,
+    slot_names: Vec<String>,   // slot idx -> var name (for closure capture)
 }
 
 struct CompiledFn {
@@ -79,6 +83,7 @@ struct Compiler {
     code: Vec<Instr>,
     consts: Vec<Value>,
     names: Vec<String>,
+    slot_names: Vec<String>,   // slot idx -> name, for closure capture
     // loop stack: (start_pc, [pending break patch positions])
     loops: Vec<(usize, Vec<usize>)>,
     // var name -> local slot (allocated lazily; env Vec grows to fit)
@@ -88,8 +93,11 @@ struct Compiler {
 
 impl Compiler {
     fn slot(&mut self, name: &str) -> u32 {
-        *self.slots.entry(name.to_string())
-            .or_insert_with(|| { let s = self.next_slot; self.next_slot += 1; s })
+        if let Some(&s) = self.slots.get(name) { return s; }
+        let s = self.next_slot; self.next_slot += 1;
+        self.slots.insert(name.to_string(), s);
+        self.slot_names.push(name.to_string());
+        s
     }
 
     fn emit(&mut self, i: Instr) -> usize {
@@ -261,18 +269,45 @@ impl Compiler {
                     return Err(format!("VM subset: explicit variant {}#{} unsupported", name, v));
                 }
                 for a in args { self.compile_expr(a)?; }
-                let ni = self.name_idx(name);
-                self.emit(Instr::Call(ni, args.len() as u32));
+                if let Some(&sl) = self.slots.get(name) {
+                    // name is a local var — may hold a Closure
+                    self.emit(Instr::CallVar(sl, args.len() as u32));
+                } else {
+                    let ni = self.name_idx(name);
+                    self.emit(Instr::Call(ni, args.len() as u32));
+                }
             }
             Expr::MethodCall(obj, m, args) => {
+                // Var receiver: delegate then write the (possibly mutated)
+                // receiver back into the slot — mutating methods like
+                // append/insert must land on OUR env, not the helper's.
+                let var_slot = match obj.as_ref() {
+                    Expr::Var(n) => self.slots.get(n).copied(),
+                    _ => None,
+                };
                 self.compile_expr(obj)?;
                 for a in args { self.compile_expr(a)?; }
                 let ni = self.name_idx(m);
-                self.emit(Instr::MethodCall(ni, args.len() as u32));
+                match var_slot {
+                    Some(sl) => self.emit(Instr::MethodCallVar(
+                        sl, ni, args.len() as u32)),
+                    None => self.emit(Instr::MethodCall(
+                        ni, args.len() as u32)),
+                };
             }
             Expr::Index(o, i) => {
                 self.compile_expr(o)?; self.compile_expr(i)?;
                 self.emit(Instr::IndexGet);
+            }
+            Expr::Lambda(params, body) => {
+                // Closure proto in const pool; CaptureEnv fills its env
+                // with a snapshot of the frame's named slots at runtime.
+                let proto = Value::Closure(
+                    params.clone(), body.clone(),
+                    std::rc::Rc::new(std::cell::RefCell::new(HashMap::new())));
+                let k = self.konst(proto);
+                self.emit(Instr::Const(k));
+                self.emit(Instr::CaptureEnv);
             }
             Expr::Interp(parts) => {
                 for (i, p) in parts.iter().enumerate() {
@@ -403,13 +438,15 @@ impl Vm {
         -> Result<Chunk, String> {
         let mut c = Compiler {
             code: Vec::new(), consts: Vec::new(), names: Vec::new(),
+            slot_names: Vec::new(),
             loops: Vec::new(), slots: HashMap::new(), next_slot: 0,
         };
         // params occupy slots 0..n — the frame binds args by position
         for p in params { c.slot(p); }
         for s in stmts { c.compile_stmt(s)?; }
         c.emit(Instr::Halt);
-        Ok(Chunk { code: c.code, consts: c.consts, names: c.names })
+        Ok(Chunk { code: c.code, consts: c.consts,
+                   names: c.names, slot_names: c.slot_names })
     }
 
     fn exec(&mut self, code: Rc<Chunk>, args_out: &mut Vec<Value>) -> Result<(), String> {
@@ -612,6 +649,58 @@ impl Vm {
                     let m = &code.names[ni as usize];
                     let v = self.delegate_method(recv, m, args)?;
                     stack.push(v);
+                }
+                Instr::MethodCallVar(sl, ni, argc) => {
+                    let args: Vec<Value> =
+                        stack.drain(stack.len() - argc as usize..).collect();
+                    let recv = stack.pop().unwrap();
+                    let m = code.names[ni as usize].clone();
+                    let v = self.delegate_method(recv, &m, args)?;
+                    // write back — mutating methods changed the receiver
+                    let newv = self.helper.vars.borrow()
+                        .get("__vm_recv").cloned();
+                    if let Some(nv) = newv {
+                        let frame = frames.last_mut().unwrap();
+                        if frame.env.len() <= sl as usize {
+                            frame.env.resize(sl as usize + 1, None);
+                        }
+                        frame.env[sl as usize] = Some(nv);
+                    }
+                    stack.push(v);
+                }
+                Instr::CaptureEnv => {
+                    let proto = stack.pop().unwrap();
+                    let Value::Closure(params, body, _) = proto else {
+                        return Err("CaptureEnv on non-closure".into());
+                    };
+                    // snapshot named slots into a HashMap env (capture-all,
+                    // matching the tree-walker's vars.clone() semantics)
+                    let frame = frames.last().unwrap();
+                    let mut env = HashMap::new();
+                    for (i, v) in frame.env.iter().enumerate() {
+                        if let (Some(vv), Some(n)) =
+                            (v, code.slot_names.get(i)) {
+                            env.insert(n.clone(), vv.clone());
+                        }
+                    }
+                    stack.push(Value::Closure(
+                        params, body,
+                        std::rc::Rc::new(std::cell::RefCell::new(env))));
+                }
+                Instr::CallVar(sl, argc) => {
+                    let args: Vec<Value> =
+                        stack.drain(stack.len() - argc as usize..).collect();
+                    let frame = frames.last().unwrap();
+                    let v = frame.env.get(sl as usize)
+                        .and_then(|o| o.clone())
+                        .ok_or("call on unset variable")?;
+                    match v {
+                        Value::Closure(..) => {
+                            let r = self.helper.call_closure_pub(&v, args)?;
+                            stack.push(r);
+                        }
+                        _ => return Err("variable is not callable".into()),
+                    }
                 }
                 Instr::PrintOut => {
                     let v = stack.pop().unwrap();

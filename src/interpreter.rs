@@ -1214,6 +1214,13 @@ impl Interpreter {
         Ok(result)
     }
 
+    /// VM delegation: invoke a closure value through the reference
+    /// interpreter so lambda semantics are shared, not duplicated.
+    pub(crate) fn call_closure_pub(&mut self, closure: &Value, args: Vec<Value>)
+        -> Result<Value, String> {
+        self.call_closure_value(closure, args)
+    }
+
     fn call_closure_value(&mut self, closure: &Value, args: Vec<Value>) -> Result<Value, String> {
         match closure {
             Value::Closure(params, body, captured) => {
