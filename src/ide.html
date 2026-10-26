@@ -485,6 +485,7 @@
     <button class="btn amber" id="evolveBtn">Evolve</button>
     <button class="btn danger" id="clearBtn">Clear Garden</button>
     <button class="btn primary" id="runBtn">▶ Run</button>
+    <label style="font-size:11px;opacity:.7;margin-left:6px"><input type="checkbox" id="sandboxChk"> sandbox</label>
   </div>
 </div>
 
@@ -703,7 +704,7 @@ async function runProgram() {
   const res = await fetch(API + '/api/run', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ source })
+    body: JSON.stringify({ source, sandbox: document.getElementById('sandboxChk').checked })
   });
   const data = await res.json();
 
