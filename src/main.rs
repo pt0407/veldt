@@ -3295,6 +3295,9 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
                 out.extend(sub.into_iter().map(|w| format!("{}: {}", name, w)));
             }
             Stmt::Let(name, e) => {
+                if !name.starts_with('_') && bound.iter().any(|(_, b)| *b == name) {
+                    out.push(format!("let {} shadows an outer let", name));
+                }
                 bound.push((i, name));
                 if let Expr::Var(v) = e {
                     if v == name { out.push(format!("let {} = {} — self-assignment, likely a typo", name, name)); }
