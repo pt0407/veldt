@@ -59,6 +59,7 @@ pub fn run_lsp() {
                         "definitionProvider": true,
                         "documentSymbolProvider": true,
                         "workspaceSymbolProvider": true,
+                        "documentHighlightProvider": true,
                         "completionProvider": {"triggerCharacters": [".", ":"]}
                     },
                     "serverInfo": {"name": "veldt-lsp", "version": env!("CARGO_PKG_VERSION")}
@@ -70,6 +71,7 @@ pub fn run_lsp() {
                 "textDocument/completion" => completion(params, &docs),
                 "textDocument/documentSymbol" => document_symbol(params, &docs),
                 "workspace/symbol" => workspace_symbol(params, &docs),
+                "textDocument/documentHighlight" => document_highlight(params, &docs),
                 _ => None,
             };
 
@@ -234,6 +236,35 @@ fn workspace_symbol(params: &Value, docs: &HashMap<String, Doc>) -> Option<Value
                               "end": {"line": line as u32, "character": text.len() as u32}}},
                 "containerName": uri.split('/').last().unwrap_or(uri),
             }));
+        }
+    }
+    Some(Value::Array(out))
+}
+
+/// Highlight every occurrence of the word under the cursor —
+/// DocumentHighlight kind 1 = text. Cheap whole-doc word scan.
+fn document_highlight(params: &Value, docs: &HashMap<String, Doc>) -> Option<Value> {
+    let doc = doc_of(params, docs)?;
+    let line = params["position"]["line"].as_u64()? as usize;
+    let ch = params["position"]["character"].as_u64()? as usize;
+    let word = word_at(&doc.text, line as u32, ch as u32);
+    if word.is_empty() { return Some(json!([])); }
+    let mut out = Vec::new();
+    for (l, line_text) in doc.text.lines().enumerate() {
+        let mut start = 0;
+        while let Some(pos) = line_text[start..].find(word.as_str()) {
+            let col = start + pos;
+            // word-boundary check — don't match inside a longer identifier
+            let before = line_text[..col].chars().last().unwrap_or(' ');
+            let after = line_text[col + word.len()..].chars().next().unwrap_or(' ');
+            if !before.is_alphanumeric() && before != '_' && !after.is_alphanumeric() && after != '_' {
+                out.push(json!({
+                    "range": {"start": {"line": l as u32, "character": col as u32},
+                              "end": {"line": l as u32, "character": (col + word.len()) as u32}},
+                    "kind": 1,
+                }));
+            }
+            start = col + word.len();
         }
     }
     Some(Value::Array(out))
