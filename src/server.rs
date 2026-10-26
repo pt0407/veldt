@@ -70,6 +70,7 @@ pub async fn start_server(port: u16) {
         .route("/api/selection", get(selection))
         .route("/api/mutation_rate", get(mutation_rate))
         .route("/api/turnover", get(turnover))
+        .route("/api/diversity", get(diversity))
         .route("/api/run", post(run_program))
         .route("/api/evolve", post(evolve))
         .route("/api/clear", post(clear_veldt))
@@ -633,6 +634,25 @@ async fn turnover() -> Json<serde_json::Value> {
     let avg_stale = stale.iter().sum::<u64>() / stale.len().max(1) as u64;
     Json(serde_json::json!({
         "avg_age": avg_age, "avg_death_age": dead_age, "avg_staleness": avg_stale,
+    }))
+}
+
+async fn diversity() -> Json<serde_json::Value> {
+    let mut veldt = veldt::Veldt::new();
+    if veldt.load().is_err() {
+        return Json(serde_json::json!({"error": "garden load failed"}));
+    }
+    let sizes: Vec<usize> = veldt.functions.values().map(|vs| vs.len()).collect();
+    let avg_fam = sizes.iter().sum::<usize>() / sizes.len().max(1);
+    let niche_counts: Vec<usize> = veldt.functions.values()
+        .flat_map(|vs| vs.iter().map(|e| e.niche_scores.len())).collect();
+    let avg_niches = niche_counts.iter().sum::<usize>() / niche_counts.len().max(1);
+    let immigrants: usize = veldt.functions.values()
+        .flat_map(|vs| vs.iter())
+        .filter(|e| e.origin.starts_with("immigrant")).count();
+    Json(serde_json::json!({
+        "avg_family_size": avg_fam, "avg_niches": avg_niches,
+        "immigrants": immigrants,
     }))
 }
 
