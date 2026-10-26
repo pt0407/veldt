@@ -52,7 +52,8 @@ fn main() {
                 std::fs::write(&tmp, &code).unwrap_or_else(|e| { eprintln!("eval temp write: {}", e); process::exit(1); });
                 if args.iter().any(|a| a == "--vm") {
                     run_program_vm(tmp.to_str().unwrap(),
-                        args.iter().any(|a| a == "--evolve"));
+                        args.iter().any(|a| a == "--evolve"),
+                        args.iter().any(|a| a == "--trace"));
                 } else {
                     run_program(tmp.to_str().unwrap(), args.iter().any(|a| a == "--trace"), args.iter().any(|a| a == "--evolve"));
                 }
@@ -62,7 +63,8 @@ fn main() {
                 let file = args[2..].iter().find(|a| a.ends_with(".veldt"))
                     .cloned().unwrap_or_else(|| args[2].clone());
                 run_program_vm(&file,
-                    args.iter().any(|a| a == "--evolve"));
+                    args.iter().any(|a| a == "--evolve"),
+                    args.iter().any(|a| a == "--trace"));
             } else {
                 run_program(&args[2], args.iter().any(|a| a == "--trace"), args.iter().any(|a| a == "--evolve"));
             }
@@ -80,7 +82,7 @@ fn main() {
                 run_program(&f, false, false);
                 let tree = t0.elapsed();
                 let t1 = std::time::Instant::now();
-                run_program_vm(&f, false);
+                run_program_vm(&f, false, std::env::args().any(|a| a == "--trace"));
                 let vm = t1.elapsed();
                 println!("{:>18} {:>10.0}ms {:>10.0}ms {:>7.1}x",
                          p.file_name().unwrap().to_str().unwrap(),
@@ -98,7 +100,7 @@ fn main() {
             let tree = t0.elapsed();
             println!("=== bytecode VM + JIT ===");
             let t1 = std::time::Instant::now();
-            run_program_vm(&file, false);
+            run_program_vm(&file, false, std::env::args().any(|a| a == "--trace"));
             let vm = t1.elapsed();
             let speed = tree.as_secs_f64() / vm.as_secs_f64().max(1e-9);
             println!("--- compare ---");
@@ -1986,7 +1988,7 @@ fn main() {
                 let mut times: Vec<u128> = Vec::new();
                 for _ in 0..reps {
                     let t0 = std::time::Instant::now();
-                    if vm { run_program_vm(file, false) } else { run_program(file, false, false) };
+                    if vm { run_program_vm(file, false, std::env::args().any(|a| a == "--trace")) } else { run_program(file, false, false) };
                     times.push(t0.elapsed().as_millis());
                 }
                 let min = times.iter().min().copied().unwrap_or(0);
@@ -4228,7 +4230,7 @@ impl rustyline::highlight::Highlighter for VeldtHelper {}
 impl rustyline::validate::Validator for VeldtHelper {}
 impl rustyline::Helper for VeldtHelper {}
 
-fn run_program_vm(path: &str, evolve_after: bool) {
+fn run_program_vm(path: &str, evolve_after: bool, trace: bool) {
     // Phase 11: bytecode VM path. Same lex/parse; different executor.
     let source = match std::fs::read_to_string(path) {
         Ok(s) => s,
@@ -4252,6 +4254,7 @@ fn run_program_vm(path: &str, evolve_after: bool) {
         }
     }
     let mut v = vm::Vm::new();
+    v.trace = trace;
     let mut garden = veldt::Veldt::new();
     // Track load success — NEVER save an unloaded garden over the
     // real file (a parse error or read race would wipe every family).

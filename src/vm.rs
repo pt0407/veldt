@@ -92,6 +92,7 @@ pub struct Vm {
     pub(crate) helper: Interpreter,    // delegation for builtins/methods
     pub steps: u64,
     max_steps: u64,
+    pub trace: bool,
 }
 
 // ---------------- compiler ----------------
@@ -563,6 +564,7 @@ impl Vm {
             fns: HashMap::new(),
             globals: HashMap::new(),
             helper: Interpreter::new(),
+            trace: false,
             steps: 0,
             max_steps: 100_000_000,
         }
@@ -816,6 +818,10 @@ impl Vm {
             }
             let instr = {
                 let frame = frames.last_mut().unwrap();
+                if self.trace {
+                    eprintln!("  [vm:{:>4}] {:?}", frame.pc,
+                              code.code.get(frame.pc));
+                }
                 if frame.pc >= code.code.len() {
                     if frames.len() == 1 {
                         stack.push(Value::Null);
