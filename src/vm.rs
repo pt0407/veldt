@@ -1000,7 +1000,7 @@ impl Vm {
                         }
                     }
                     if let Some(j) = chosen.jit.borrow().as_ref() {
-                        if args.len() <= 4
+                        if args.len() <= 6
                             && args.iter().all(|a|
                                 matches!(a, Value::Int(_) | Value::Float(_))) {
                             let p = j.code_ptr;
