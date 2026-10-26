@@ -1043,10 +1043,41 @@ impl JitEngine {
                             else { fail_pc = pc; ok = false; break; };
                         let a = b.ins().iconst(types::I64,
                             matches!(chunk.code[pc], Instr::AndOp) as i64);
-                                                let v = ecall!(rt.logop, rtv, a, l, r)
+                        // Bool/Bool: tag 3, u8 payload @8 — band/bor inline
+                        let lt = b.ins().load(types::I8,
+                            cranelift_codegen::ir::MemFlagsData::trusted(), l, 0);
+                        let rtg = b.ins().load(types::I8,
+                            cranelift_codegen::ir::MemFlagsData::trusted(), r, 0);
+                        let three = b.ins().iconst(types::I8, 3);
+                        let lb = b.ins().icmp(IntCC::Equal, lt, three);
+                        let rb = b.ins().icmp(IntCC::Equal, rtg, three);
+                        let both = b.ins().band(lb, rb);
+                        let fb = b.create_block();
+                        let hb = b.create_block();
+                        let mb = b.create_block();
+                        let arg = b.append_block_param(mb, types::I64);
+                        b.ins().brif(both, fb, &[], hb, &[]);
+                        b.seal_block(fb);
+                        b.switch_to_block(fb);
+                        let av = b.ins().load(types::I8,
+                            cranelift_codegen::ir::MemFlagsData::trusted(), l, 8);
+                        let cv = b.ins().load(types::I8,
+                            cranelift_codegen::ir::MemFlagsData::trusted(), r, 8);
+                        let res = if matches!(chunk.code[pc], Instr::AndOp) {
+                            b.ins().band(av, cv)
+                        } else { b.ins().bor(av, cv) };
+                        let res64 = b.ins().uextend(types::I64, res);
+                        let fv = ecall!(rt.boolbox, rtv, res64)
                             .unwrap_or_else(|| b.ins().iconst(types::I64, 0));
-                        catch_check!(v);
-                        stack.push(v);
+                        b.ins().jump(mb, &[cranelift_codegen::ir::BlockArg::Value(fv)]);
+                        b.switch_to_block(hb);
+                        let hv = ecall!(rt.logop, rtv, a, l, r)
+                            .unwrap_or_else(|| b.ins().iconst(types::I64, 0));
+                        catch_check!(hv);
+                        b.ins().jump(mb, &[cranelift_codegen::ir::BlockArg::Value(hv)]);
+                        b.switch_to_block(mb);
+                        b.seal_block(mb);
+                        stack.push(arg);
                     }
                     Instr::InOp => {
                         let (Some(r), Some(l)) = (stack.pop(), stack.pop())
