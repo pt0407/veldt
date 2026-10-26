@@ -566,6 +566,25 @@ fn main() {
                 }
                 println!("=== The Veldt (fitness >= {}) ===", min);
                 filtered.print_garden(sick_only, healthy_only);
+            } else if let Some(spec) = args.iter().position(|a| a == "--min_niche_fam")
+                .and_then(|p| args.get(p + 1)).cloned() {
+                // --min_niche_fam <name:min> — variants in this family with >= min niches
+                let (fam, min_n) = spec.split_once(':')
+                    .and_then(|(n, s)| s.parse::<usize>().ok().map(|m| (n.to_string(), m)))
+                    .unwrap_or((spec.clone(), 0));
+                let mut filtered = veldt::Veldt::new();
+                filtered.probes = veldt.probes.clone();
+                filtered.obituaries = veldt.obituaries.clone();
+                filtered.run_count = veldt.run_count;
+                filtered.garden_path = veldt.garden_path.clone();
+                if let Some(vs) = veldt.functions.get(&fam) {
+                    let keep: Vec<_> = vs.iter()
+                        .filter(|e| e.niche_scores.len() >= min_n)
+                        .cloned().collect();
+                    if !keep.is_empty() { filtered.functions.insert(fam.clone(), keep); }
+                }
+                println!("=== The Veldt ({} niches >= {}) ===", fam, min_n);
+                filtered.print_garden(sick_only, healthy_only);
             } else if let Some(spec) = args.iter().position(|a| a == "--max_last_used_fam")
                 .and_then(|p| args.get(p + 1)).cloned() {
                 // --max_last_used_fam <name:max> — variants in this family with last_used <= max
