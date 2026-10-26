@@ -3325,6 +3325,16 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
                         }
                     }
                 }
+                // if c { return true } else { return false } → return c
+                if let Some(e) = b {
+                    if a.len() == 1 && e.len() == 1 {
+                        if let (Stmt::Return(Some(t)), Stmt::Return(Some(f))) = (&a[0], &e[0]) {
+                            if matches!(t, Expr::Bool(true)) && matches!(f, Expr::Bool(false)) {
+                                out.push("if-else returning bool literals — simplify to return <cond>".into());
+                            }
+                        }
+                    }
+                }
                 if let Some(e) = b {
                     if *a == *e { out.push("if branches are identical — dead conditional".into()); }
                     if a.is_empty() && !e.is_empty() {
