@@ -149,6 +149,13 @@ impl JitEngine {
         if let Some(&(p, m)) = self.ptrs.get(&key) {
             return Some(JitFn { code_ptr: p, mode: m });
         }
+        // a previous compile may have landed under a mode-suffixed
+        // key — redefining the same FuncId is a cranelift error
+        for suf in ["$f", "$v"] {
+            if let Some(&(p, m)) = self.ptrs.get(&format!("{}{}", key, suf)) {
+                return Some(JitFn { code_ptr: p, mode: m });
+            }
+        }
         if self.compiling.contains(&key) {
             return None;   // in-progress cycle on this variant
         }

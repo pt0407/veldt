@@ -703,7 +703,15 @@ fn main() {
                 let why = args.iter().any(|a| a == "--why");
                 for (name, _) in &veldt.functions {
                     match engine.compile_fn(name, &v.fns) {
-                        Some(_) => { println!("  {}: native", name); native += 1; }
+                        Some(j) => {
+                            let tag = match j.mode {
+                                0 => "native",
+                                1 => "native (float)",
+                                _ => "native (boxed)",
+                            };
+                            println!("  {}: {}", name, tag);
+                            native += 1;
+                        }
                         None => {
                             let fit = v.fns.get(name).and_then(|vs|
                                 vs.iter().max_by(|a, b|
