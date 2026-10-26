@@ -898,7 +898,10 @@ impl JitEngine {
                             let mb = b.create_block();
                             let arg = b.append_block_param(mb, types::I64);
                             b.ins().brif(both, fb, &[], hb, &[]);
-                            b.seal_block(fb); b.seal_block(hb);
+                            // fb seals now; hb gets a SECOND predecessor
+                            // from the Div/Mod zero-check — seal_all_blocks
+                            // catches it at the end instead
+                            b.seal_block(fb);
                             // fast: native op on the int payloads
                             b.switch_to_block(fb);
                             let a = b.ins().load(types::I64,
@@ -924,7 +927,9 @@ impl JitEngine {
                             } else if matches!(chunk.code[pc], Instr::Div|Instr::Mod) {
                                 // sdiv/srem trap on i64::MIN/-1 and 0 —
                                 // the helper wraps/errors correctly, so
-                                // only inline when the divisor is safe
+                                // only inline when the divisor is safe.
+                                // (z is fv's placeholder — emitted into fb
+                                // BEFORE the brif, since fb fills after it)
                                 let z = b.ins().iconst(types::I64, 0);
                                 let nz = b.ins().icmp(IntCC::NotEqual, c, z);
                                 let min = b.ins().iconst(types::I64, i64::MIN);
@@ -945,7 +950,7 @@ impl JitEngine {
                                 let bv = ecall!(rt.intbox, rtv, res)
                                     .unwrap_or_else(|| b.ins().iconst(types::I64, 0));
                                 b.ins().jump(mb, &[cranelift_codegen::ir::BlockArg::Value(bv)]);
-                                b.ins().iconst(types::I64, 0) // fb's unused tail value
+                                z
                             } else {
                                 let res = match chunk.code[pc] {
                                     Instr::Add => b.ins().iadd(a, c),
