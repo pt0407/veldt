@@ -2336,6 +2336,16 @@ fn print_stats(veldt: &veldt::Veldt) {
                         for inp in inputs { println!("    {}", inp); }
                     }
                 }
+                // recent traces — the family's call history
+                if let Some(traces) = veldt.traces.get(fam) {
+                    let recent: Vec<_> = traces.iter().rev().take(5).collect();
+                    if !recent.is_empty() {
+                        println!("  recent traces:");
+                        for t in recent {
+                            println!("    {}({}) → {} [v{}]", fam, t.args.join(" "), t.result, t.variant);
+                        }
+                    }
+                }
             }
         }
         if veldt.fitness_history.len() >= 2 {
