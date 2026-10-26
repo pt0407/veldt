@@ -4984,17 +4984,23 @@ fn print_family_detail(veldt: &veldt::Veldt, fam: &String, vs: &[veldt::Function
     let seedling = vs.iter().filter(|e| matches!(e.trust, veldt::Trust::Seedling)).count();
     let estab = vs.iter().filter(|e| matches!(e.trust, veldt::Trust::Established)).count();
     let canon = vs.iter().filter(|e| matches!(e.trust, veldt::Trust::Canonical)).count();
-    println!("  trust: {} seedling → {} established → {} canonical", seedling, estab, canon);
+    println!("  trust: {} seedling → {} established → {} canonical  {}",
+        seedling, estab, canon,
+        spark(&[seedling as f64, estab as f64, canon as f64]));
     // health breakdown — the family's health distribution
     let healthy_n = vs.iter().filter(|e| matches!(e.health, Health::Healthy)).count();
     let sick_n = vs.iter().filter(|e| matches!(e.health, Health::Sick(_))).count();
     let dying_n = vs.iter().filter(|e| matches!(e.health, Health::Dying)).count();
-    println!("  health: {} healthy · {} sick · {} dying", healthy_n, sick_n, dying_n);
+    println!("  health: {} healthy · {} sick · {} dying  {}",
+        healthy_n, sick_n, dying_n,
+        spark(&[healthy_n as f64, sick_n as f64, dying_n as f64]));
     // probe coverage — the family's test suite stats
     let probe_count = veldt.probes.get(fam).map(|p| p.len()).unwrap_or(0);
     let trace_count = veldt.traces.get(fam).map(|t| t.len()).unwrap_or(0);
     let death_count = veldt.obituaries.iter().filter(|o| o.name == *fam).count();
-    println!("  probes: {} · traces: {} · deaths: {}", probe_count, trace_count, death_count);
+    println!("  probes: {} · traces: {} · deaths: {}  {}",
+        probe_count, trace_count, death_count,
+        spark(&[probe_count as f64, trace_count as f64, death_count as f64]));
     // age distribution — youngest / oldest / avg
     let ages: Vec<u64> = vs.iter().map(|e| e.age).collect();
     if !ages.is_empty() {
