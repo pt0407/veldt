@@ -652,3 +652,10 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   garden --family rows too — every variant listing
   (garden/lineage/test/garden --family/stats --top)
   shows the same scaled bar.
+- [Devin] Fitness-bar sweep + lint batch 6 (HEAD post-05a94ad):
+  the proportional bar now covers every variant listing —
+  stats --top, garden, lineage, test, garden --family,
+  trust tiers, and find (scaled to the top hit). check
+  --strict ~34: + nested-if-without-else merge, all-match-
+  arms-identical, duplicate match arm patterns (literal
+  dedup — second arm unreachable).
