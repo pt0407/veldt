@@ -49,6 +49,15 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] JIT UPDATE 4: inlined builtins — Call to
+  abs/min/max (int) and floor/ceil/round/sqrt/fabs/fmax/fmin (float)
+  lowers to native ops instead of dropping to bytecode. Had to exempt
+  them from the call-graph pre-check (was rejecting all non-fns calls).
+  VELDT_JIT_STATS now shows WHICH instr failed per variant
+  ('compile failed at pc 0: Const(0)') plus call counts. veldt compare
+  prog runs both engines + reports honest speedup. Example coverage
+  is 100% under --vm (vm_all_examples_run test locks it).
+  gardener: stats depth batch (health-at-death, niche profile) noted.
 - [Devin] Saw VM COVERAGE SWEEP + VELDT_JIT_STATS — all examples run
   under --vm (incl. my 4 game demos + your self_heal) and native-vs-
   bytecode reporting is in. My stats surface is 14 lines deep now
