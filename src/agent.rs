@@ -210,6 +210,23 @@ pub fn respond(task: &str, editor_source: &str, veldt: &mut Veldt) -> AgentRespo
     if hasw(&["improve", "optimize", "optimise", "faster", "upgrade"]) {
         return improve_intent(&t, &words, veldt);
     }
+    if hasw(&["fuzz"]) {
+        return fuzz_intent(&words, veldt);
+    }
+    if hasw(&["absorb"]) {
+        crate::absorb_traces(None);
+        return plain("Absorbed live call traces into the probe pool — production evidence now feeds selection.");
+    }
+    if hasw(&["tournament"]) {
+        let url = words.iter().find(|w| w.starts_with("http")).copied();
+        match url {
+            Some(u) => { crate::tournament(u, None); return plain(&format!("Tournament run against {} — champions crowned and pushed back.", u)); }
+            None => return plain("Tournament against which pool? Give me a URL — \"tournament http://host:7878\"."),
+        }
+    }
+    if has(&["sandbox", "isolated"]) && hasw(&["run", "try"]) {
+        return sandbox_run_intent(editor_source, veldt);
+    }
     if hasw(&["suggest", "surprise"]) {
         return suggest_intent(&words, veldt);
     }
@@ -243,6 +260,70 @@ pub fn respond(task: &str, editor_source: &str, veldt: &mut Veldt) -> AgentRespo
         return resp;
     }
     help_intent()
+}
+
+fn fuzz_intent(words: &[&str], veldt: &mut Veldt) -> AgentResponse {
+    // "fuzz <name>" — boundary corpus vs every variant, divergence report
+    let name = words.iter().find(|w| !["fuzz","the","family","it","them","all"].contains(w)
+        && veldt.functions.contains_key(**w)).copied();
+    let Some(name) = name else {
+        return plain("Fuzz which family? \"fuzz score\" — I'll sweep the boundary corpus and flag variants that disagree.");
+    };
+    let variants: Vec<u32> = veldt.functions[name].iter().map(|e| e.id).collect();
+    let mut interp = crate::interpreter::Interpreter::with_step_limit(50000);
+    interp.caps = crate::interpreter::Caps::sandboxed();
+    veldt.load_into_interpreter(&mut interp);
+    let mut divergent = 0u32;
+    let mut report = String::new();
+    for case in 0..8 {
+        let params = &veldt.functions[name][0].params;
+        let args: Vec<crate::interpreter::Value> = params.iter()
+            .map(|p| crate::evolve::boundary_value(&p.typ, case))
+            .collect::<Option<_>>().unwrap_or_default();
+        if args.is_empty() && !params.is_empty() { break; }
+        let mut outs: std::collections::HashMap<String, Vec<u32>> = std::collections::HashMap::new();
+        for id in &variants {
+            let r = interp.call_function(name, Some(*id), args.clone())
+                .map(|v| serde_json::to_string(&v).unwrap_or_default())
+                .unwrap_or_else(|e| format!("ERR:{}", e));
+            outs.entry(r).or_default().push(*id);
+        }
+        if outs.len() > 1 {
+            divergent += 1;
+            report.push_str(&format!("case {}: {:?}\n", case,
+                outs.iter().map(|(o, ids)| format!("{} <- #{}", o, ids.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(","))).collect::<Vec<_>>()));
+        }
+    }
+    plain(&format!("fuzz {}: {} boundary cases, {} divergent.{}",
+        name, 8, divergent,
+        if report.is_empty() { " Family agrees everywhere — healthy.".into() } else { format!("\n{}", report) }))
+}
+
+fn sandbox_run_intent(editor_source: &str, veldt: &mut Veldt) -> AgentResponse {
+    if editor_source.trim().is_empty() {
+        return plain("Editor's empty — nothing to sandbox.");
+    }
+    // execute the editor source with all capabilities denied
+    let mut interp = crate::interpreter::Interpreter::new();
+    interp.caps = crate::interpreter::Caps::sandboxed();
+    veldt.load_into_interpreter(&mut interp);
+    let mut lx = crate::lexer::Lexer::new(editor_source);
+    let result = lx.tokenize()
+        .map_err(|e| e.to_string())
+        .and_then(|toks| {
+            let mut p = crate::parser::Parser::new_with_lines(toks, lx.token_lines.clone());
+            p.parse_program().map_err(|e| e.to_string())
+        })
+        .and_then(|stmts| {
+            interp.print_buffer = Some(String::new());
+            stmts.iter().try_for_each(|s| interp.exec_stmt_pub(s).map(|_| ()))
+                .map_err(|e| e.to_string())
+        });
+    let out = interp.print_buffer.unwrap_or_default();
+    plain(&match result {
+        Ok(()) => format!("Sandboxed run finished clean — no fs/net/proc touched.\n{}", out),
+        Err(e) => format!("Sandboxed run stopped: {}\n{}", e, out),
+    })
 }
 
 fn plain(text: &str) -> AgentResponse {
