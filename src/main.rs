@@ -604,9 +604,22 @@ fn main() {
                     std::thread::sleep(std::time::Duration::from_secs(2));
                 }
             } else {
-                let src = std::fs::read_to_string(&path)
-                    .unwrap_or_else(|e| { eprintln!("Error reading {}: {}", path, e); process::exit(1); });
-                print(&path, &src);
+                // `veldt check -` — read the program from stdin
+                // (editors/IDEs pipe unsaved buffers; Gardener pipes
+                // generated source without a temp file)
+                let (label, src) = if path == "-" {
+                    let mut buf = String::new();
+                    use std::io::Read;
+                    if std::io::stdin().read_to_string(&mut buf).is_err() {
+                        eprintln!("Error reading stdin"); process::exit(1);
+                    }
+                    ("<stdin>".to_string(), buf)
+                } else {
+                    let src = std::fs::read_to_string(&path)
+                        .unwrap_or_else(|e| { eprintln!("Error reading {}: {}", path, e); process::exit(1); });
+                    (path.clone(), src)
+                };
+                print(&label, &src);
             }
         }
         "diff" => {
