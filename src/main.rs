@@ -542,6 +542,12 @@ fn main() {
                     eprintln!("no garden found (nothing to lint)");
                     process::exit(1);
                 }
+                if let Some(f) = fam {
+                    if !v.functions.contains_key(f.as_str()) {
+                        eprintln!("no family '{}' in the garden", f);
+                        if !watch { return; }
+                    }
+                }
                 if watch {
                     let gp = v.garden_path.join("veldt.json");
                     let mtime = std::fs::metadata(&gp)
