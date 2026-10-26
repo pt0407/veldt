@@ -42,6 +42,7 @@ pub async fn start_server(port: u16) {
         .route("/api/verify", post(verify_family))
         .route("/api/quarantine", post(quarantine_family))
         .route("/api/compare", post(compare_engines))
+        .route("/api/lineage", get(lineage_family))
         .route("/api/run", post(run_program))
         .route("/api/evolve", post(evolve))
         .route("/api/clear", post(clear_veldt))
@@ -150,6 +151,27 @@ async fn compare_engines(
         "tw_out": tw_out.map(|o| String::from_utf8_lossy(&o.stdout).to_string()).unwrap_or_default(),
         "vm_out": vm_out.map(|o| String::from_utf8_lossy(&o.stdout).to_string()).unwrap_or_default(),
     }))
+}
+
+#[derive(Deserialize)]
+struct LineageRequest { name: String }
+
+async fn lineage_family(
+    axum::extract::Query(req): axum::extract::Query<LineageRequest>,
+) -> Json<serde_json::Value> {
+    let mut veldt = veldt::Veldt::new();
+    if veldt.load().is_err() {
+        return Json(serde_json::json!({"error": "garden load failed"}));
+    }
+    let variants: Vec<serde_json::Value> = veldt.functions.get(&req.name)
+        .map(|vs| vs.iter().map(|e| serde_json::json!({
+            "id": e.id, "health": format!("{:?}", e.health),
+            "fitness": e.fitness, "age": e.age, "lifespan": e.lifespan,
+            "usage": e.usage_count, "trust": format!("{:?}", e.trust),
+            "origin": e.origin,
+        })).collect())
+        .unwrap_or_default();
+    Json(serde_json::json!({"name": req.name, "variants": variants}))
 }
 
 #[derive(Deserialize)]
