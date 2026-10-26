@@ -1239,3 +1239,5 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 - [Devin] IDE lint badge: Inspector shows lint health under
   the trust ladder (red defects/amber warnings/green clean)
   via /api/lint — code-health visible in-studio.
+- [Devin] garden --family footer shows ⚠N warnings — same
+  wrap as check --garden, only when warnings exist.
