@@ -957,8 +957,22 @@ fn main() {
                     let peak = vs.iter().map(|e| e.fitness).fold(f64::NEG_INFINITY, f64::max);
                     let probes = veldt.probes.get(fam).map(|p| p.len()).unwrap_or(0);
                     let deaths = veldt.obituaries.iter().filter(|o| o.name == *fam).count();
-                    println!("  — {} variants · {} healthy | {} seed {} estab {} canon | peak {:.2} | {} probes · {} deaths",
-                        vs.len(), healthy, seed, estab, canon, peak, probes, deaths);
+                    // lint health — the same wrap as check --garden;
+                    // only surfaced when the family carries warnings
+                    let warns: usize = vs.iter().map(|e| {
+                        let wrapped = ast::Stmt::Grow(ast::GrowItem::Fn(
+                            fam.to_string(), e.params.clone(),
+                            e.body.clone(), e.tests.clone()));
+                        lint(&[wrapped]).into_iter()
+                            .filter(|w| !w.contains("defined but never called")
+                                && !w.contains("no top-level statements"))
+                            .count()
+                    }).sum();
+                    let lint_str = if warns > 0 {
+                        format!(" | ⚠{} warnings", warns)
+                    } else { String::new() };
+                    println!("  — {} variants · {} healthy | {} seed {} estab {} canon | peak {:.2} | {} probes · {} deaths{}",
+                        vs.len(), healthy, seed, estab, canon, peak, probes, deaths, lint_str);
                 }
                 // --detail — the full per-family dashboard (same panel as stats --family --top)
                 if args.iter().any(|a| a == "--detail") {
