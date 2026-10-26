@@ -276,7 +276,26 @@ fn main() {
             }
             let sick_only = args.iter().any(|a| a == "--sick");
             let obituaries = args.iter().any(|a| a == "--obituaries");
-            if args.iter().any(|a| a == "--json") {
+            let trust_filter = args.iter().position(|a| a == "--trust")
+                .and_then(|p| args.get(p + 1));
+            if let Some(t) = trust_filter {
+                // ladder view — show only variants at a given trust tier
+                let want = match t.to_lowercase().as_str() {
+                    "seedling" | "s" => 0, "established" | "e" => 1,
+                    "canonical" | "c" => 2, _ => { eprintln!("--trust seedling|established|canonical"); process::exit(1); }
+                };
+                for (name, vs) in &veldt.functions {
+                    let tier: Vec<_> = vs.iter().filter(|e| match e.trust {
+                        veldt::Trust::Seedling => want == 0,
+                        veldt::Trust::Established => want == 1,
+                        veldt::Trust::Canonical => want == 2,
+                    }).collect();
+                    if !tier.is_empty() {
+                        println!("{}:", name);
+                        for e in tier { println!("  #{} — fitness {:.2}  origin: {}", e.id, e.fitness, e.origin); }
+                    }
+                }
+            } else if args.iter().any(|a| a == "--json") {
                 // machine-readable census — registry/tooling consumers
                 let fams: Vec<serde_json::Value> = veldt.functions.iter().map(|(name, vs)| {
                     serde_json::json!({
