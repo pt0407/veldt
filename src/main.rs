@@ -4828,7 +4828,10 @@ fn print_family_detail(veldt: &veldt::Veldt, fam: &String, vs: &[veldt::Function
         let min = fits.iter().cloned().fold(f64::INFINITY, f64::min);
         let max = fits.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
         let avg = fits.iter().sum::<f64>() / fits.len() as f64;
-        println!("  fitness: {:.2} – {:.2} (avg {:.2})", min, max, avg);
+        let mut sorted = fits.clone();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        println!("  fitness: {:.2} – {:.2} (avg {:.2})  {}", min, max, avg,
+            spark(&sorted));
     }
     // size distribution — avg / peak code size
     let sizes: Vec<usize> = vs.iter()
