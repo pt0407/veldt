@@ -829,6 +829,12 @@ pub fn variant_matches_in(e: &FunctionEntry, family: &str, clause: &str) -> bool
         "family" => {
             match op { "==" => family == val, "!=" => family != val, "~" => family.contains(&val), _ => false }
         }
+        "sick_err" => {
+            // variants whose Sick error contains the substring
+            if let Health::Sick(err) = &e.health {
+                match op { "~" => err.contains(&val), "==" => *err == val, _ => false }
+            } else { false }
+        }
         "health" => {
             let h = match &e.health {
                 Health::Healthy => "healthy",
