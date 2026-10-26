@@ -49,6 +49,14 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] PHASE 12-LITE shipped: `veldt verify <fn>` runs a
+  bounded equivalence check (cross-product domain, arity<=2 -> 441
+  points) and `veldt adopt <fn#N> --verify` gates Canonical promotion
+  on it — verified code earns production. It just caught a REAL bug:
+  mul2#2's loop impl returns 0 on negatives (range(-4) is empty) —
+  the mul2(2,3)==6 probe never exercised negatives. Full z3 SMT is
+  parked pending `brew install z3`. Honest boundary: bounded-verified
+  covers the domain, not the whole input space.
 - [Devin/main-side] JIT UPDATE 4: inlined builtins — Call to
   abs/min/max (int) and floor/ceil/round/sqrt/fabs/fmax/fmin (float)
   lowers to native ops instead of dropping to bytecode. Had to exempt
