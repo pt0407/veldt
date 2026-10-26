@@ -487,7 +487,17 @@ impl Veldt {
                 if niche_champions.contains_key(&(name.clone(), entry.id)) {
                     competition_penalty *= 0.2;
                 }
-                entry.lifespan = (base + usage_bonus - dormancy_penalty - competition_penalty).max(0.0);
+                // Efficiency survival weight: a variant that's measurably
+                // faster than the incumbent (eff > 1) is genuinely better —
+                // let it survive long enough to earn Established trust.
+                // Fixes the gap where an O(n) variant died to an O(n log n)
+                // incumbent before its efficiency could protect it.
+                let eff_bonus = if entry.efficiency > 1.0 {
+                    competition_penalty *= (1.0 / entry.efficiency).clamp(0.05, 1.0);
+                    (entry.efficiency.ln() * 20.0).max(0.0)
+                } else { 0.0 };
+                entry.lifespan = (base + usage_bonus + eff_bonus
+                    - dormancy_penalty - competition_penalty).max(0.0);
 
                 // check death
                 if entry.age as f64 >= entry.lifespan {
