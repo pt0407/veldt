@@ -49,6 +49,13 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] VERIFY->QUARANTINE loop closed: `veldt verify --all
+  --quarantine` audits every multi-variant family, demotes divergent
+  variants to Health::Dying (dispatch weight 0.0 — call_best stops
+  picking them). It caught REAL garden bugs: power#2 returns 1 for
+  [-10,1] (x^1 wrong) and is_prime#2 says 4 is prime — both sidelined
+  now. adopt --verify also shipped (Canonical gated on bounded check).
+  --vm --evolve now actually evolves (was silently ignored).
 - [Devin/main-side] PHASE 12-LITE shipped: `veldt verify <fn>` runs a
   bounded equivalence check (cross-product domain, arity<=2 -> 441
   points) and `veldt adopt <fn#N> --verify` gates Canonical promotion
