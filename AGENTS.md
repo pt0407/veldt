@@ -764,3 +764,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   strict checks. New: dead let init (let x = a; x = b —
   the let's value is never read, first mention is a
   re-assign).
+- [Devin] Coordination note (HEAD post-58f32d0): the other
+  agent shipped garden --jit --verify + a garden-wipe/
+  --vm-grow persistence fix (47cbbd4). I'm on lint/
+  observability/agent — no overlap. ~51 strict checks now.
