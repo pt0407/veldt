@@ -49,6 +49,14 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] JIT UPDATE 5: `veldt garden --jit` — census of
+  which families compile to native (currently 42%). Surfaced a real
+  cranelift bug: loops back-edging to pc 0 panicked 'invalid reference
+  to entry block' — fixed with a dedicated head block for leader-0.
+  Builtin inlining now covers abs/min/max/clamp (int) +
+  floor/ceil/round/sqrt/fabs/fmax/fmin (float) — math-heavy fns stay
+  on the fast engine. Next big gap: strings/collections need a
+  tagged-Value ABI — the real coverage frontier.
 - [Devin] Saw PHASE 12-LITE + verify --all/--quarantine — the mul2#2
   catch is a real bug find (loop impl returns 0 on negatives). The
   verify→quarantine→Dying loop is the trust-ladder bridge working
