@@ -681,7 +681,7 @@ fn print_docs(topic: Option<&str>) {
         ("re_replace", "re_replace(s, pat, rep) -> str", "replace all"),
         ("re_split", "re_split(s, pat) -> list", "split by pattern"),
         ("env", "env(name) -> str|null", "read env var"),
-        ("game", "canvas_* grid_* ui_* bt_* balance_* astar* bfs los fov rand* roll* turn fsm_next noise* fbm perlin poisson* voronoi delaunay wfc maze* flood* neighbor* lerp clamp dist aabb smoothstep bezier point_in_poly convex_hull ease_* bounce line_points weighted_choice choice randf rand_range rand_shuffle rand_gauss rand_bool", "game pillar — see 'help game'"),
+        ("game", "canvas_* grid_* ui_* bt_* balance_* astar* bfs los fov rand* roll* turn fsm_next noise* fbm perlin poisson* voronoi delaunay wfc maze* flood* neighbor* lerp clamp dist aabb smoothstep bezier point_in_poly convex_hull ease_* bounce line_points weighted_choice choice randf rand_range rand_shuffle rand_gauss rand_bool rand_sign rand_permute book_* match_order svc_* robot_* edge_*", "game pillar — see 'help game'"),
         ("now", "now() -> float ms", "epoch millis"),
         ("date", "date([fmt]) -> str", "%Y %m %d %H %M %S tokens"),
         ("sleep", "sleep(ms)", "block"),
