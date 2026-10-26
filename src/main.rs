@@ -3700,7 +3700,9 @@ fn tournament(url: &str, only: Option<&str>) {
         Some(n) => vec![n.to_string()],
         None => veldt.functions.keys().cloned().collect(),
     };
+    let json = std::env::args().any(|a| a == "--json");
     let mut crowned = 0u32;
+    let mut champions: Vec<serde_json::Value> = Vec::new();
     for name in &families {
         let ids: Vec<u32> = veldt.functions.get(name)
             .map(|vs| vs.iter().map(|e| e.id).collect()).unwrap_or_default();
@@ -3725,12 +3727,26 @@ fn tournament(url: &str, only: Option<&str>) {
             }
         }
         if let Some(b) = best_id {
-            println!("  {}: champion {}#{} — fitness {:.2}", name, name, b,
-                veldt.functions[name].iter().find(|e| e.id == b).map(|e| e.fitness).unwrap_or(0.0));
+            let fitness = veldt.functions[name].iter()
+                .find(|e| e.id == b).map(|e| e.fitness).unwrap_or(0.0);
+            if json {
+                champions.push(serde_json::json!({
+                    "family": name, "champion": format!("{}#{}", name, b),
+                    "fitness": fitness,
+                }));
+            } else {
+                println!("  {}: champion {}#{} — fitness {:.2}", name, name, b, fitness);
+            }
         }
     }
     veldt.save().unwrap_or_else(|e| eprintln!("Save error: {}", e));
-    println!("{} champions crowned; pushing winners back to {}", crowned, base);
+    if json {
+        println!("{}", serde_json::json!({
+            "crowned": crowned, "pushed_to": base, "champions": champions,
+        }));
+    } else {
+        println!("{} champions crowned; pushing winners back to {}", crowned, base);
+    }
     push_garden(base);
 }
 
