@@ -1579,6 +1579,16 @@ fn main() {
                         print_family_detail(&veldt, &args[2], vs);
                     }
                 }
+                // --watch — re-render on a 2s poll until interrupted
+                if args.iter().any(|a| a == "--watch") {
+                    loop {
+                        std::thread::sleep(std::time::Duration::from_secs(2));
+                        let mut v2 = veldt::Veldt::new();
+                        if v2.load().is_err() { break; }
+                        print!("\x1b[2J\x1b[H");
+                        v2.print_lineage(&args[2]);
+                    }
+                }
             }
         }
         "prune" => {
