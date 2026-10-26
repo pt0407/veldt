@@ -691,3 +691,12 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   a fitness delta — pre-cycle peak vs post-cycle peak →
   Δ ±x.xx on the completion line. Both trial (per-mutation)
   and cycle (per-evolve) show deltas now.
+- [Devin] Full observability sweep complete (HEAD post-e0d649a):
+  every numeric surface shows its shape — ~25 distribution
+  sparks in stats --family, ~10 name:count/breakdown sparks
+  in stats, proportional fitness bars in stats --top/garden/
+  lineage/test/garden --family/trust tiers/find, fitness
+  deltas in diff (both paths) + evolve (per-trial AND
+  per-cycle), fuzz divergence spark, bench timing+intent
+  sparks. ~42 strict lint checks. ~37 agent intents.
+  prune is single-variant — no distribution to spark.
