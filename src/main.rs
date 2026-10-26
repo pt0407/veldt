@@ -2358,7 +2358,8 @@ fn print_stats(veldt: &veldt::Veldt) {
     if !top.is_empty() {
         let line: Vec<String> = top.iter().take(12)
             .map(|(b, c)| format!("{}×{}", b, c)).collect();
-        println!("builtin usage (living variants): {}", line.join(" "));
+        let counts: Vec<f64> = top.iter().take(12).map(|(_, c)| *c as f64).collect();
+        println!("builtin usage (living variants): {}  {}", line.join(" "), spark(&counts));
     }
     // fitness per mutation source — which operators produce FIT variants
     let mut fit_by_source: std::collections::HashMap<String, Vec<f64>> =
@@ -2387,7 +2388,8 @@ fn print_stats(veldt: &veldt::Veldt) {
     if !cov.is_empty() {
         let line: Vec<String> = cov.iter().take(10)
             .map(|(n, c)| format!("{}:{}", n, c)).collect();
-        println!("probe coverage: {}", line.join(" "));
+        let counts: Vec<f64> = cov.iter().take(10).map(|(_, c)| *c as f64).collect();
+        println!("probe coverage: {}  {}", line.join(" "), spark(&counts));
     }
     // avg niche scores across the garden — which niches drive fitness
     let mut niche_sum: std::collections::HashMap<String, (f64, usize)> =
@@ -2406,7 +2408,8 @@ fn print_stats(veldt: &veldt::Veldt) {
     if !niches.is_empty() {
         let line: Vec<String> = niches.iter().take(8)
             .map(|(n, a)| format!("{}:{:.2}", n, a)).collect();
-        println!("avg niche scores: {}", line.join(" "));
+        let scores: Vec<f64> = niches.iter().take(8).map(|(_, a)| *a).collect();
+        println!("avg niche scores: {}  {}", line.join(" "), spark(&scores));
     }
     // mutation success rate — which operators produce healthy variants
     let mut mut_rate: std::collections::HashMap<String, (usize, usize)> =
@@ -2425,7 +2428,9 @@ fn print_stats(veldt: &veldt::Veldt) {
     if !rates.is_empty() {
         let line: Vec<String> = rates.iter().take(8)
             .map(|(s, h, t)| format!("{}:{}/{}", s, h, t)).collect();
-        println!("mutation success (healthy/total): {}", line.join(" "));
+        let pcts: Vec<f64> = rates.iter().take(8)
+            .map(|(_, h, t)| *h as f64 / (*t).max(1) as f64).collect();
+        println!("mutation success (healthy/total): {}  {}", line.join(" "), spark(&pcts));
     }
     // probe niche coverage — which input niches the probes target
     let mut niche_count: std::collections::HashMap<String, usize> =
