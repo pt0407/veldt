@@ -198,6 +198,7 @@ fn main() {
             let source = std::fs::read_to_string(&args[2])
                 .unwrap_or_else(|e| { eprintln!("Error reading {}: {}", args[2], e); process::exit(1); });
             let json_out = args.iter().any(|a| a == "--json");
+            let strict = args.iter().any(|a| a == "--strict");
             let report_err = |kind: &str, e: &dyn std::fmt::Display| {
                 if json_out {
                     println!("{}", serde_json::json!({"file": args[2], "ok": false, "error": format!("{}: {}", kind, e)}));
@@ -214,7 +215,15 @@ fn main() {
                     match p.parse_program() {
                         Err(e) => report_err("Parse error", &e),
                         Ok(stmts) => {
-                            if json_out {
+                            if strict {
+                                let warnings = lint(&stmts);
+                                if json_out {
+                                    println!("{}", serde_json::json!({"file": args[2], "ok": true, "statements": stmts.len(), "warnings": warnings}));
+                                } else {
+                                    for w in &warnings { eprintln!("  ⚠ {}", w); }
+                                    println!("{} — ok ({} statements, {} warnings)", args[2], stmts.len(), warnings.len());
+                                }
+                            } else if json_out {
                                 println!("{}", serde_json::json!({"file": args[2], "ok": true, "statements": stmts.len()}));
                             } else {
                                 println!("{} — ok ({} statements)", args[2], stmts.len());
@@ -964,6 +973,98 @@ fn fmt_check(path: &str) {
     } else {
         eprintln!("{} is NOT formatted (run: veldt fmt {} --write)", path, path);
         process::exit(1);
+    }
+}
+
+/// veldt check --strict — lint-lite warnings on a parsed program:
+/// grow fns without test clauses, statements after return, lets
+/// bound but never referenced.
+fn lint(stmts: &[ast::Stmt]) -> Vec<String> {
+    use ast::*;
+    let mut out = Vec::new();
+    lint_block(stmts, &mut out);
+    out
+}
+
+fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
+    use ast::*;
+    let mut returned = false;
+    // vars bound in this block — flag if never read later
+    let mut bound: Vec<(usize, &String)> = Vec::new();
+    for (i, s) in stmts.iter().enumerate() {
+        if returned { out.push("unreachable code after return".into()); }
+        match s {
+            Stmt::Grow(GrowItem::Fn(name, _, body, tests)) => {
+                if tests.is_empty() {
+                    out.push(format!("grow fn {} has no test clause — no birth-check", name));
+                }
+                let mut sub = Vec::new();
+                lint_block(body, &mut sub);
+                out.extend(sub.into_iter().map(|w| format!("{}: {}", name, w)));
+            }
+            Stmt::FnDef(name, _, body) => {
+                let mut sub = Vec::new();
+                lint_block(body, &mut sub);
+                out.extend(sub.into_iter().map(|w| format!("{}: {}", name, w)));
+            }
+            Stmt::Let(name, _) => bound.push((i, name)),
+            Stmt::If(_, a, b) => {
+                lint_block(a, out);
+                if let Some(e) = b { lint_block(e, out); }
+            }
+            Stmt::While(_, body) | Stmt::For(_, _, body) => lint_block(body, out),
+            Stmt::Try(a, _, b) => { lint_block(a, out); lint_block(b, out); }
+            Stmt::Match(_, arms, els) => {
+                for (_, body) in arms { lint_block(body, out); }
+                if let Some(e) = els { lint_block(e, out); }
+            }
+            Stmt::Return(_) => returned = true,
+            _ => {}
+        }
+    }
+    for (i, name) in bound {
+        let read = stmts.iter().skip(i + 1).any(|s| stmt_mentions(s, name));
+        if !read && !name.starts_with('_') {
+            out.push(format!("let {} bound but never read", name));
+        }
+    }
+}
+
+fn stmt_mentions(s: &ast::Stmt, name: &str) -> bool {
+    use ast::*;
+    match s {
+        Stmt::Let(_, e) | Stmt::ExprStmt(e) | Stmt::Print(e) | Stmt::Assign(_, e) => expr_mentions(e, name),
+        Stmt::If(c, a, b) => expr_mentions(c, name) || a.iter().any(|x| stmt_mentions(x, name))
+            || b.as_ref().map(|x| x.iter().any(|y| stmt_mentions(y, name))).unwrap_or(false),
+        Stmt::While(c, body) | Stmt::For(_, c, body) => expr_mentions(c, name) || body.iter().any(|x| stmt_mentions(x, name)),
+        Stmt::Return(Some(e)) => expr_mentions(e, name),
+        Stmt::Grow(GrowItem::Fn(_, _, body, _)) | Stmt::FnDef(_, _, body) => body.iter().any(|x| stmt_mentions(x, name)),
+        Stmt::LetDestructure(_, e) => expr_mentions(e, name),
+        _ => false,
+    }
+}
+
+fn expr_mentions(e: &ast::Expr, name: &str) -> bool {
+    use ast::*;
+    match e {
+        Expr::Var(n) => n == name,
+        Expr::BinOp(a, _, b) => expr_mentions(a, name) || expr_mentions(b, name),
+        Expr::UnaryOp(_, a) => expr_mentions(a, name),
+        Expr::Call(_, _, args) => args.iter().any(|a| expr_mentions(a, name)),
+        Expr::Index(a, i) => expr_mentions(a, name) || expr_mentions(i, name),
+        Expr::Slice(o, lo, hi) => expr_mentions(o, name)
+            || lo.as_ref().map(|x| expr_mentions(x, name)).unwrap_or(false)
+            || hi.as_ref().map(|x| expr_mentions(x, name)).unwrap_or(false),
+        Expr::MethodCall(a, _, args) | Expr::SafeGet(a, _, Some(args)) =>
+            expr_mentions(a, name) || args.iter().any(|x| expr_mentions(x, name)),
+        Expr::SafeGet(a, _, None) | Expr::FieldAccess(a, _) => expr_mentions(a, name),
+        Expr::StructLit(_, fields) => fields.iter().any(|(_, v)| expr_mentions(v, name)),
+        Expr::List(items) => items.iter().any(|i| expr_mentions(i, name)),
+        Expr::Interp(parts) => parts.iter().any(|p| expr_mentions(p, name)),
+        Expr::Lambda(_, body) => body.iter().any(|s| stmt_mentions(s, name)),
+        Expr::ListComp(v, _, iter, cond) => expr_mentions(v, name) || expr_mentions(iter, name)
+            || cond.as_ref().map(|c| expr_mentions(c, name)).unwrap_or(false),
+        _ => false,
     }
 }
 
