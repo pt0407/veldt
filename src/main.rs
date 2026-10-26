@@ -2154,6 +2154,11 @@ fn print_stats(veldt: &veldt::Veldt) {
                 let sick_n = vs.iter().filter(|e| matches!(e.health, Health::Sick(_))).count();
                 let dying_n = vs.iter().filter(|e| matches!(e.health, Health::Dying)).count();
                 println!("  health: {} healthy · {} sick · {} dying", healthy_n, sick_n, dying_n);
+                // probe coverage — the family's test suite stats
+                let probe_count = veldt.probes.get(fam).map(|p| p.len()).unwrap_or(0);
+                let trace_count = veldt.traces.get(fam).map(|t| t.len()).unwrap_or(0);
+                let death_count = veldt.obituaries.iter().filter(|o| o.name == *fam).count();
+                println!("  probes: {} · traces: {} · deaths: {}", probe_count, trace_count, death_count);
             }
         }
         if veldt.fitness_history.len() >= 2 {
