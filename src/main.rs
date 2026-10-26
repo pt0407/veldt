@@ -2328,6 +2328,14 @@ fn print_stats(veldt: &veldt::Veldt) {
                         println!("    {:<20} {}/{} healthy", src, h, t);
                     }
                 }
+                // probe inputs — which inputs the family's probes test
+                if let Some(probes) = veldt.probes.get(fam) {
+                    let inputs: Vec<_> = probes.iter().take(8).map(|p| p.args.join(" ")).collect();
+                    if !inputs.is_empty() {
+                        println!("  probe inputs:");
+                        for inp in inputs { println!("    {}", inp); }
+                    }
+                }
             }
         }
         if veldt.fitness_history.len() >= 2 {
