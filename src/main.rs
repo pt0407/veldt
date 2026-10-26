@@ -566,6 +566,21 @@ fn main() {
                 }
                 println!("=== The Veldt (fitness >= {}) ===", min);
                 filtered.print_garden(sick_only, healthy_only);
+            } else if let Some(fam) = args.iter().position(|a| a == "--niche_sort_fam")
+                .and_then(|p| args.get(p + 1)).cloned() {
+                // --niche_sort_fam <name> — variants in this family sorted by niche count
+                let mut sorted = veldt::Veldt::new();
+                sorted.probes = veldt.probes.clone();
+                sorted.obituaries = veldt.obituaries.clone();
+                sorted.run_count = veldt.run_count;
+                sorted.garden_path = veldt.garden_path.clone();
+                if let Some(vs) = veldt.functions.get(&fam) {
+                    let mut sorted_vs = vs.clone();
+                    sorted_vs.sort_by(|a, b| b.niche_scores.len().cmp(&a.niche_scores.len()));
+                    sorted.functions.insert(fam.clone(), sorted_vs);
+                }
+                println!("=== The Veldt ({} broadest first) ===", fam);
+                sorted.print_garden(sick_only, healthy_only);
             } else if let Some(fam) = args.iter().position(|a| a == "--size_fam")
                 .and_then(|p| args.get(p + 1)).cloned() {
                 // --size_fam <name> — variants in this family sorted by code size
