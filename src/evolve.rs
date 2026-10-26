@@ -196,7 +196,7 @@ impl Evolver {
 
                 let do_crossover = healthy_ids.len() >= 2 && self.rand_range(10) < 3;
 
-                let (child_body, parents, origin) = if do_crossover {
+                let (mut child_body, parents, origin) = if do_crossover {
                     let other_id = healthy_ids.iter().filter(|i| **i != entry.id)
                         .nth(self.rand_range(healthy_ids.len() - 1)).copied().unwrap();
                     let other = veldt.functions[name].iter().find(|e| e.id == other_id).cloned().unwrap();
@@ -218,6 +218,13 @@ impl Evolver {
                     (body, vec![entry.id],
                      format!("{} of {}#{}", mutation_name(mutation), name, entry.id))
                 };
+
+                // Mechanical normalization: run the repair passes on the
+                // child before judging it — mutations that only splice in
+                // dead code normalize back to the parent shape and get
+                // CloneRejected instead of being born dirty
+                crate::health::HealthChecker::repair_dead_tail(&mut child_body);
+                crate::health::HealthChecker::repair_dead_lets(&mut child_body);
 
                 // Semantic dedup: reject children identical to an existing variant
                 if let Some(variants) = veldt.functions.get(name) {
