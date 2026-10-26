@@ -219,7 +219,7 @@ fn main() {
                     .map(|g| g.split("&&").map(|s| s.trim().to_string()).collect())
                     .collect());
             let names: Vec<String> = veldt.functions.iter()
-                .filter(|(_, vs)| vs.len() >= 2
+                .filter(|(name, vs)| vs.len() >= 2
                     && or_groups.as_ref().map(|gs| vs.iter().any(|e|
                         gs.iter().any(|g|
                             g.iter().all(|c| veldt::variant_matches_in(e, name, c)))))
@@ -464,7 +464,7 @@ fn main() {
                     Some(vs) => {
                         let mut matching: Vec<_> = vs.iter()
                             .filter(|e| or_groups.iter().any(|g|
-                                g.iter().all(|c| veldt::variant_matches_in(e, name, c))))
+                                g.iter().all(|c| veldt::variant_matches_in(e, &args[2], c))))
                             .collect();
                         matching.sort_by(|a, b| b.fitness.partial_cmp(&a.fitness)
                             .unwrap_or(std::cmp::Ordering::Equal));
@@ -524,7 +524,7 @@ fn main() {
                 .filter(|(n, vs)| n.to_lowercase().contains(&needle)
                     && or_groups.as_ref().map(|gs| vs.iter().any(|e|
                         gs.iter().any(|g|
-                            g.iter().all(|c| veldt::variant_matches_in(e, name, c)))))
+                            g.iter().all(|c| veldt::variant_matches_in(e, n, c)))))
                     .unwrap_or(true))
                 .collect();
             if args.iter().any(|a| a == "--json") {
@@ -3035,7 +3035,7 @@ fn main() {
                     .collect();
                 if let Some(vs) = veldt.functions.get_mut(&args[2]) {
                     vs.retain(|e| or_groups.iter().any(|g|
-                        g.iter().all(|c| veldt::variant_matches_in(e, name, c))));
+                        g.iter().all(|c| veldt::variant_matches_in(e, &args[2], c))));
                 }
                 println!("[lineage --filter {}]", expr);
             }
