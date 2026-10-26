@@ -2346,6 +2346,14 @@ fn print_stats(veldt: &veldt::Veldt) {
                         }
                     }
                 }
+                // recent deaths — the family's obituary log
+                let deaths: Vec<_> = veldt.obituaries.iter().filter(|o| o.name == *fam).rev().take(5).collect();
+                if !deaths.is_empty() {
+                    println!("  recent deaths:");
+                    for o in deaths {
+                        println!("    {}#{} — {} (age {})", o.name, o.id, o.cause_of_death, o.age);
+                    }
+                }
             }
         }
         if veldt.fitness_history.len() >= 2 {
