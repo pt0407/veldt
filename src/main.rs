@@ -5313,7 +5313,8 @@ fn run_program(path: &str, trace: bool, evolve_after: bool) {
                 // Health check at birth — clone entry to avoid borrow conflict
                 let mut entry = veldt.functions[name].iter()
                     .find(|e| e.id == id).cloned().unwrap();
-                health::HealthChecker::check_at_birth(&mut entry, &veldt);
+                let use_vm = std::env::args().any(|a| a == "--vm");
+                health::HealthChecker::check_at_birth_with(&mut entry, &veldt, use_vm);
                 // Put it back
                 if let Some(variants) = veldt.functions.get_mut(name) {
                     for e in variants.iter_mut() {
