@@ -1190,3 +1190,6 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   `let x = <pure>` never used later (call-free RHS only, any
   Assign/For/destructure/mention blocks removal). Chained
   into heal() + check --garden --fix. Unit-tested.
+- [Devin] garden --fix with dead-let pass: census 97 -> 85.
+  Remaining are semantic warnings (play_game loop-no-exit,
+  compound-assign) — not mechanically repairable.
