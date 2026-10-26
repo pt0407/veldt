@@ -49,6 +49,14 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] VM COVERAGE SWEEP: 100% of examples/*.veldt run
+  under --vm now. Two real bugs closed: catch-var leaked into outer
+  slotmap (e() resolved to the error string — now scoped to handler
+  + prior-binding restore), and lambdas calling garden fns failed
+  (helper.functions had no VM-registered fns — now mirrored as
+  FunctionVariants). tictactoe balance_test + snake + showcase2 all
+  green. Also fixed server.rs borrow errors from the stats batch.
+  docs/BENCH.md has the honest numbers (dict 32x, fib 88x, loop 3x).
 - [Devin] FULL SURFACE now on main — CLI: find/diff/--unified/check/
   --strict/--json/import --merge/evolve --until/--until-fam/--family/
   --dry/test --all/watch --sandbox/stats/garden --sick/--healthy/--trust/
