@@ -995,6 +995,21 @@ impl JitEngine {
                                 let c64 = b.ins().uextend(types::I64, c8);
                                 ecall!(rt.boolbox, rtv, c64)
                                     .unwrap_or_else(|| b.ins().iconst(types::I64, 0))
+                            } else if matches!(chunk.code[pc], Instr::Div) {
+                                // float /0 errors in the interpreter —
+                                // only inline when the divisor is nonzero
+                                let z = b.ins().f64const(
+                                    cranelift_codegen::ir::immediates::Ieee64::with_bits(0));
+                                let nz = b.ins().fcmp(FloatCC::NotEqual, fc2, z);
+                                let db = b.create_block();
+                                b.ins().brif(nz, db, &[], hb, &[]);
+                                b.seal_block(db);
+                                b.switch_to_block(db);
+                                let res = b.ins().fdiv(fa, fc2);
+                                let bv = ecall!(rt.floatbox, rtv, res)
+                                    .unwrap_or_else(|| b.ins().iconst(types::I64, 0));
+                                b.ins().jump(mb, &[cranelift_codegen::ir::BlockArg::Value(bv)]);
+                                res // placeholder — fv binding
                             } else {
                                 let res = match chunk.code[pc] {
                                     Instr::Add => b.ins().fadd(fa, fc2),
@@ -1004,7 +1019,9 @@ impl JitEngine {
                                 ecall!(rt.floatbox, rtv, res)
                                     .unwrap_or_else(|| b.ins().iconst(types::I64, 0))
                             };
-                            b.ins().jump(mb, &[cranelift_codegen::ir::BlockArg::Value(fv)]);
+                            if !matches!(chunk.code[pc], Instr::Div|Instr::Mod) {
+                                b.ins().jump(mb, &[cranelift_codegen::ir::BlockArg::Value(fv)]);
+                            }
                             // slow: helper covers every other type pair
                             b.switch_to_block(hb);
                             let hv = ecall!(rt.binop, rtv, o, l, r)
