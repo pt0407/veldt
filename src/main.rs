@@ -3302,6 +3302,14 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
             Stmt::Try(a, _, b) => { lint_block(a, out); lint_block(b, out); }
             Stmt::Match(_, arms, els) => {
                 if arms.is_empty() { out.push("match with no arms — dead statement".into()); }
+                // _ arm before a non-_ arm — the later arm is unreachable
+                let wild = arms.iter().position(|(p, _)|
+                    matches!(p, Expr::Var(v) if v == "_"));
+                if let Some(w) = wild {
+                    if w < arms.len() - 1 {
+                        out.push("match arm after a _ pattern — unreachable".into());
+                    }
+                }
                 for (_, body) in arms { lint_block(body, out); }
                 if let Some(e) = els { lint_block(e, out); }
             }
