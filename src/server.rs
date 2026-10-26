@@ -84,6 +84,7 @@ pub async fn start_server(port: u16) {
         .route("/api/probe", get(probe_family))
         .route("/api/family", get(family_detail))
         .route("/api/sick", get(sick))
+        .route("/api/vars", get(vars))
         .route("/api/run", post(run_program))
         .route("/api/evolve", post(evolve))
         .route("/api/clear", post(clear_veldt))
@@ -1416,6 +1417,17 @@ async fn sick() -> Json<serde_json::Value> {
             }).collect::<Vec<_>>())
         .collect();
     Json(serde_json::json!({"sick": sick_list}))
+}
+
+async fn vars() -> Json<serde_json::Value> {
+    let mut veldt = veldt::Veldt::new();
+    if veldt.load().is_err() {
+        return Json(serde_json::json!({"error": "garden load failed"}));
+    }
+    let var_data: Vec<serde_json::Value> = veldt.variables.iter()
+        .map(|(n, v)| serde_json::json!({"name": n, "value": format!("{:?}", v)}))
+        .collect();
+    Json(serde_json::json!({"variables": var_data}))
 }
 
 // --- IDE HTML ---
