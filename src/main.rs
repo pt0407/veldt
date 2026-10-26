@@ -2180,6 +2180,14 @@ fn print_stats(veldt: &veldt::Veldt) {
                     let avg = fits.iter().sum::<f64>() / fits.len() as f64;
                     println!("  fitness: {:.2} – {:.2} (avg {:.2})", min, max, avg);
                 }
+                // size distribution — avg / peak code size
+                let sizes: Vec<usize> = vs.iter()
+                    .map(|e| crate::fmt::format_program(&e.body).len()).collect();
+                if !sizes.is_empty() {
+                    let avg = sizes.iter().sum::<usize>() as f64 / sizes.len() as f64;
+                    let max = sizes.iter().max().unwrap();
+                    println!("  size: avg {:.0} chars (peak {})", avg, max);
+                }
             }
         }
         if veldt.fitness_history.len() >= 2 {
