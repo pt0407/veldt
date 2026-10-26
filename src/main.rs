@@ -2885,6 +2885,18 @@ fn main() {
                 eprintln!("Error loading veldt: {}", e);
                 process::exit(1);
             }
+            if let Some(expr) = args.iter().position(|a| a == "--filter")
+                .and_then(|p| args.get(p + 1)) {
+                // --filter <expr> — only show matching variants in the lineage
+                let or_groups: Vec<Vec<&str>> = expr.split("||")
+                    .map(|g| g.split("&&").map(|s| s.trim()).collect())
+                    .collect();
+                if let Some(vs) = veldt.functions.get_mut(&args[2]) {
+                    vs.retain(|e| or_groups.iter().any(|g|
+                        g.iter().all(|c| veldt::variant_matches(e, c))));
+                }
+                println!("[lineage --filter {}]", expr);
+            }
             if args.iter().any(|a| a == "--json") {
                 let vs = veldt.functions.get(&args[2]);
                 match vs {
