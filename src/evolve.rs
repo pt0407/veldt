@@ -229,6 +229,27 @@ impl Evolver {
                     }
                 }
 
+                // Strict-lint gate: reject mutants that introduce real-bug
+                // warnings the parent didn't already carry — mutations
+                // shouldn't birth unreachable/self-reading/arity-broken code
+                {
+                    let parent_warns = mutant_realbugs(name, &entry.params,
+                        &entry.body, &entry.tests);
+                    let child_warns = mutant_realbugs(name, &entry.params,
+                        &child_body, &entry.tests);
+                    let new_warns: Vec<String> = child_warns.iter()
+                        .filter(|w| !parent_warns.contains(w))
+                        .cloned().collect();
+                    if !new_warns.is_empty() {
+                        events.push(EvolutionEvent::LintRejected {
+                            name: name.clone(),
+                            warnings: new_warns,
+                        });
+                        spent += 1;
+                        continue;
+                    }
+                }
+
                 let source = format!("fn {}(...) {{ [{}] }}", name, origin);
                 let new_id = veldt.grow_function_full(name, entry.params.clone(), child_body,
                     entry.tests.clone(), &source, parents.clone(), &origin);
@@ -1128,6 +1149,7 @@ pub enum EvolutionEvent {
     NoCandidates,
     ProbeGenerated { name: String, niche: String },
     CloneRejected { name: String },
+    LintRejected { name: String, warnings: Vec<String> },
     Mutate { name: String, parent_id: u32, new_id: u32, desc: String },
     Trial { name: String, id: u32, healthy: bool, score: f64, fitness: f64, parent_fitness: f64 },
     Death { name: String, id: u32, cause: String },
@@ -1144,6 +1166,10 @@ impl EvolutionEvent {
             }
             Self::CloneRejected { name } => {
                 format!("  [REJECT] {} — child identical to existing variant, not born", name)
+            }
+            Self::LintRejected { name, warnings } => {
+                format!("  [LINT]   {} — child introduces real-bug warnings, not born ({})",
+                        name, warnings.join("; "))
             }
             Self::Mutate { name, parent_id, new_id, desc } => {
                 format!("  [MUTATE] {}#{} → {}#{} ({})", name, parent_id, name, new_id, desc)
@@ -1323,6 +1349,33 @@ fn mutation_name(m: Mutation) -> &'static str {
         Mutation::HoistInvariant => "loop-invariant hoisting",
         Mutation::EarlyExit => "early-exit fusion",
     }
+}
+
+/// strict-lint a candidate mutant body — returns only the
+/// real-bug warnings (defects, not style). The body wraps as a
+/// synthetic grow fn so params seed scope and tests get checked.
+fn mutant_realbugs(name: &str, params: &[Param], body: &[Stmt],
+                   tests: &[TestAssert]) -> Vec<String> {
+    let wrapped = Stmt::Grow(GrowItem::Fn(
+        name.to_string(), params.to_vec(), body.to_vec(), tests.to_vec()));
+    crate::lint(&[wrapped]).into_iter()
+        .filter(|w| is_realbug_warning(w))
+        .collect()
+}
+
+/// the defect subset of strict-lint warnings — things a mutant
+/// almost certainly shouldn't carry: arity mismatches, unbound
+/// reads/assigns, null binds, fn shadowing, wrong-fn tests,
+/// unreachable code, never-matching patterns
+fn is_realbug_warning(w: &str) -> bool {
+    w.contains("args, got")
+        || w.contains("shadows fn")
+        || w.contains("never returns a value")
+        || w.contains("before it's bound")
+        || w.contains("doesn't exercise")
+        || w.contains("unreachable code after return")
+        || w.contains("assigned but never declared")
+        || w.contains("is unbound — never matches")
 }
 
 #[cfg(test)]
