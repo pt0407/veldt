@@ -620,7 +620,7 @@ impl Veldt {
 
     // === Display ===
 
-    pub fn print_garden(&self, sick_only: bool) {
+    pub fn print_garden(&self, sick_only: bool, healthy_only: bool) {
         if self.functions.is_empty() && self.variables.is_empty() && self.structs.is_empty() {
             println!("The veldt is empty.");
             return;
@@ -637,6 +637,8 @@ impl Veldt {
             for entry in variants {
                 let show = if sick_only {
                     matches!(entry.health, Health::Sick(_) | Health::Dying)
+                } else if healthy_only {
+                    matches!(entry.health, Health::Healthy)
                 } else {
                     true
                 };

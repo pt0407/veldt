@@ -284,6 +284,7 @@ fn main() {
                 process::exit(1);
             }
             let sick_only = args.iter().any(|a| a == "--sick");
+            let healthy_only = args.iter().any(|a| a == "--healthy");
             let obituaries = args.iter().any(|a| a == "--obituaries");
             let trust_filter = args.iter().position(|a| a == "--trust")
                 .and_then(|p| args.get(p + 1));
@@ -329,7 +330,7 @@ fn main() {
                 veldt.print_obituaries();
             } else {
                 println!("=== The Veldt ===");
-                veldt.print_garden(sick_only);
+                veldt.print_garden(sick_only, healthy_only);
             }
         }
         "lineage" => {
