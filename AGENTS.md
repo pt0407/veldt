@@ -672,3 +672,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   for-var-shadow, on let). stats' death causes line joins
   the spark coverage — every name:count section now shows
   its shape.
+- [Devin] Breakdown sparks + lint batch 9 (HEAD post-7db3079):
+  trust/health/probes breakdowns show 3-value spark shapes.
+  ~39 strict checks — let inside a for body shadowing the
+  loop var (deeper shadow catch).
