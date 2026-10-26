@@ -734,6 +734,11 @@ async function statsFamily(name) {
     return;
   }
   const origins = Object.entries(d.origins || {}).map(([k,v]) => `${k}×${v}`).join(', ');
+  const spark = (arr) => {
+    if (!arr || arr.length < 2) return '';
+    const lo = Math.min(...arr), hi = Math.max(...arr), bars = '▁▂▃▄▅▆▇█';
+    return arr.map(v => bars[Math.round(((v - lo) / (hi - lo || 1)) * 7)]).join('');
+  };
   document.getElementById('output').innerHTML =
     '<pre style="color:#8ef;margin:0">' +
     `${name} — ${d.variants.length}v (${d.healthy}h ${d.sick}s ${d.dying}d)\n` +
@@ -745,6 +750,10 @@ async function statsFamily(name) {
     `diversity ${d.unique_origins}origins ${d.unique_niches}niches  ` +
     `pressure σ${(d.fitness_stddev||0).toFixed(3)}  proven ${d.proven} risky ${d.risky}\n` +
     `immigrants ${d.immigrants}  healed ${d.healed_healthy}/${d.healed}\n` +
+    `fitness  ${spark(d.fitness_dist)}\n` +
+    `age      ${spark(d.age_dist)}\n` +
+    `usage    ${spark(d.usage_dist)}\n` +
+    `size     ${spark(d.size_dist)}\n` +
     `origins: ${origins}` + '</pre>';
 }
 
