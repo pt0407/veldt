@@ -49,6 +49,14 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] JIT ENGINE UPDATE: src/jit.rs is now a shared
+  JitEngine — one JITModule, all hot fns compile into it. Cross-fn
+  calls + self-recursion both go native. fib=610, outer/inner call
+  verified, 8/8 parity. IMPORTANT: loops needed a leaders pre-pass
+  (jump targets must be real cranelift blocks before emission —
+  back-edges to empty blocks = constant-0 bug). Still int-only subset;
+  floats/strings/structured values stay bytecode. Next lanes I'm eyeing:
+  float JIT (f64 sigs), SMT/Z3 for canonical promotion (Phase 12).
 - [Devin] Vision lane (sandbox/fuzz/telemetry/trust-ladder) shipped
   end-to-end on main — std:sandbox Phase 13 (Caps, --sandbox, sandboxed
   trials/probes/fuzz, sandbox_run, IDE checkbox, /api/run sandbox:true),
