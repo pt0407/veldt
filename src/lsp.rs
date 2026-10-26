@@ -143,15 +143,21 @@ fn write_msg(w: &mut impl Write, v: &Value) {
 /// "Line N:" prefixes we surface as the diagnostic range.
 fn publish_diag(w: &mut impl Write, uri: &str, text: &str) {
     let mut lx = crate::lexer::Lexer::new(text);
-    let err = match lx.tokenize() {
-        Err(e) => Some(e.to_string()),
+    enum Diag { Err(String), Warn(Vec<String>) }
+    let diag = match lx.tokenize() {
+        Err(e) => Diag::Err(e.to_string()),
         Ok(tokens) => {
             let mut p = crate::parser::Parser::new_with_lines(tokens, lx.token_lines.clone());
-            p.parse_program().err().map(|e| e.to_string())
+            match p.parse_program() {
+                Err(e) => Diag::Err(e.to_string()),
+                // strict-lint warnings — the ~91-check pass from
+                // check --strict, surfaced as editor squiggles
+                Ok(stmts) => Diag::Warn(crate::lint(&stmts)),
+            }
         }
     };
-    let diags = match err {
-        Some(e) => {
+    let diags = match diag {
+        Diag::Err(e) => {
             let line = e.split("Line ").nth(1)
                 .and_then(|s| s.split(|c: char| !c.is_ascii_digit()).next())
                 .and_then(|s| s.parse::<u32>().ok())
@@ -162,7 +168,14 @@ fn publish_diag(w: &mut impl Write, uri: &str, text: &str) {
                 "severity": 1, "source": "veldt", "message": e
             })]
         }
-        None => vec![],
+        Diag::Warn(warns) => warns.iter().map(|w| {
+            let line = warn_anchor(text, w);
+            json!({
+                "range": {"start": {"line": line, "character": 0},
+                          "end": {"line": line, "character": 200}},
+                "severity": 2, "source": "veldt-lint", "message": w
+            })
+        }).collect(),
     };
     write_msg(w, &json!({"jsonrpc": "2.0", "method": "textDocument/publishDiagnostics",
         "params": {"uri": uri, "diagnostics": diags}}));
@@ -183,6 +196,26 @@ fn word_at(text: &str, line: u32, ch: u32) -> String {
 
 fn doc_of<'a>(params: &Value, docs: &'a HashMap<String, Doc>) -> Option<&'a Doc> {
     docs.get(params["textDocument"]["uri"].as_str()?)
+}
+
+/// Anchor a lint warning to the enclosing fn's definition line.
+/// Fn-scoped warnings are "name: msg"; program-level warnings
+/// mention the fn as "grow fn name" / "fn name". Falls back to
+/// the top of file for file-level diagnostics.
+fn warn_anchor(text: &str, w: &str) -> u32 {
+    if let Some((head, _)) = w.split_once(": ") {
+        if !head.contains(' ') {
+            if let Some(l) = find_defs(text, head).first() { return *l; }
+        }
+    }
+    for marker in ["grow fn ", "fn "] {
+        if let Some(rest) = w.strip_prefix(marker) {
+            let name = rest.split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+                .next().unwrap_or("");
+            if let Some(l) = find_defs(text, name).first() { return *l; }
+        }
+    }
+    0
 }
 
 /// `fn name(` / `grow fn name(` definitions in the doc → line numbers.
