@@ -1765,6 +1765,57 @@ impl Interpreter {
                     num_at(args, 4)?, num_at(args, 5)?, num_at(args, 6)?, num_at(args, 7)?);
                 Ok(Some(Value::Bool(ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by)))
             }
+            "bfs" => {
+                // bfs(c, sx, sy, tx, ty, walkable_ch) — shortest path on a
+                // canvas, walking cells that contain walkable_ch. Returns
+                // [[x,y],...] or null if unreachable.
+                let (d, sx, sy, tx, ty, walk) = match (args.get(0), args.get(1), args.get(2), args.get(3), args.get(4), args.get(5)) {
+                    (Some(Value::Dict(d)), Some(Value::Int(sx)), Some(Value::Int(sy)),
+                     Some(Value::Int(tx)), Some(Value::Int(ty)), Some(Value::Str(w)))
+                        => (d, *sx as i64, *sy as i64, *tx as i64, *ty as i64, w.clone()),
+                    _ => return Err("bfs(c, sx, sy, tx, ty, walkable_ch) expects dict + 4 ints + str".into()),
+                };
+                let (w, h) = (d.get("w").and_then(|v| if let Value::Int(w) = v { Some(*w as i64) } else { None }),
+                              d.get("h").and_then(|v| if let Value::Int(h) = v { Some(*h as i64) } else { None }));
+                let (Some(w), Some(h)) = (w, h) else { return Err("canvas: missing w/h".into()) };
+                let Some(Value::List(cells)) = d.get("cells") else { return Err("canvas: no cells".into()) };
+                let cell_ok = |x: i64, y: i64| -> bool {
+                    if x < 0 || y < 0 || x >= w || y >= h { return false; }
+                    if let Value::List(r) = &cells[y as usize] {
+                        if let Some(Value::Str(s)) = r.get(x as usize) {
+                            return *s == walk;
+                        }
+                    }
+                    false
+                };
+                // bfs
+                let mut prev: std::collections::HashMap<(i64, i64), (i64, i64)> = std::collections::HashMap::new();
+                let mut q: std::collections::VecDeque<(i64, i64)> = std::collections::VecDeque::new();
+                let mut seen: std::collections::HashSet<(i64, i64)> = std::collections::HashSet::new();
+                q.push_back((sx, sy));
+                seen.insert((sx, sy));
+                while let Some((cx, cy)) = q.pop_front() {
+                    if cx == tx && cy == ty { break; }
+                    for (dx, dy) in [(0, -1), (0, 1), (-1, 0), (1, 0)] {
+                        let (nx, ny) = (cx + dx, cy + dy);
+                        if !seen.contains(&(nx, ny)) && (cell_ok(nx, ny) || (nx == tx && ny == ty)) {
+                            seen.insert((nx, ny));
+                            prev.insert((nx, ny), (cx, cy));
+                            q.push_back((nx, ny));
+                        }
+                    }
+                }
+                if !seen.contains(&(tx, ty)) { return Ok(Some(Value::Null)); }
+                let mut path = Vec::new();
+                let mut cur = (tx, ty);
+                loop {
+                    path.push(Value::List(im::vector![Value::Int(cur.0), Value::Int(cur.1)]));
+                    if cur == (sx, sy) { break; }
+                    cur = prev[&cur];
+                }
+                path.reverse();
+                Ok(Some(Value::List(path.into_iter().collect())))
+            }
             "dist_stats" => {
                 // dist_stats(fn, trials) — mean/stddev/min/max over n samples
                 let (f, trials) = match (args.get(0), args.get(1)) {
