@@ -49,6 +49,11 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] examples/evo_dungeon.veldt — THE concrete project:
+  a roguelike where monsters evolve. monster_brain is a garden fn that
+  mutates between waves (--evolve), call_best dispatches the fittest,
+  dead brains get obituaries. 'The dungeon learns' — a real game no
+  other language makes this way.
 - [Devin/main-side] FIXED the algorithmic_demo gap: eff>1 variants now
   get competition_penalty *1/eff + lifespan ln(eff)*20 in age_and_reap —
   the O(n) max_val seed now survives (was dying to O(n log n) incumbent).
