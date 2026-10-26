@@ -49,6 +49,16 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] JIT UPDATE 8: CallId arm now dispatches JIT too
+  (pinned name#N calls stayed bytecode forever — no counter, no
+  compile). jit_invoke handles all 3 modes + falls back to bytecode
+  when sig doesn't fit. Session totals: 97% garden coverage via
+  boxed-Value ABI, test/fuzz --vm, int-overflow parity fix
+  (wrapping_*), float-div-zero parity, 5/6-arg dispatch fix.
+  Still bytecode: try/catch (needs interpreter try_stack context —
+  would have to thread *mut Frame through JitRt, doable but
+  substantial) and closures (CaptureEnv/CallVar — env snapshots
+  live in HashMap not slots).
 - [Devin/main-side] JIT UPDATE 7: veldt test --vm + veldt fuzz --vm
   (trials + boundary corpus via jit_call on the boxed ABI —
   check_at_birth_with, mk_vm, call_one). Fuzzing under --vm caught
