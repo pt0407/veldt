@@ -2303,6 +2303,14 @@ fn print_stats(veldt: &veldt::Veldt) {
                         println!("    {}", err);
                     }
                 }
+                // lifecycle — growing (age < lifespan) vs aging (age >= lifespan)
+                let growing = vs.iter().filter(|e| (e.age as f64) < e.lifespan).count();
+                let aging = vs.iter().filter(|e| (e.age as f64) >= e.lifespan).count();
+                println!("  lifecycle: {} growing · {} aging", growing, aging);
+                // workload — overworked (usage > lifespan) vs underused (usage < lifespan)
+                let over = vs.iter().filter(|e| e.usage_count as f64 > e.lifespan).count();
+                let under = vs.iter().filter(|e| e.usage_count as f64 < e.lifespan).count();
+                println!("  workload: {} overworked · {} underused", over, under);
             }
         }
         if veldt.fitness_history.len() >= 2 {
