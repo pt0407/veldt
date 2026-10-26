@@ -1026,7 +1026,32 @@ fn fuzz_family(name: &str) {
                 println!("    {} -> #{}", out, ids.iter().map(|i| i.to_string())
                     .collect::<Vec<_>>().join(", #"));
             }
+            // divergence -> probe: majority answer becomes expected, so
+            // dissenting variants fail this case on their next trial —
+            // fuzzing feeds selection, not just a report.
+            if let Some((expected, _)) = by_out.iter().max_by_key(|(_, ids)| ids.len()) {
+                if !expected.starts_with("ERR:") {
+                    let arg_strs: Vec<String> = args.iter()
+                        .map(|a| serde_json::to_string(a).unwrap_or_default()).collect();
+                    let pool = veldt.probes.entry(name.to_string()).or_insert_with(Vec::new);
+                    if !pool.iter().any(|p| p.args == arg_strs) {
+                        pool.push(veldt::Probe {
+                            args: arg_strs,
+                            expected: expected.clone(),
+                            niche: format!("fuzz:case{}", case),
+                            born: std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map(|d| d.as_secs()).unwrap_or(0),
+                            scale: 0,
+                        });
+                        println!("    ^ probe planted — dissenters will fail it next trial");
+                    }
+                }
+            }
         }
+    }
+    if divergences > 0 {
+        veldt.save().unwrap_or_else(|e| eprintln!("Save error: {}", e));
     }
     println!("{} boundary cases, {} divergent", cases, divergences);
 }

@@ -900,11 +900,31 @@ print("@N@(97) = " + @N@(97))
             Some(note.to_string()), veldt,
         );
     }
+    // builtin-stdlib strains — mutations can't invent these calls;
+    // planting them gives evolution the faster building block directly.
+    for (kw, name, body) in [
+        ("sort", "sort", "grow fn @N@(xs: list) test @N@([3,1,2]) == [1,2,3], @N@([]) == [] {\n    return xs.sort()\n}\n\nprint(@N@([9, 1, 5]))"),
+        ("reverse", "reverse", "grow fn @N@(xs: list) test @N@([1,2,3]) == [3,2,1], @N@([]) == [] {\n    return xs.reverse()\n}\n\nprint(@N@([1, 2, 3]))"),
+        ("join", "join", "grow fn @N@(xs: list, sep: str) test @N@([\"a\",\"b\"], \"-\") == \"a-b\", @N@([], \"-\") == \"\" {\n    return xs.join(sep)\n}\n\nprint(@N@([\"x\", \"y\"], \"+\"))"),
+    ] {
+        if t.contains(kw) {
+            let code = body.replace("@N@", name);
+            let note = if veldt.functions.contains_key(name) {
+                format!("{} via the builtin — one call, no loop. Should out-compete a manual {} on trial speed.", name, kw)
+            } else {
+                format!("No {} lineage yet — the builtin strain plants as founder.", name)
+            };
+            return grow_and_report_stages(
+                vec![StageSpec { label: format!("builtin {} strain", kw), code }],
+                Some(note), veldt,
+            );
+        }
+    }
     let target = find_lineage(words, veldt);
     match target {
         Some(n) => plain(&format!(
-            "I don't know a faster strain for {} — my improvements cover fib (fast-doubling) and is_prime (odd-only). Try \"evolve\" and let mutation try instead.", n)),
-        None => plain("Improve what? I know fast strains for fib and is_prime — say \"improve fib\" or \"improve prime\". For others, \"evolve\" is the path."),
+            "I don't know a faster strain for {} — my improvements cover fib (fast-doubling), is_prime (odd-only), and the builtin-stdlib strains (sort, reverse, join). Try \"evolve\" and let mutation try instead.", n)),
+        None => plain("Improve what? I know fast strains for fib and is_prime, plus builtin strains for sort/reverse/join — say \"improve sort\". For others, \"evolve\" is the path."),
     }
 }
 
