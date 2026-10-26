@@ -4,6 +4,8 @@
 VM with a Cranelift tier-2 JIT (pure-int and pure-float functions →
 native after 64 calls). Numbers from `bench/*.veldt` on Apple Silicon:
 
+`veldt compare --all` prints a fresh table like this on demand.
+
 | benchmark          | tree-walk | --vm     | speedup |
 |--------------------|-----------|----------|---------|
 | dict_ops           | 7.31s     | 0.23s    | ~32x    |
