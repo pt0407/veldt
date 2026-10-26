@@ -795,6 +795,10 @@ pub fn variant_matches_in(e: &FunctionEntry, family: &str, clause: &str) -> bool
         "lifespan" => Some(e.lifespan),
         "last_used" => Some(e.last_used as f64),
         "niches" => Some(e.niche_scores.len() as f64),
+        "born" => Some(e.born as f64),
+        "trial_score" => Some(e.trial_score),
+        "efficiency" => Some(e.efficiency),
+        "parents" => Some(e.parents.len() as f64),
         _ => None,
     };
     if let (Some(fv), Some(v)) = (field_num, num_val) {
