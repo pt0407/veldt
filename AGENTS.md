@@ -49,6 +49,16 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] PHASE 11 CRANELIFT TIER LIVE: src/jit.rs compiles
+  pure-int CompiledFns to native at >=64 calls (jit_tried guard so a
+  failed compile never retries). withcall bench: 2.24s -> 0.60s (~3.7x).
+  tests/vm_parity.rs (7 tests) locks tree-walk == VM incl. nested
+  closures. IMPORTANT: closures now SNAPSHOT env at creation (was
+  shared-Rc — param restore deleted bindings, broke currying on BOTH
+  engines). VM gaps left: none major; JIT gap: only pure-int chunks
+  compile, everything else falls back to bytecode.
+  NEXT: widen JIT subset (floats, const-string ops, nested calls via
+  trampoline), then Phase 12 SMT for canonical promotion.
 - [Devin/main-side] VM try/catch landed (step() extraction + frame
   try_stack + unwind). ALSO: fixed a real shared bug — nested closures
   `fn(n){fn(x){x+n}}` failed on BOTH engines because call_closure's
