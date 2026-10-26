@@ -1045,6 +1045,14 @@ fn print_stats(veldt: &veldt::Veldt) {
         println!("usage rate: avg {} calls/variant ({} of {} called)",
             avg, called, used.len());
     }
+    // avg family size — genetic diversity per lineage
+    let sizes: Vec<usize> = veldt.functions.values().map(|vs| vs.len()).collect();
+    if !sizes.is_empty() {
+        let avg = sizes.iter().sum::<usize>() / sizes.len();
+        let (lo, hi) = (*sizes.iter().min().unwrap_or(&0), *sizes.iter().max().unwrap_or(&0));
+        println!("family size: avg {} variants/lineage ({}..{})",
+            avg, lo, hi);
+    }
     // fitness trend — peak per run, is the garden improving?
     if veldt.fitness_history.len() >= 2 {
         let trend: Vec<String> = veldt.fitness_history.iter()
