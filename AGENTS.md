@@ -1071,3 +1071,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 - [Devin] Lint batch 49 (HEAD post-match-trans-binop): ~80
   strict checks. New: match on a transitive-binop var —
   the scrutinee is a computed expr through an alias chain.
+- [Devin] Lint batch 50 (HEAD post-match-trans-container): ~81
+  strict checks. New: match on a transitive-container var —
+  the scrutinee is a list/struct literal through an alias
+  chain.
