@@ -55,6 +55,7 @@ pub async fn start_server(port: u16) {
         .route("/api/trust", get(trust))
         .route("/api/bare", get(bare))
         .route("/api/immigrants", get(immigrants))
+        .route("/api/mutation", get(mutation))
         .route("/api/run", post(run_program))
         .route("/api/evolve", post(evolve))
         .route("/api/clear", post(clear_veldt))
@@ -365,6 +366,25 @@ async fn immigrants() -> Json<serde_json::Value> {
             })).collect::<Vec<_>>())
         .collect();
     Json(serde_json::json!({"immigrants": imm}))
+}
+
+async fn mutation() -> Json<serde_json::Value> {
+    let mut veldt = veldt::Veldt::new();
+    if veldt.load().is_err() {
+        return Json(serde_json::json!({"error": "garden load failed"}));
+    }
+    let mut src_count: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    for vs in veldt.functions.values() {
+        for e in vs {
+            *src_count.entry(e.origin.clone()).or_default() += 1;
+        }
+    }
+    let mut src: Vec<(String, usize)> = src_count.into_iter().collect();
+    src.sort_by(|a, b| b.1.cmp(&a.1));
+    Json(serde_json::json!({"sources": src.iter()
+        .map(|(s, c)| serde_json::json!({"source": s, "count": c}))
+        .collect::<Vec<_>>()}))
 }
 
 #[derive(Deserialize)]
