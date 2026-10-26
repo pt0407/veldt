@@ -574,11 +574,22 @@ impl Vm {
         for (name, variants) in self.fns.iter() {
             for v in variants {
                 let state = if v.jit.borrow().is_some() {
-                    "native"
+                    "native".to_string()
                 } else if v.jit_tried.get() {
-                    "bytecode (compile failed)"
+                    let key = format!("{}#{}", name, v.id);
+                    match self.jit_engine.as_ref()
+                        .and_then(|e| e.fail_at.get(&key)) {
+                        Some(pc) => {
+                            let instr = v.code.code.get(*pc)
+                                .map(|i| format!("{:?}", i))
+                                .unwrap_or_else(|| "?".into());
+                            format!("bytecode (compile failed at pc {}: {})",
+                                    pc, instr)
+                        }
+                        None => "bytecode (compile failed)".to_string(),
+                    }
                 } else {
-                    "bytecode (cold)"
+                    "bytecode (cold)".to_string()
                 };
                 eprintln!("  {}#{}: {} calls -> {}", name, v.id,
                           v.calls.get(), state);
