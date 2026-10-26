@@ -3775,6 +3775,10 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                                 out.push(format!("match on {} — bound to a container literal", v));
                                 break;
                             }
+                            if n == v && matches!(e, Expr::BinOp(..)) {
+                                out.push(format!("match on {} — bound to a computed expr", v));
+                                break;
+                            }
                         }
                     }
                 }
