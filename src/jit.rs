@@ -70,27 +70,28 @@ impl JitEngine {
     }
 
     /// Compile `name` (fittest variant) and everything it calls into
-    /// the engine. Returns the code pointer when the whole reachable
-    /// set compiled — otherwise None (caller falls back to bytecode).
-    pub fn compile_fn(&mut self, name: &str, fns: &Fns) -> Option<*const u8> {
-        if let Some(&p) = self.ptrs.get(name) { return Some(p); }
-        if self.compiling.contains(name) {
-            // cycle — already declared; caller's call site works
-            return self.ids.get(name).map(|_| usize::MAX as *const u8);
-        }
+    /// the engine. Keys ptrs by `name#id` — a newly-fittest variant
+    /// after evolution compiles fresh instead of running stale code.
+    pub fn compile_fn(&mut self, name: &str, fns: &Fns)
+        -> Option<*const u8> {
         let f = fns.get(name)?;
         let chosen = f.iter()
             .max_by(|a, b| a.fitness.partial_cmp(&b.fitness)
                 .unwrap_or(std::cmp::Ordering::Equal))?;
+        let key = format!("{}#{}", name, chosen.id);
+        if let Some(&p) = self.ptrs.get(&key) { return Some(p); }
+        if self.compiling.contains(&key) {
+            return None;   // in-progress cycle on this variant
+        }
         let arity = chosen.params.len();
-        let fid = self.declare(name, arity)?;
-        self.compiling.insert(name.to_string());
-        let ok = self.define(fid, name, &chosen.code, arity, fns);
-        self.compiling.remove(name);
+        let fid = self.declare(&key, arity)?;
+        self.compiling.insert(key.clone());
+        let ok = self.define(fid, &key, &chosen.code, arity, fns);
+        self.compiling.remove(&key);
         if !ok { return None; }
         if self.module.finalize_definitions().is_err() { return None; }
         let p = self.module.get_finalized_function(fid);
-        self.ptrs.insert(name.to_string(), p);
+        self.ptrs.insert(key, p);
         Some(p)
     }
 
@@ -214,14 +215,42 @@ impl JitEngine {
                     }
                     Instr::Call(ni, argc) => {
                         let cn = chunk.names[ni as usize].clone();
-                        // compile the callee first so its FuncId exists
-                        if cn != own_name {
+                        // self-recursion: own_name is `name#id`
+                        if cn != own_name.rsplit_once('#')
+                            .map(|(n, _)| n).unwrap_or(own_name) {
                             match self.compile_fn(&cn, fns) {
                                 Some(_) => {}
                                 None => { ok = false; break; }
                             }
+                            // callee's key is cn#its-chosen-id
+                            let ckey = fns.get(&cn).and_then(|vf|
+                                vf.iter().max_by(|a, b|
+                                    a.fitness.partial_cmp(&b.fitness)
+                                        .unwrap_or(std::cmp::Ordering::Equal))
+                                .map(|c| format!("{}#{}", cn, c.id)));
+                            let Some(ckey) = ckey else { ok = false; break; };
+                            let cfid = match self.ids.get(&ckey) {
+                                Some(&f) => f,
+                                None => { ok = false; break; }
+                            };
+                            let fref = self.module.declare_func_in_func(
+                                cfid, b.func);
+                            let mut cargs = Vec::new();
+                            for _ in 0..argc {
+                                match stack.pop() {
+                                    Some(v) => cargs.push(v),
+                                    None => { ok = false; break; }
+                                }
+                            }
+                            if !ok { break; }
+                            cargs.reverse();
+                            let call = b.ins().call(fref, &cargs);
+                            stack.push(b.inst_results(call)[0]);
+                            pc += 1;
+                            continue;
                         }
-                        let cfid = match self.ids.get(&cn) {
+                        // self-recursion — own key
+                        let cfid = match self.ids.get(own_name) {
                             Some(&f) => f,
                             None => { ok = false; break; }
                         };
