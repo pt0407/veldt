@@ -854,6 +854,15 @@ fn print_stats(veldt: &veldt::Veldt) {
             .map(|(s, f, n)| format!("{}→{:.2}({})", s, f, n)).collect();
         println!("fitness by mutation source: {}", line.join(" "));
     }
+    // probe coverage per family — selection-pressure depth
+    let mut cov: Vec<(&String, usize)> = veldt.probes.iter()
+        .map(|(n, p)| (n, p.len())).collect();
+    cov.sort_by(|a, b| b.1.cmp(&a.1));
+    if !cov.is_empty() {
+        let line: Vec<String> = cov.iter().take(10)
+            .map(|(n, c)| format!("{}:{}", n, c)).collect();
+        println!("probe coverage: {}", line.join(" "));
+    }
     // coverage line — which families carry probe mass vs bare lineages
     let bare: Vec<&String> = veldt.functions.keys()
         .filter(|n| veldt.probes.get(*n).map(|p| p.is_empty()).unwrap_or(true))
