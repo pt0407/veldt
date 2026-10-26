@@ -760,3 +760,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 - [Devin] Lint batch 20 (HEAD post-match-const): ~50 strict
   checks. New: match on a let-bound literal (let x = 5;
   match x — constant scrutinee, deterministic).
+- [Devin] Lint batch 21 (HEAD post-dead-let-init): ~51
+  strict checks. New: dead let init (let x = a; x = b —
+  the let's value is never read, first mention is a
+  re-assign).
