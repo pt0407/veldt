@@ -2517,6 +2517,11 @@ fn print_stats(veldt: &veldt::Veldt) {
                     println!("  trace rate: {} traces (avg {:.1} per variant)", trace_n,
                         trace_n as f64 / vs.len().max(1) as f64);
                 }
+                // LLM influence — the family's BYOK mutations
+                let llm_n = vs.iter().filter(|e| e.origin.contains("llm")).count();
+                if llm_n > 0 {
+                    println!("  LLM-bred: {} variants", llm_n);
+                }
             }
         }
         if veldt.fitness_history.len() >= 2 {
