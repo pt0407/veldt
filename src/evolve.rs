@@ -293,12 +293,18 @@ impl Evolver {
 
         let mut probes = Vec::new();
         for i in 0..count {
-            // alternate normal and big-scale probes
+            // ~1/3 boundary corpus (fuzz edge cases), rest random + scale
+            let boundary = i % 3 == 2;
             let scale = if i % 2 == 1 { 1 } else { 0 };
             let mut args = Vec::new();
             let mut ok = true;
             for p in &fittest.params {
-                match self.gen_value_scaled(&p.typ, scale) {
+                let v = if boundary {
+                    boundary_value(&p.typ, self.rand_range(8))
+                } else {
+                    self.gen_value_scaled(&p.typ, scale)
+                };
+                match v {
                     Some(v) => args.push(v),
                     None => { ok = false; break; }
                 }
@@ -1115,6 +1121,42 @@ enum Mutation {
     ConstProp,
     HoistInvariant,
     EarlyExit,
+}
+
+/// Fuzz boundary corpus — canonical edge cases per type (std:fuzz).
+/// `i` selects the case; returns None for types we can't generate.
+pub(crate) fn boundary_value(t: &Type, i: usize) -> Option<crate::interpreter::Value> {
+    use crate::interpreter::Value;
+    match t {
+        Type::Int => Some(Value::Int(match i % 8 {
+            0 => i64::MIN, 1 => i64::MAX, 2 => 0, 3 => -1,
+            4 => 1, 5 => -1000, 6 => i64::MAX - 1, _ => i64::MIN + 1,
+        })),
+        Type::Float => Some(Value::Float(match i % 8 {
+            0 => 0.0, 1 => -0.0, 2 => f64::INFINITY, 3 => f64::NEG_INFINITY,
+            4 => f64::EPSILON, 5 => 1e308, 6 => -1e308, _ => f64::MIN_POSITIVE,
+        })),
+        Type::Str => {
+            let s: String = match i % 8 {
+                0 => "".into(), 1 => " ".into(), 2 => "\n\t\r".into(),
+                3 => "hello world".into(), 4 => "x".repeat(1024),
+                5 => "\\\"'".into(), 6 => "%s%d{0}".into(), _ => "".into(),
+            };
+            Some(Value::Str(s.into()))
+        }
+        Type::Bool => Some(Value::Bool(i % 2 == 0)),
+        Type::List(inner) => {
+            let items: Vec<Value> = match i % 5 {
+                0 => vec![],                                              // empty
+                1 => vec![boundary_value(inner, 2)?],                     // singleton
+                2 => (0..50).map(|j| boundary_value(inner, j % 4).unwrap()).collect(), // mixed
+                3 => vec![boundary_value(inner, 1)?; 20],                 // dupes
+                _ => vec![],                                              // also empty
+            };
+            Some(Value::List(items.into_iter().collect()))
+        }
+        _ => None,
+    }
 }
 
 /// Constant condition truthiness — for dead-branch elimination.

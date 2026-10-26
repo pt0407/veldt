@@ -151,6 +151,13 @@ fn main() {
             }
             tournament(&args[2], args.get(3).map(|s| s.as_str()));
         }
+        "fuzz" => {
+            if args.len() < 3 {
+                eprintln!("Usage: veldt fuzz <name>  (boundary corpus vs every variant)");
+                process::exit(1);
+            }
+            fuzz_family(&args[2]);
+        }
         "search" => {
             if args.len() < 4 {
                 eprintln!("Usage: veldt search <url> <name>  (find families in a registry)");
@@ -951,6 +958,59 @@ fn tournament(url: &str, only: Option<&str>) {
     veldt.save().unwrap_or_else(|e| eprintln!("Save error: {}", e));
     println!("{} champions crowned; pushing winners back to {}", crowned, base);
     push_garden(base);
+}
+
+/// std:fuzz (vision): sweep the boundary corpus against every variant
+/// of a family, group outputs, flag variants that diverge from the
+/// consensus answer — boundary bugs evolution should kill.
+fn fuzz_family(name: &str) {
+    let mut veldt = veldt::Veldt::new();
+    if let Err(e) = veldt.load() { eprintln!("Error: {}", e); process::exit(1); }
+    let Some(vars) = veldt.functions.get(name) else {
+        println!("No variants of '{}'", name); return;
+    };
+    let variants: Vec<veldt::FunctionEntry> = vars.clone();
+    println!("=== fuzz {} — {} variants, boundary corpus ===", name, variants.len());
+    let mut cases = 0u32;
+    let mut divergences = 0u32;
+    // sweep each param-position boundary value (up to 8 cases per arg slot)
+    for case in 0..8 {
+        // build args: boundary value for every param (any/unknown -> int)
+        let Some(first) = variants.first() else { break };
+        let mut args = Vec::new();
+        let mut ok = true;
+        for p in &first.params {
+            match evolve::boundary_value(&p.typ, case) {
+                Some(v) => args.push(v),
+                None => { ok = false; break; }
+            }
+        }
+        if !ok { break; }
+        cases += 1;
+        // run each variant, group outputs
+        let mut interp = interpreter::Interpreter::with_step_limit(50000);
+        veldt.load_into_interpreter(&mut interp);
+        let mut by_out: std::collections::HashMap<String, Vec<u32>> =
+            std::collections::HashMap::new();
+        for v in &variants {
+            if !matches!(v.health, veldt::Health::Healthy) { continue; }
+            let out = match interp.call_function(name, Some(v.id), args.clone()) {
+                Ok(r) => serde_json::to_string(&r).unwrap_or_default(),
+                Err(e) => format!("ERR:{}", e),
+            };
+            by_out.entry(out).or_default().push(v.id);
+        }
+        if by_out.len() > 1 {
+            divergences += 1;
+            println!("  case {} args {:?}:", case,
+                args.iter().map(|a| format!("{:?}", a)).collect::<Vec<_>>().join(","));
+            for (out, ids) in &by_out {
+                println!("    {} -> #{}", out, ids.iter().map(|i| i.to_string())
+                    .collect::<Vec<_>>().join(", #"));
+            }
+        }
+    }
+    println!("{} boundary cases, {} divergent", cases, divergences);
 }
 
 fn test_family(name: &str) {
