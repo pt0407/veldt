@@ -319,6 +319,9 @@ pub fn respond(task: &str, editor_source: &str, veldt: &mut Veldt) -> AgentRespo
     if has(&["dead code", "deadcode", "unreachable", "stripped"]) {
         return dead_intent(veldt);
     }
+    if has(&["best", "winner", "winning", "strongest", "fittest", "leaderboard", "top variant"]) {
+        return best_intent(&words, veldt);
+    }
     if has(&["obituar", "why did", "why'd"]) || hasw(&["deaths", "died", "dead"]) {
         return obituary_intent(&words, veldt);
     }
@@ -1365,6 +1368,37 @@ fn dead_intent(veldt: &Veldt) -> AgentResponse {
     let mut text = format!("{} dead-code-removal variants:\n", rows.len());
     for (n, e) in rows.iter().take(8) {
         text.push_str(&format!("  {}#{} — fit {:.2} ({})\n", n, e.id, e.fitness, e.origin));
+    }
+    plain(&text)
+}
+
+/// Best — "who's winning" / "leaderboard" — fitness ranking.
+fn best_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
+    if let Some(name) = find_lineage(words, veldt) {
+        let vs = match veldt.functions.get(&name) {
+            Some(v) => v,
+            None => return plain(&format!("No lineage called '{}'.", name)),
+        };
+        let mut sorted: Vec<&FunctionEntry> = vs.iter().collect();
+        sorted.sort_by(|a, b| b.fitness.partial_cmp(&a.fitness)
+            .unwrap_or(std::cmp::Ordering::Equal));
+        let mut text = format!("{} — fitness leaderboard\n", name);
+        for e in sorted.iter().take(3) {
+            text.push_str(&format!("  #{} — {:.2} ({})\n", e.id, e.fitness, e.origin));
+        }
+        return plain(&text);
+    }
+    // global — peak variant per family
+    let mut rows: Vec<(&String, &FunctionEntry)> = veldt.functions.iter()
+        .filter_map(|(n, vs)| vs.iter()
+            .max_by(|a, b| a.fitness.partial_cmp(&b.fitness)
+                .unwrap_or(std::cmp::Ordering::Equal)).map(|e| (n, e)))
+        .collect();
+    rows.sort_by(|a, b| b.1.fitness.partial_cmp(&a.1.fitness)
+        .unwrap_or(std::cmp::Ordering::Equal));
+    let mut text = String::from("Garden leaderboard (peak per family):\n");
+    for (n, e) in rows.iter().take(8) {
+        text.push_str(&format!("  {}#{} — {:.2}\n", n, e.id, e.fitness));
     }
     plain(&text)
 }
