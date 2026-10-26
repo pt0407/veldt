@@ -74,6 +74,7 @@ pub async fn start_server(port: u16) {
         .route("/api/pressure", get(pressure))
         .route("/api/builtin_usage", get(builtin_usage))
         .route("/api/champions", get(champions))
+        .route("/api/summary", get(summary))
         .route("/api/run", post(run_program))
         .route("/api/evolve", post(evolve))
         .route("/api/clear", post(clear_veldt))
@@ -1194,6 +1195,43 @@ async fn champions() -> Json<serde_json::Value> {
             })))
         .collect();
     Json(serde_json::json!({"champions": champs}))
+}
+
+async fn summary() -> Json<serde_json::Value> {
+    let mut veldt = veldt::Veldt::new();
+    if veldt.load().is_err() {
+        return Json(serde_json::json!({"error": "garden load failed"}));
+    }
+    let total: usize = veldt.functions.values().map(|vs| vs.len()).sum();
+    let (mut h, mut s, mut d) = (0usize, 0usize, 0usize);
+    let (mut seed, mut estab, mut canon) = (0usize, 0usize, 0usize);
+    for vs in veldt.functions.values() {
+        for e in vs {
+            match e.health {
+                crate::veldt::Health::Healthy => h += 1,
+                crate::veldt::Health::Sick(_) => s += 1,
+                crate::veldt::Health::Dying => d += 1,
+            }
+            match e.trust {
+                crate::veldt::Trust::Seedling => seed += 1,
+                crate::veldt::Trust::Established => estab += 1,
+                crate::veldt::Trust::Canonical => canon += 1,
+            }
+        }
+    }
+    let mut fam: Vec<(&String, f64)> = veldt.functions.iter()
+        .map(|(n, vs)| (n, vs.iter().map(|e| e.fitness)
+            .fold(f64::NEG_INFINITY, f64::max))).collect();
+    fam.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    Json(serde_json::json!({
+        "lineages": veldt.functions.len(), "variants": total,
+        "healthy": h, "sick": s, "dying": d,
+        "seedling": seed, "established": estab, "canonical": canon,
+        "probes": veldt.probes.values().map(|v| v.len()).sum::<usize>(),
+        "deaths": veldt.obituaries.len(), "runs": veldt.run_count,
+        "top_families": fam.iter().take(5).map(|(n, f)| serde_json::json!({"name": n, "peak": f})).collect::<Vec<_>>(),
+        "fitness_trend": veldt.fitness_history,
+    }))
 }
 
 // --- IDE HTML ---
