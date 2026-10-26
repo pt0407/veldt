@@ -3638,6 +3638,12 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                         }
                     }
                 }
+                // else arm that just exits — the match adds no handling
+                if let Some(e) = els {
+                    if e.len() == 1 && matches!(e[0], Stmt::Return(_) | Stmt::Break | Stmt::Continue) {
+                        out.push("match else just exits — the match adds no handling".into());
+                    }
+                }
                 for (_, body) in arms {
                     let mut inner = outer.clone();
                     for (_, n) in &bound { inner.insert((*n).clone()); }
