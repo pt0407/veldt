@@ -2144,6 +2144,16 @@ fn print_stats(veldt: &veldt::Veldt) {
                         println!("    {:<20} {} variants", src, count);
                     }
                 }
+                // trust breakdown — the family's trust distribution
+                let seedling = vs.iter().filter(|e| matches!(e.trust, veldt::Trust::Seedling)).count();
+                let estab = vs.iter().filter(|e| matches!(e.trust, veldt::Trust::Established)).count();
+                let canon = vs.iter().filter(|e| matches!(e.trust, veldt::Trust::Canonical)).count();
+                println!("  trust: {} seedling → {} established → {} canonical", seedling, estab, canon);
+                // health breakdown — the family's health distribution
+                let healthy_n = vs.iter().filter(|e| matches!(e.health, Health::Healthy)).count();
+                let sick_n = vs.iter().filter(|e| matches!(e.health, Health::Sick(_))).count();
+                let dying_n = vs.iter().filter(|e| matches!(e.health, Health::Dying)).count();
+                println!("  health: {} healthy · {} sick · {} dying", healthy_n, sick_n, dying_n);
             }
         }
         if veldt.fitness_history.len() >= 2 {
