@@ -1,6 +1,7 @@
 // Veldt CLI — main entry point
 
 mod jit;
+#[cfg(feature = "smt")]
 mod smt;
 mod agent;
 mod ast;
@@ -3984,6 +3985,29 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                     if items.is_empty() { out.push("for over an empty list — dead loop".into()); }
                     if items.len() == 1 { out.push("for over a single-element list — one iteration".into()); }
                 }
+                // for over a var bound to an empty/single list — dead or trivial
+                // (only if nothing grew it between binding and the loop)
+                if let Expr::Var(v) = iter {
+                    for (bi, s) in stmts.iter().enumerate().take(i).rev() {
+                        match s {
+                            Stmt::Let(n, e) | Stmt::Assign(n, e) if n == v => {
+                                let grew = stmts.iter().skip(bi + 1).take(i - bi - 1)
+                                    .any(|s| stmt_grows(s, v));
+                                if !grew {
+                                    if let Expr::List(items) = e {
+                                        if items.is_empty() {
+                                            out.push(format!("for over {} — bound to an empty list, iterates zero times", v));
+                                        } else if items.len() == 1 {
+                                            out.push(format!("for over {} — bound to a single-element list", v));
+                                        }
+                                    }
+                                }
+                                break;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
                 if let Expr::Call(f, _, args) = iter {
                     if f == "range" && args.len() == 2 {
                         if let (Expr::Int(a), Expr::Int(b)) = (&args[0], &args[1]) {
@@ -5411,61 +5435,69 @@ fn verify_family(name: &str, args: &[String]) {
     // counterexample. Falls back to the bounded sweep when a variant
     // uses ops we don't encode (strings, floats, loops, match).
     if args.iter().any(|a| a == "--exact") {
-        match smt::verify_exact(name) {
-            Ok(Some((id, cex))) => {
-                println!("{}#{}: PROVABLY DIVERGENT — counterexample: {}",
-                         name, id, cex.join(", "));
-                // the counterexample is a real failing input — plant it
-                // as a probe so the divergence is caught on every
-                // future variant, not just reported once
-                let mut veldt = veldt::Veldt::new();
-                if veldt.load().is_err() { return; }
-                let mut interp = interpreter::Interpreter::new();
-                veldt.load_into_interpreter(&mut interp);
-                let arg_vals: Vec<interpreter::Value> = cex.iter()
-                    .filter_map(|s| s.parse::<i64>().ok())
-                    .map(interpreter::Value::Int).collect();
-                if arg_vals.len() == cex.len() {
-                    if let Some(fittest) = veldt.get_fittest_variant(name) {
-                        let f_id = fittest.id;
-                        if let Ok(expected) =
-                            interp.call_function(name, Some(f_id), arg_vals.clone())
-                        {
-                            let pool = veldt.probes.entry(name.to_string())
-                                .or_insert_with(Vec::new);
-                            let arg_strs: Vec<String> = arg_vals.iter()
-                                .map(|v| serde_json::to_string(v).unwrap_or_default())
-                                .collect();
-                            let already = pool.iter().any(|p| p.args == arg_strs);
-                            if !already {
-                                pool.push(veldt::Probe {
-                                    args: arg_strs,
-                                    expected: serde_json::to_string(&expected)
-                                        .unwrap_or_default(),
-                                    niche: format!("smt:cex{}", id),
-                                    born: std::time::SystemTime::now()
-                                        .duration_since(std::time::UNIX_EPOCH)
-                                        .map(|d| d.as_secs()).unwrap_or(0),
-                                    scale: 0,
-                                });
-                                let _ = veldt.save();
-                                println!("  → probe planted: f({}) = {}",
-                                         cex.join(", "),
-                                         serde_json::to_string(&expected)
-                                            .unwrap_or_default());
+        #[cfg(feature = "smt")]
+        {
+            match smt::verify_exact(name) {
+                Ok(Some((id, cex))) => {
+                    println!("{}#{}: PROVABLY DIVERGENT — counterexample: {}",
+                             name, id, cex.join(", "));
+                    // the counterexample is a real failing input — plant it
+                    // as a probe so the divergence is caught on every
+                    // future variant, not just reported once
+                    let mut veldt = veldt::Veldt::new();
+                    if veldt.load().is_err() { return; }
+                    let mut interp = interpreter::Interpreter::new();
+                    veldt.load_into_interpreter(&mut interp);
+                    let arg_vals: Vec<interpreter::Value> = cex.iter()
+                        .filter_map(|s| s.parse::<i64>().ok())
+                        .map(interpreter::Value::Int).collect();
+                    if arg_vals.len() == cex.len() {
+                        if let Some(fittest) = veldt.get_fittest_variant(name) {
+                            let f_id = fittest.id;
+                            if let Ok(expected) =
+                                interp.call_function(name, Some(f_id), arg_vals.clone())
+                            {
+                                let pool = veldt.probes.entry(name.to_string())
+                                    .or_insert_with(Vec::new);
+                                let arg_strs: Vec<String> = arg_vals.iter()
+                                    .map(|v| serde_json::to_string(v).unwrap_or_default())
+                                    .collect();
+                                let already = pool.iter().any(|p| p.args == arg_strs);
+                                if !already {
+                                    pool.push(veldt::Probe {
+                                        args: arg_strs,
+                                        expected: serde_json::to_string(&expected)
+                                            .unwrap_or_default(),
+                                        niche: format!("smt:cex{}", id),
+                                        born: std::time::SystemTime::now()
+                                            .duration_since(std::time::UNIX_EPOCH)
+                                            .map(|d| d.as_secs()).unwrap_or(0),
+                                        scale: 0,
+                                    });
+                                    let _ = veldt.save();
+                                    println!("  → probe planted: f({}) = {}",
+                                             cex.join(", "),
+                                             serde_json::to_string(&expected)
+                                                .unwrap_or_default());
+                                }
                             }
                         }
                     }
                 }
+                Ok(None) => {
+                    println!("{}: PROVABLY EQUIVALENT — all variants agree", name);
+                }
+                Err(why) => {
+                    println!("{}: bails to bounded ({})", name, why);
+                }
             }
-            Ok(None) => {
-                println!("{}: PROVABLY EQUIVALENT — all variants agree", name);
-            }
-            Err(why) => {
-                println!("{}: bails to bounded ({})", name, why);
-            }
+            return;
         }
-        return;
+        #[cfg(not(feature = "smt"))]
+        {
+            eprintln!("{}: --exact requires the smt feature (cargo build --features smt — needs a C++ toolchain + cmake for bundled z3)", name);
+            return;
+        }
     }
     let bound: i64 = args.iter().position(|a| a == "--domain")
         .and_then(|i| args.get(i + 1))
