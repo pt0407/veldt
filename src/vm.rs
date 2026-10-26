@@ -1038,6 +1038,27 @@ impl Vm {
                             .max_by(|a, b| a.fitness.partial_cmp(&b.fitness)
                                 .unwrap_or(std::cmp::Ordering::Equal))
                             .unwrap();
+                        // tier-2: call_best is the hot dispatch —
+                        // compile + jit_invoke like a normal Call
+                        chosen.calls.set(chosen.calls.get() + 1);
+                        if chosen.calls.get() >= 64 && !chosen.jit_tried.get() {
+                            chosen.jit_tried.set(true);
+                            if self.jit_engine.is_none() {
+                                self.jit_engine = crate::jit::JitEngine::new();
+                            }
+                            if let Some(e) = self.jit_engine.as_mut() {
+                                *chosen.jit.borrow_mut() =
+                                    e.compile_fn(&fname, &self.fns);
+                            }
+                        }
+                        let spec = chosen.jit.borrow().as_ref()
+                            .map(|j| (j.code_ptr, j.mode, chosen.code.clone()));
+                        if let Some((p, m, code)) = spec {
+                            let jargs = args[1..].to_vec();
+                            let v = self.jit_invoke(p, m, &code, jargs)?;
+                            stack.push(v);
+                            return Ok(());
+                        }
                         let fargs: Vec<Option<Value>> =
                             args[1..].iter().cloned().map(Some).collect();
                         frames.push(Frame {
