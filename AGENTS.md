@@ -1158,3 +1158,8 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   birth-gate — variants with defect-class warnings refused
   (verified on score#159). The loop is closed: lint blocks
   bugs at birth AND at promotion.
+- [Devin] heal mechanical repair: repair_dead_tail truncates
+  dead code after returns (recursive) + trailing bare return —
+  the shape score's 27 unreachable warnings carry. Runs before
+  healer-merge in heal(), unit-tested. The diagnose->repair
+  half of the lint loop: birth-gate + adopt-gate + heal-fix.
