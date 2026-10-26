@@ -597,3 +597,9 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   gets a proportional fitness bar per family; garden + lineage
   get the same bar per variant (scaled to the family's peak).
   Every view now shows the shape, not just the numbers.
+- [Devin] Visualization + lint tail (HEAD post-ac078fc):
+  /api/family emits *_dist sorted vecs; IDE Σ view renders
+  them as mini-sparks; stats --top/garden/lineage rows get
+  proportional fitness bars. check --strict: while cond var
+  never assigned inside body (stmt_assigns walks nested
+  bodies), match one-arm + else → if/else.
