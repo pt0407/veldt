@@ -1658,6 +1658,15 @@ fn main() {
                 veldt.functions = filtered;
                 println!("[stats --filter {}]", expr);
             }
+            // --family <name> — scope the stats to one family (the drill-down)
+            if let Some(fam) = args.iter().position(|a| a == "--family")
+                .and_then(|p| args.get(p + 1)) {
+                let mut scoped = std::collections::HashMap::new();
+                if let Some(vs) = veldt.functions.get(fam) {
+                    scoped.insert(fam.clone(), vs.clone());
+                }
+                veldt.functions = scoped;
+            }
             if args.iter().any(|a| a == "--json") {
                 let mut total = 0usize;
                 let (mut healthy, mut sick, mut dying) = (0usize, 0usize, 0usize);
