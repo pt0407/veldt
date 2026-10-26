@@ -484,7 +484,27 @@ fn main() {
             }
         }
         "absorb" => {
-            absorb_traces(args.get(2).map(|s| s.as_str()));
+            if args.get(2).map(|s| s.as_str()) == Some("--filter") {
+                // --filter <expr> — absorb traces for families with matching variants
+                let expr = args.get(3).map(|s| s.as_str()).unwrap_or("");
+                let mut veldt = veldt::Veldt::new();
+                if let Err(e) = veldt.load() { eprintln!("Error: {}", e); process::exit(1); }
+                let or_groups: Vec<Vec<&str>> = expr.split("||")
+                    .map(|g| g.split("&&").map(|s| s.trim()).collect())
+                    .collect();
+                let names: Vec<String> = veldt.functions.iter()
+                    .filter(|(_, vs)| vs.iter().any(|e|
+                        or_groups.iter().any(|g|
+                            g.iter().all(|c| veldt::variant_matches(e, c)))))
+                    .map(|(n, _)| n.clone())
+                    .collect();
+                println!("[absorb --filter {} — {} families]", expr, names.len());
+                for name in &names {
+                    absorb_traces(Some(name));
+                }
+            } else {
+                absorb_traces(args.get(2).map(|s| s.as_str()));
+            }
         }
         "find" => {
             if args.len() < 3 {
