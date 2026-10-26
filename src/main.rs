@@ -3528,6 +3528,15 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                         }
                     }
                 }
+                // unbound Var pattern (not _) — evaluates the var, fails to match
+                for (p, _) in arms.iter() {
+                    if let Expr::Var(v) = p {
+                        if v != "_" && !bound.iter().any(|(_, b)| *b == v)
+                            && !outer.contains(v.as_str()) {
+                            out.push(format!("match pattern {} is unbound — never matches", v));
+                        }
+                    }
+                }
                 for (_, body) in arms {
                     let mut inner = outer.clone();
                     for (_, n) in &bound { inner.insert((*n).clone()); }
