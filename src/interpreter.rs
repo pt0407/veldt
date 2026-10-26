@@ -22,6 +22,11 @@ pub enum Value {
     Null,
 }
 
+/// Read the char tile at (x, y) from a canvas's cells list.
+fn r_tile(rows: &im::Vector<Value>, x: usize, y: usize) -> Option<Value> {
+    rows.get(y).and_then(|r| if let Value::List(r) = r { r.get(x).cloned() } else { None })
+}
+
 /// Extract a numeric arg (Int or Float) as f64 — used by game-math builtins.
 fn num_at(args: &[Value], i: usize) -> Result<f64, String> {
     match args.get(i) {
@@ -2936,6 +2941,87 @@ impl Interpreter {
                     ])
                 ).collect();
                 Ok(Some(Value::List(out.into_iter().collect())))
+            }
+            "wfc" => {
+                // wfc(sample_canvas, w, h) — wave-function collapse lite:
+                // learn 4-dir adjacency rules from a sample, generate a new
+                // w×h canvas by lowest-entropy collapse.
+                let (sample, w, h) = match (args.get(0), args.get(1), args.get(2)) {
+                    (Some(Value::Dict(d)), Some(Value::Int(w)), Some(Value::Int(h)))
+                        => (d.clone(), *w as usize, *h as usize),
+                    _ => return Err("wfc(sample, w, h) expects a canvas + 2 ints".into()),
+                };
+                let Some(Value::List(srows)) = sample.get("cells") else { return Err("wfc: sample needs cells".into()) };
+                let (sw, sh) = (srows.get(0).and_then(|r| if let Value::List(r) = r { Some(r.len()) } else { None }).unwrap_or(0), srows.len());
+                // learn adjacency: allowed[dir][tile] -> set of allowed neighbors
+                let mut allowed: std::collections::HashMap<(usize, String), std::collections::HashSet<String>> =
+                    std::collections::HashMap::new();
+                for sy in 0..sh {
+                    for sx in 0..sw {
+                        if let (Value::List(r), Some(Value::Str(tile))) = (&srows[sy], r_tile(&srows, sx, sy)) {
+                            let tile = tile.to_string();
+                            for (dir, (dx, dy)) in [(0usize, (0i64, -1i64)), (1, (0, 1)), (2, (-1, 0)), (3, (1, 0))] {
+                                let (nx, ny) = (sx as i64 + dx, sy as i64 + dy);
+                                if nx < 0 || ny < 0 || nx >= sw as i64 || ny >= sh as i64 { continue; }
+                                if let Some(Value::Str(n_tile)) = r_tile(&srows, nx as usize, ny as usize) {
+                                    allowed.entry((dir, tile.clone()))
+                                        .or_default()
+                                        .insert(n_tile.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+                // wave[x][y] = set of possible tiles
+                let all_tiles: Vec<String> = allowed.values().flatten().cloned()
+                    .chain(allowed.keys().map(|(_, t)| t.clone()))
+                    .collect::<std::collections::HashSet<_>>().into_iter().collect();
+                if all_tiles.is_empty() { return Err("wfc: no tiles learned".into()) }
+                let mut wave: Vec<Vec<std::collections::HashSet<String>>> =
+                    vec![vec![all_tiles.iter().cloned().collect(); w]; h];
+                let mut done: Vec<Vec<bool>> = vec![vec![false; w]; h];
+                let mut rng = self.rng_state;
+                let mut next = || {
+                    rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17;
+                    (rng % 1_000_000) as f64 / 1_000_000.0
+                };
+                for _ in 0..w * h {
+                    // pick lowest-entropy un-done cell
+                    let mut best: Option<(usize, usize, usize)> = None;
+                    for y in 0..h { for x in 0..w {
+                        if !done[y][x] && wave[y][x].len() > 0 {
+                            let e = wave[y][x].len();
+                            if best.map(|b| e < b.2).unwrap_or(true) { best = Some((x, y, e)); }
+                        }
+                    }}
+                    let Some((cx, cy, _)) = best else { break };
+                    // collapse to a random option
+                    let opts: Vec<String> = wave[cy][cx].iter().cloned().collect();
+                    let pick = opts[(next() * opts.len() as f64) as usize].clone();
+                    wave[cy][cx] = [pick.clone()].into_iter().collect();
+                    done[cy][cx] = true;
+                    // propagate: neighbors must be in allowed[dir][pick]
+                    for (dir, (dx, dy)) in [(0usize, (0i64, -1i64)), (1, (0, 1)), (2, (-1, 0)), (3, (1, 0))] {
+                        let (nx, ny) = (cx as i64 + dx, cy as i64 + dy);
+                        if nx < 0 || ny < 0 || nx >= w as i64 || ny >= h as i64 { continue; }
+                        let (nx, ny) = (nx as usize, ny as usize);
+                        if let Some(allowed_set) = allowed.get(&(dir, pick.clone())) {
+                            wave[ny][nx].retain(|t| allowed_set.contains(t));
+                        }
+                    }
+                }
+                let cells: im::Vector<Value> = wave.iter().map(|row|
+                    Value::List(row.iter().map(|s| {
+                        let first = s.iter().next().cloned().unwrap_or_else(|| " ".to_string());
+                        Value::Str(first.into())
+                    }).collect())
+                ).collect();
+                self.rng_state = rng;
+                let mut d = im::HashMap::new();
+                d.insert("w".to_string(), Value::Int(w as i64));
+                d.insert("h".to_string(), Value::Int(h as i64));
+                d.insert("cells".to_string(), Value::List(cells));
+                Ok(Some(Value::Dict(d)))
             }
             "dist_stats" => {
                 // dist_stats(fn, trials) — mean/stddev/min/max over n samples
