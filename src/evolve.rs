@@ -11,6 +11,9 @@ pub struct Evolver {
     /// Falls back to mechanical mutation when unconfigured or when
     /// the model returns unparseable code.
     pub llm: bool,
+    /// Variant-level filter expression — only breed from variants
+    /// matching every &&-clause (the garden --filter DSL).
+    pub filter: Option<String>,
 }
 
 impl Evolver {
@@ -19,7 +22,7 @@ impl Evolver {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_nanos() as u64)
             .unwrap_or(42);
-        Evolver { rng_seed: seed, llm: false }
+        Evolver { rng_seed: seed, llm: false, filter: None }
     }
 
     /// Deterministic evolution: same seed + same garden = same outcomes.
@@ -62,11 +65,15 @@ impl Evolver {
             let mut spent = 0;
 
             // Collect candidates: healthy functions with tests, sorted by usage (high usage = important)
+            let clauses: Vec<String> = self.filter.as_ref()
+                .map(|f| f.split("&&").map(|s| s.trim().to_string()).collect())
+                .unwrap_or_default();
             let candidates: Vec<(String, u32)> = veldt.functions.iter()
                 .filter(|(name, _)| only.map(|n| n == name.as_str()).unwrap_or(true))
                 .flat_map(|(name, variants)| {
                     variants.iter()
-                        .filter(|e| matches!(e.health, Health::Healthy) && !e.tests.is_empty())
+                        .filter(|e| matches!(e.health, Health::Healthy) && !e.tests.is_empty()
+                            && clauses.iter().all(|c| crate::veldt::variant_matches(e, c)))
                         .map(|e| (name.clone(), e.id))
                         .collect::<Vec<_>>()
                 })

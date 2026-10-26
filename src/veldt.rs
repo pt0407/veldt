@@ -762,6 +762,67 @@ pub(crate) fn deserialize_value(s: &str) -> Result<Value, String> {
     serde_json::from_str(s).map_err(|e| e.to_string())
 }
 
+/// Evaluate a `field op value` clause against a variant — the
+/// garden --filter / evolve --filter query language.
+/// fields: fitness age usage size args lifespan last_used niches
+///         health trust origin calls
+/// ops: > < >= <= == != ~ (contains)
+pub fn variant_matches(e: &FunctionEntry, clause: &str) -> bool {
+    let parts: Vec<&str> = clause.split_whitespace().collect();
+    if parts.len() < 3 { return false; }
+    let (field, op, val) = (parts[0], parts[1], parts[2..].join(" "));
+
+    let num_val = val.parse::<f64>().ok();
+    let field_num: Option<f64> = match field {
+        "fitness" => Some(e.fitness),
+        "age" => Some(e.age as f64),
+        "usage" => Some(e.usage_count as f64),
+        "size" => Some(crate::fmt::format_program(&e.body).len() as f64),
+        "args" => Some(e.params.len() as f64),
+        "lifespan" => Some(e.lifespan),
+        "last_used" => Some(e.last_used as f64),
+        "niches" => Some(e.niche_scores.len() as f64),
+        _ => None,
+    };
+    if let (Some(fv), Some(v)) = (field_num, num_val) {
+        return match op {
+            ">" => fv > v, "<" => fv < v,
+            ">=" => fv >= v, "<=" => fv <= v,
+            "==" => (fv - v).abs() < f64::EPSILON,
+            "!=" => (fv - v).abs() >= f64::EPSILON,
+            _ => false,
+        };
+    }
+
+    match field {
+        "health" => {
+            let h = match &e.health {
+                Health::Healthy => "healthy",
+                Health::Sick(_) => "sick",
+                Health::Dying => "dying",
+            };
+            match op { "==" => h == val, "!=" => h != val, _ => false }
+        }
+        "trust" => {
+            let t = match e.trust {
+                Trust::Seedling => "seedling",
+                Trust::Established => "established",
+                Trust::Canonical => "canonical",
+                _ => "unknown",
+            };
+            match op { "==" => t == val, "!=" => t != val, _ => false }
+        }
+        "origin" => {
+            match op { "~" => e.origin.contains(&val), "==" => e.origin == val, _ => false }
+        }
+        "calls" => {
+            let src = crate::fmt::format_program(&e.body);
+            match op { "~" => src.contains(&val), _ => false }
+        }
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

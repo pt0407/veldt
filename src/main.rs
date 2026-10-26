@@ -584,7 +584,7 @@ fn main() {
                 for (name, vs) in &veldt.functions {
                     let keep: Vec<_> = vs.iter()
                         .filter(|e| or_groups.iter().any(|g|
-                            g.iter().all(|c| variant_matches(e, c))))
+                            g.iter().all(|c| veldt::variant_matches(e, c))))
                         .cloned().collect();
                     if !keep.is_empty() { filtered.functions.insert(name.clone(), keep); }
                 }
@@ -3067,6 +3067,8 @@ fn main() {
             if let Some(f) = fam_scope { eprintln!("[EVOLVE] scoped to family: {}", f); }
             let mut evolver = evolve::Evolver::new();
             evolver.llm = args.iter().any(|a| a == "--llm");
+            evolver.filter = args.iter().position(|a| a == "--filter")
+                .and_then(|p| args.get(p + 1)).cloned();
             if let Some(pos) = args.iter().position(|a| a == "--seed") {
                 if let Some(n) = args.get(pos + 1).and_then(|s| s.parse::<u64>().ok()) {
                     evolver.set_seed(n);
@@ -5183,67 +5185,6 @@ pub fn run_program_capture(path: &str) -> String {
     match std::process::Command::new(exe).arg("run").arg(path).output() {
         Ok(o) => String::from_utf8_lossy(&o.stdout).to_string(),
         Err(e) => format!("Error running {}: {}", path, e),
-    }
-}
-
-fn variant_matches(e: &veldt::FunctionEntry, clause: &str) -> bool {
-    // clause: `field op value` — field is a variant property,
-    // op is > < >= <= == != or ~ (contains), value is the comparand
-    let parts: Vec<&str> = clause.split_whitespace().collect();
-    if parts.len() < 3 { return false; }
-    let (field, op, val) = (parts[0], parts[1], parts[2..].join(" "));
-
-    let num_val = val.parse::<f64>().ok();
-    let num_field = |v: f64| -> Option<f64> { Some(v) };
-
-    let field_num: Option<f64> = match field {
-        "fitness" => num_field(e.fitness),
-        "age" => num_field(e.age as f64),
-        "usage" => num_field(e.usage_count as f64),
-        "size" => num_field(crate::fmt::format_program(&e.body).len() as f64),
-        "args" => num_field(e.params.len() as f64),
-        "lifespan" => num_field(e.lifespan),
-        "last_used" => num_field(e.last_used as f64),
-        "niches" => num_field(e.niche_scores.len() as f64),
-        _ => None,
-    };
-    if let (Some(fv), Some(v)) = (field_num, num_val) {
-        return match op {
-            ">" => fv > v, "<" => fv < v,
-            ">=" => fv >= v, "<=" => fv <= v,
-            "==" => (fv - v).abs() < f64::EPSILON,
-            "!=" => (fv - v).abs() >= f64::EPSILON,
-            _ => false,
-        };
-    }
-
-    // string fields
-    match field {
-        "health" => {
-            let h = match &e.health {
-                veldt::Health::Healthy => "healthy",
-                veldt::Health::Sick(_) => "sick",
-                veldt::Health::Dying => "dying",
-            };
-            match op { "==" => h == val, "!=" => h != val, _ => false }
-        }
-        "trust" => {
-            let t = match e.trust {
-                veldt::Trust::Seedling => "seedling",
-                veldt::Trust::Established => "established",
-                veldt::Trust::Canonical => "canonical",
-                _ => "unknown",
-            };
-            match op { "==" => t == val, "!=" => t != val, _ => false }
-        }
-        "origin" => {
-            match op { "~" => e.origin.contains(&val), "==" => e.origin == val, _ => false }
-        }
-        "calls" => {
-            let src = crate::fmt::format_program(&e.body);
-            match op { "~" => src.contains(&val), _ => false }
-        }
-        _ => false,
     }
 }
 
