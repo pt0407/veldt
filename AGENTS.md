@@ -483,3 +483,12 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   diff, absorb, test, verify, adopt, tournament, prune, check.
   The IDE can drive the whole garden through JSON, no text
   parsing anywhere on the read/write surface.
+- [Devin] fn_calls perf batch (HEAD=c11811a): `FunctionDef.params`
+  → `Rc<Vec<Param>>` (was cloning every param's String+Type per
+  call — part of the ~15µs/call wall in BASELINE.md) +
+  `HashMap::with_capacity(params.len()+4)` on the call env (skips
+  growth rehash). REMAINING on that wall: `param.name.clone()`
+  String alloc per param per call — needs interned names or
+  `Rc<str>` map keys (deeper refactor across ast/veldt/interp).
+  Bench numbers are noisy on this box (570-814ms same build) —
+  treat single-run timings as directional only.
