@@ -3369,6 +3369,14 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                         out.push(format!("let {} = null and never assigned — placeholder left null", name));
                     }
                 }
+                // let bound to a false/0 sentinel and never assigned — a flag/counter that never updates
+                if matches!(e, Expr::Bool(false) | Expr::Int(0)) {
+                    let assigned = stmts.iter().skip(i + 1)
+                        .any(|s| stmt_assigns(s, name));
+                    if !assigned && stmts.iter().skip(i + 1).any(|s| stmt_mentions(s, name)) {
+                        out.push(format!("let {} = <sentinel> never assigned — the flag/counter never updates", name));
+                    }
+                }
             }
             Stmt::Assign(name, e) => {
                 if !bound.iter().any(|(_, b)| *b == name) && !outer.contains(name.as_str()) {
