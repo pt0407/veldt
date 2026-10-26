@@ -897,10 +897,19 @@ fn start_repl() {
                     }
                     ":garden" => { let _ = veldt.load(); veldt.print_lineage(
                         veldt.functions.keys().next().map(|s| s.as_str()).unwrap_or("(none)")); }
+                    ":stats" => { let _ = veldt.load(); print_stats(&veldt); }
+                    ":absorb" => { let _ = veldt.load();
+                        veldt.merge_traces(&interp.traces);
+                        absorb_traces(None); }
+                    _ if trimmed.starts_with(":fuzz ") => {
+                        let _ = veldt.load(); fuzz_family(trimmed[6..].trim());
+                    }
                     ":help" | _ => {
                         println!(":help  this help"); println!(":quit  exit");
                         println!(":load <file>  run a file in this session");
-                        println!(":garden  show first lineage"); println!("exprs print their value");
+                        println!(":garden  show first lineage · :stats census");
+                        println!(":fuzz <name> boundary sweep · :absorb traces->probes");
+                        println!("exprs print their value");
                     }
                 }
                 continue;
