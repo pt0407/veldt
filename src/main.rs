@@ -1094,6 +1094,20 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
             }
         }
     }
+    // dead functions — `fn name`/`grow fn name` defined but never called
+    let mut defs: Vec<&String> = Vec::new();
+    for s in stmts {
+        match s {
+            Stmt::FnDef(n, _, _) | Stmt::Grow(GrowItem::Fn(n, _, _, _)) => defs.push(n),
+            _ => {}
+        }
+    }
+    for name in defs {
+        let called = stmts.iter().any(|s| stmt_calls(s, name));
+        if !called {
+            out.push(format!("fn {} defined but never called", name));
+        }
+    }
 }
 
 /// Is this expr a compile-time literal? Returns a label for the warning.
@@ -1106,6 +1120,46 @@ fn const_bool(e: &ast::Expr) -> Option<&'static str> {
         ast::Expr::UnaryOp(ast::UnaryOp::Not, inner) if const_bool(inner).is_some() =>
             Some("!const"),
         _ => None,
+    }
+}
+
+/// Does this statement (or its children) call a function named `name`?
+fn stmt_calls(s: &ast::Stmt, name: &str) -> bool {
+    use ast::*;
+    match s {
+        Stmt::Let(_, e) | Stmt::ExprStmt(e) | Stmt::Print(e) | Stmt::Assign(_, e) => expr_calls(e, name),
+        Stmt::If(c, a, b) => expr_calls(c, name) || a.iter().any(|x| stmt_calls(x, name))
+            || b.as_ref().map(|x| x.iter().any(|y| stmt_calls(y, name))).unwrap_or(false),
+        Stmt::While(c, body) | Stmt::For(_, c, body) => expr_calls(c, name) || body.iter().any(|x| stmt_calls(x, name)),
+        Stmt::Return(Some(e)) => expr_calls(e, name),
+        Stmt::Grow(GrowItem::Fn(_, _, body, _)) | Stmt::FnDef(_, _, body) => body.iter().any(|x| stmt_calls(x, name)),
+        Stmt::LetDestructure(_, e) => expr_calls(e, name),
+        Stmt::Try(a, _, b) => a.iter().any(|x| stmt_calls(x, name)) || b.iter().any(|x| stmt_calls(x, name)),
+        Stmt::Match(c, arms, els) => expr_calls(c, name)
+            || arms.iter().any(|(p, b)| expr_calls(p, name) || b.iter().any(|x| stmt_calls(x, name)))
+            || els.as_ref().map(|x| x.iter().any(|y| stmt_calls(y, name))).unwrap_or(false),
+        _ => false,
+    }
+}
+
+fn expr_calls(e: &ast::Expr, name: &str) -> bool {
+    use ast::*;
+    match e {
+        Expr::Call(n, _, args) => n == name || args.iter().any(|a| expr_calls(a, name)),
+        Expr::MethodCall(a, _, args) | Expr::SafeGet(a, _, Some(args)) => expr_calls(a, name) || args.iter().any(|x| expr_calls(x, name)),
+        Expr::BinOp(a, _, b) => expr_calls(a, name) || expr_calls(b, name),
+        Expr::UnaryOp(_, a) => expr_calls(a, name),
+        Expr::Index(a, i) => expr_calls(a, name) || expr_calls(i, name),
+        Expr::Slice(o, lo, hi) => expr_calls(o, name)
+            || lo.as_ref().map(|x| expr_calls(x, name)).unwrap_or(false)
+            || hi.as_ref().map(|x| expr_calls(x, name)).unwrap_or(false),
+        Expr::List(items) | Expr::Interp(items) => items.iter().any(|i| expr_calls(i, name)),
+        Expr::StructLit(_, fs) => fs.iter().any(|(_, v)| expr_calls(v, name)),
+        Expr::Lambda(_, body) => body.iter().any(|s| stmt_calls(s, name)),
+        Expr::ListComp(v, _, iter, cond) => expr_calls(v, name) || expr_calls(iter, name)
+            || cond.as_ref().map(|c| expr_calls(c, name)).unwrap_or(false),
+        Expr::SafeGet(a, _, None) | Expr::FieldAccess(a, _) => expr_calls(a, name),
+        _ => false,
     }
 }
 
