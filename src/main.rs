@@ -3505,8 +3505,8 @@ fn print_stats(veldt: &veldt::Veldt) {
     let mut sick = 0usize;
     let mut dying = 0usize;
     // (name, peak, count, avg_age, usage, avg_size, probes, deaths, traces,
-    //  immigrants, sick, healthy)
-    let mut best: Vec<(String, f64, usize, f64, u64, f64, usize, usize, usize, usize, usize, usize)> = Vec::new();
+    //  immigrants, sick, healthy, canonical, established, seedling)
+    let mut best: Vec<(String, f64, usize, f64, u64, f64, usize, usize, usize, usize, usize, usize, usize, usize, usize)> = Vec::new();
     for (name, variants) in &veldt.functions {
         let top = variants.iter().map(|e| e.fitness)
             .fold(f64::NEG_INFINITY, f64::max);
@@ -3522,9 +3522,12 @@ fn print_stats(veldt: &veldt::Veldt) {
         let immigrants = variants.iter().filter(|e| e.origin.contains("immigrant")).count();
         let sick_n = variants.iter().filter(|e| matches!(e.health, Health::Sick(_))).count();
         let healthy_n = variants.iter().filter(|e| matches!(e.health, Health::Healthy)).count();
+        let canon_n = variants.iter().filter(|e| matches!(e.trust, veldt::Trust::Canonical)).count();
+        let estab_n = variants.iter().filter(|e| matches!(e.trust, veldt::Trust::Established)).count();
+        let seed_n = variants.iter().filter(|e| matches!(e.trust, veldt::Trust::Seedling)).count();
         best.push((name.clone(), if variants.is_empty() { 0.0 } else { top },
             variants.len(), avg_age, usage, avg_size, probes, deaths, traces,
-            immigrants, sick_n, healthy_n));
+            immigrants, sick_n, healthy_n, canon_n, estab_n, seed_n));
         for e in variants {
             total += 1;
             match e.health {
@@ -3551,6 +3554,9 @@ fn print_stats(veldt: &veldt::Veldt) {
         "immigrants" => best.sort_by(|a, b| b.9.cmp(&a.9)),
         "sick" => best.sort_by(|a, b| b.10.cmp(&a.10)),
         "healthy" => best.sort_by(|a, b| b.11.cmp(&a.11)),
+        "canonical" => best.sort_by(|a, b| b.12.cmp(&a.12)),
+        "established" => best.sort_by(|a, b| b.13.cmp(&a.13)),
+        "seedling" => best.sort_by(|a, b| b.14.cmp(&a.14)),
         _ => best.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)),
     }
     let probe_count: usize = veldt.probes.values().map(|v| v.len()).sum();
