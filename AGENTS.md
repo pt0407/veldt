@@ -1261,3 +1261,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 - [Devin] check --suppress <substr> (repeatable): drop
   warnings containing the substring — works on file/stdin/
   watch/--json. Escape hatch without a rule-ID refactor.
+- [Devin] evolve --tend: self-maintaining cycles — per-cycle
+  heal+repair pass ([TEND] event when work lands). Evolution
+  keeps the garden clean both directions now: lint-gate on
+  births, tend on the existing population.
