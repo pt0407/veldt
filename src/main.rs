@@ -3267,8 +3267,12 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
                     out.push(format!("if on constant {} — dead branch", lit));
                 }
                 if self_cmp(cond) { out.push("condition compares a value to itself".into()); }
+                if bool_cmp(cond) { out.push("condition compares to a bool literal — drop the == true/false".into()); }
+                if let Some(e) = b {
+                    if *a == *e { out.push("if branches are identical — dead conditional".into()); }
+                    lint_block(e, out);
+                }
                 lint_block(a, out);
-                if let Some(e) = b { lint_block(e, out); }
             }
             Stmt::While(cond, body) => {
                 if let Some(lit) = const_bool(cond) {
@@ -3527,6 +3531,28 @@ fn self_cmp(e: &ast::Expr) -> bool {
         }),
         Expr::ListComp(v, _, iter, cond) => self_cmp(v) || self_cmp(iter)
             || cond.as_ref().map(|c| self_cmp(c)).unwrap_or(false),
+        _ => false,
+    }
+}
+
+// condition compares to a bool literal: `x == true` / `x != false`
+fn bool_cmp(e: &ast::Expr) -> bool {
+    use ast::*;
+    match e {
+        Expr::BinOp(l, op, r) => {
+            (matches!(op, BinOp::Eq | BinOp::Neq)
+                && (matches!(**l, Expr::Bool(_)) || matches!(**r, Expr::Bool(_))))
+                || bool_cmp(l) || bool_cmp(r)
+        }
+        Expr::UnaryOp(_, a) => bool_cmp(a),
+        Expr::Call(_, _, args) => args.iter().any(|a| bool_cmp(a)),
+        Expr::Index(a, i) => bool_cmp(a) || bool_cmp(i),
+        Expr::MethodCall(a, _, args) | Expr::SafeGet(a, _, Some(args)) =>
+            bool_cmp(a) || args.iter().any(|x| bool_cmp(x)),
+        Expr::SafeGet(a, _, None) | Expr::FieldAccess(a, _) => bool_cmp(a),
+        Expr::List(items) => items.iter().any(|i| bool_cmp(i)),
+        Expr::Interp(parts) => parts.iter().any(|p| bool_cmp(p)),
+        Expr::StructLit(_, fields) => fields.iter().any(|(_, v)| bool_cmp(v)),
         _ => false,
     }
 }
