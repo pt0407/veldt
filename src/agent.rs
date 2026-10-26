@@ -2100,6 +2100,14 @@ pub fn bench_report(veldt: &Veldt) -> (String, Vec<BenchRow>) {
         lines.push(format!("  {:<16} {:>6}ms  {:<7} trial {:.2}  ({} stage{})",
             tmpl.canonical, ms, tag, trial, stages.len(), if stages.len() == 1 { "" } else { "s" }));
     }
+    // species summary — healthy/sick/failed counts + total time
+    {
+        let total_ms: u128 = rows.iter().map(|r| r.ms).sum();
+        let healthy_n = rows.iter().filter(|r| r.healthy).count();
+        let zero_trial = rows.iter().filter(|r| r.trial <= 0.0).count();
+        lines.push(format!("species: {}/{} healthy · {} zero-trial · {}ms total",
+            healthy_n, rows.len(), zero_trial, total_ms));
+    }
 
     // Intent latency — canned tasks against the now-populated sandbox
     lines.push(String::new());
