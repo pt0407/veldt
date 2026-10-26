@@ -144,6 +144,12 @@ pub fn verify_exact(name: &str)
     -> Result<Option<(u32, Vec<String>)>, String> {
     let mut veldt = veldt::Veldt::new();
     veldt.load().map_err(|e| e.to_string())?;
+    verify_exact_on_veldt(&veldt, name)
+}
+
+/// Census-friendly version — the caller loads the garden once.
+pub fn verify_exact_on_veldt(veldt: &veldt::Veldt, name: &str)
+    -> Result<Option<(u32, Vec<String>)>, String> {
     let variants = veldt.functions.get(name)
         .ok_or_else(|| format!("no family '{}'", name))?;
     if variants.len() < 2 { return Ok(None); }
