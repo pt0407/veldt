@@ -280,6 +280,9 @@ pub fn respond(task: &str, editor_source: &str, veldt: &mut Veldt) -> AgentRespo
     if has(&["history", "what changed", "recent changes", "mutations", "what happened", "latest"]) {
         return history_intent(&words, veldt);
     }
+    if has(&["turnover", "churn", "birth rate", "death rate", "mortality"]) {
+        return turnover_intent(&words, veldt);
+    }
     if has(&["garden", "status", "alive", "what's growing", "what is growing", "what have you", "ecosystem"]) {
         return status_intent(veldt);
     }
@@ -1061,6 +1064,40 @@ fn history_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
     };
     for (_, ev) in events.iter().take(12) {
         text.push_str(&format!("  {}\n", ev));
+    }
+    plain(&text)
+}
+
+/// Turnover — births vs deaths per family ("churn", "mortality").
+fn turnover_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
+    if let Some(name) = find_lineage(words, veldt) {
+        let born = veldt.functions.get(&name).map(|v| v.len()).unwrap_or(0);
+        let died = veldt.obituaries.iter().filter(|o| o.name == name).count();
+        let rate = if born + died > 0 { died as f64 / (born + died) as f64 } else { 0.0 };
+        let mut text = format!("{} — {} alive, {} died (turnover {:.0}%)\n",
+            name, born, died, rate * 100.0);
+        let mut causes: std::collections::HashMap<&str, usize> =
+            std::collections::HashMap::new();
+        for o in veldt.obituaries.iter().filter(|o| o.name == name) {
+            *causes.entry(o.cause_of_death.as_str()).or_insert(0) += 1;
+        }
+        for (c, n) in causes {
+            text.push_str(&format!("  {} — {}\n", c, n));
+        }
+        return plain(&text);
+    }
+    let mut rows: Vec<(&String, usize, usize)> = veldt.functions.iter()
+        .map(|(n, vs)| {
+            let died = veldt.obituaries.iter().filter(|o| o.name == *n).count();
+            (n, vs.len(), died)
+        }).collect();
+    rows.sort_by(|a, b| (b.2 as f64 / (b.1 + b.2).max(1) as f64)
+        .partial_cmp(&(a.2 as f64 / (a.1 + a.2).max(1) as f64))
+        .unwrap_or(std::cmp::Ordering::Equal));
+    let mut text = String::from("Turnover (alive | dead | rate):\n");
+    for (n, alive, dead) in rows.iter().take(8) {
+        let rate = if alive + dead > 0 { *dead as f64 / (alive + dead) as f64 } else { 0.0 };
+        text.push_str(&format!("  {} — {} | {} | {:.0}%\n", n, alive, dead, rate * 100.0));
     }
     plain(&text)
 }
