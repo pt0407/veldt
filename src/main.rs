@@ -1348,6 +1348,26 @@ fn print_stats(veldt: &veldt::Veldt) {
             .map(|(n, a)| format!("{}:{:.0}", n, a)).collect();
         println!("avg age/niche: {}", line.join(" "));
     }
+    // avg code size per niche — per-niche complexity
+    let mut niche_size: std::collections::HashMap<String, (usize, usize)> =
+        std::collections::HashMap::new();
+    for vs in veldt.functions.values() {
+        for e in vs {
+            let sz = crate::fmt::format_program(&e.body).len();
+            for (n, _) in &e.niche_scores {
+                let ent = niche_size.entry(n.clone()).or_default();
+                ent.0 += sz; ent.1 += 1;
+            }
+        }
+    }
+    let mut niche_size_list: Vec<(String, f64)> = niche_size.into_iter()
+        .map(|(n, (s, c))| (n, s as f64 / c.max(1) as f64)).collect();
+    niche_size_list.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    if !niche_size_list.is_empty() {
+        let line: Vec<String> = niche_size_list.iter().take(8)
+            .map(|(n, a)| format!("{}:{:.0}", n, a)).collect();
+        println!("avg size/niche: {}", line.join(" "));
+    }
     // fitness trend — peak per run, is the garden improving?
     if veldt.fitness_history.len() >= 2 {
         let trend: Vec<String> = veldt.fitness_history.iter()
