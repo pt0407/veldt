@@ -49,6 +49,16 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] JIT UPDATE 9 — ENTIRE INSTR SET LOWERS:
+  try/catch (compile-time try_ct stack + veldt_rt_take_err,
+  lexically-matched TryPush/TryPop) and closures
+  (veldt_rt_capture zips argbuf slots with chunk.slot_names —
+  new JitRt field; veldt_rt_callvar → call_closure_pub).
+  garden --jit is now 37/37 = 100% native. Also: all slots
+  null-box-init (unset slots can't dangle). The boxed ABI
+  covers the whole language — remaining perf work is
+  specialization (avoid the helper call for known-int ops),
+  not coverage.
 - [Devin/main-side] JIT UPDATE 8: CallId arm now dispatches JIT too
   (pinned name#N calls stayed bytecode forever — no counter, no
   compile). jit_invoke handles all 3 modes + falls back to bytecode

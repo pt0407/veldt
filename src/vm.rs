@@ -1449,6 +1449,8 @@ impl Vm {
                     vm: self as *mut Vm,
                     consts: code.consts.as_ptr(),
                     names: code.names.as_ptr(),
+                    slot_names: code.slot_names.as_ptr(),
+                    n_slot_names: code.slot_names.len(),
                     arena: Vec::new(), argbuf: Vec::new(),
                     iters: Vec::new(), err: None,
                 };
