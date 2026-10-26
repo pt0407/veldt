@@ -529,6 +529,9 @@ fn main() {
             }
             let dry = args.iter().any(|a| a == "--dry");
             if dry { eprintln!("[EVOLVE] dry run — changes not persisted"); }
+            let fam_scope = args.iter().position(|a| a == "--family")
+                .and_then(|p| args.get(p + 1));
+            if let Some(f) = fam_scope { eprintln!("[EVOLVE] scoped to family: {}", f); }
             let mut evolver = evolve::Evolver::new();
             evolver.llm = args.iter().any(|a| a == "--llm");
             if let Some(pos) = args.iter().position(|a| a == "--seed") {
@@ -546,7 +549,8 @@ fn main() {
                     .and_then(|(n, f)| Some((n.to_string(), f.parse::<f64>().ok()?))));
             let mut run_cycles = 0usize;
             while run_cycles < cycles {
-                let events = evolver.evolve(&mut veldt, 1);
+                let events = evolver.evolve_scoped(&mut veldt, 1,
+                    fam_scope.map(|s| s.as_str()));
                 for event in &events { eprintln!("{}", event.format()); }
                 run_cycles += 1;
                 if let Some(target) = until {

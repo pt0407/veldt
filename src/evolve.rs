@@ -47,6 +47,12 @@ impl Evolver {
 
     /// Run N evolution cycles. Returns a summary string.
     pub fn evolve(&mut self, veldt: &mut Veldt, cycles: usize) -> Vec<EvolutionEvent> {
+        self.evolve_scoped(veldt, cycles, None)
+    }
+
+    /// Evolve with an optional family scope — `only` restricts candidates
+    /// to a single lineage (targeted mutation on one family).
+    pub fn evolve_scoped(&mut self, veldt: &mut Veldt, cycles: usize, only: Option<&str>) -> Vec<EvolutionEvent> {
         let mut events = Vec::new();
 
         for cycle in 1..=cycles {
@@ -57,6 +63,7 @@ impl Evolver {
 
             // Collect candidates: healthy functions with tests, sorted by usage (high usage = important)
             let candidates: Vec<(String, u32)> = veldt.functions.iter()
+                .filter(|(name, _)| only.map(|n| n == name.as_str()).unwrap_or(true))
                 .flat_map(|(name, variants)| {
                     variants.iter()
                         .filter(|e| matches!(e.health, Health::Healthy) && !e.tests.is_empty())
