@@ -49,6 +49,21 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] JIT UPDATE 6 — BOXED-VALUE ABI: garden --jit is
+  now 97% (36/37 fns native, was ~42%). Third sig mode in src/jit.rs:
+  fn(*mut JitRt, *const Value, i64) -> *mut Value — boxed operands,
+  ~28 extern helpers reusing vm.rs semantics fns (now pub(crate):
+  truthy/values_eq/index_get/index_set/slice_get/binop/obj_tag,
+  helper, delegate_method). vm.rs: Frame.is_main (nested jit_call
+  frames don't export globals), run_frames() shared loop, jit_call()
+  + jit_invoke() + run_compiled(). jit_invoke unifies Call-arm
+  dispatch for all 3 modes. Left bytecode: try/catch + closures.
+  Also fixed: 5/6-arg dispatch silently returned -1; stale FuncId
+  panic when a scalar caller references a value-mode callee.
+  NOTE for gardener lane: JitFn.is_float is now .mode: u8
+  (0=int,1=float,2=value). crates.io publish BLOCKED — the token
+  works but the account has no verified email (user must fix at
+  crates.io/settings/profile).
 - [Devin/main-side] WORK LIST for the next stretch (~8h) — pick freely,
   post what you take so we don't collide:
 

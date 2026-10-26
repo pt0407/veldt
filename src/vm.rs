@@ -82,13 +82,14 @@ struct Frame {
     base: usize,                        // value-stack base for this frame
     iters: Vec<(Vec<Value>, usize)>,    // for-loop iterator stack
     try_stack: Vec<(u32, u32)>,         // (catch_pc, err_var slot)
+    is_main: bool,   // root frame exports slots to globals on exit
 }
 
 pub struct Vm {
     pub fns: HashMap<String, Vec<CompiledFn>>,
     pub globals: HashMap<String, Value>,
     jit_engine: Option<crate::jit::JitEngine>,
-    helper: Interpreter,                // delegation for builtins/methods
+    pub(crate) helper: Interpreter,    // delegation for builtins/methods
     pub steps: u64,
     max_steps: u64,
 }
@@ -797,8 +798,15 @@ impl Vm {
         let mut stack: Vec<Value> = Vec::with_capacity(64);
         let mut frames: Vec<Frame> = vec![Frame {
             code, pc: 0, env: Vec::new(), base: 0,
-            iters: Vec::new(), try_stack: Vec::new(),
+            iters: Vec::new(), try_stack: Vec::new(), is_main: true,
         }];
+        self.run_frames(&mut stack, &mut frames)
+    }
+
+    /// The dispatch loop — shared by exec (root frame) and jit_call
+    /// (a nested fn frame run synchronously).
+    fn run_frames(&mut self, stack: &mut Vec<Value>,
+                  frames: &mut Vec<Frame>) -> Result<(), String> {
         let mut code = frames.last().unwrap().code.clone(); // Rc bump — once
 
         loop {
@@ -809,7 +817,10 @@ impl Vm {
             let instr = {
                 let frame = frames.last_mut().unwrap();
                 if frame.pc >= code.code.len() {
-                    if frames.len() == 1 { return Ok(()); }
+                    if frames.len() == 1 {
+                        stack.push(Value::Null);
+                        return Ok(());
+                    }
                     frames.pop();
                     stack.push(Value::Null);
                     code = frames.last().unwrap().code.clone();
@@ -819,7 +830,7 @@ impl Vm {
                 frame.pc += 1;
                 code.code[i]
             };
-            if let Err(e) = self.step(&mut stack, &mut frames, &mut code, instr) {
+            if let Err(e) = self.step(stack, frames, &mut code, instr) {
                 // try/catch: unwind frames until one has a handler —
                 // errors inside nested calls propagate to the caller's
                 // try, matching the interpreter's exec_block semantics.
@@ -1027,6 +1038,7 @@ impl Vm {
                             code: chosen.code.clone(),
                             pc: 0, env: fargs, base: stack.len(),
                             iters: Vec::new(), try_stack: Vec::new(),
+                            is_main: false,
                         });
                         *code = frames.last().unwrap().code.clone();
                         return Ok(());
@@ -1059,62 +1071,19 @@ impl Vm {
                                 e.compile_fn(&name, &self.fns);
                         }
                     }
-                    if let Some(j) = chosen.jit.borrow().as_ref() {
-                        if args.len() <= 6
-                            && args.iter().all(|a|
-                                matches!(a, Value::Int(_) | Value::Float(_))) {
-                            let p = j.code_ptr;
-                            if j.is_float {
-                                let af: Vec<f64> = args.iter().map(|a| match a {
-                                    Value::Int(n) => *n as f64,
-                                    Value::Float(f) => *f,
-                                    _ => 0.0,
-                                }).collect();
-                                let r = unsafe {
-                                    match af.as_slice() {
-                                        [] => std::mem::transmute::<_, crate::jit::NativeF0>(p)(),
-                                        [a] => std::mem::transmute::<_, crate::jit::NativeF1>(p)(*a),
-                                        [a,b] => std::mem::transmute::<_, crate::jit::NativeF2>(p)(*a,*b),
-                                        [a,b,c] => std::mem::transmute::<_, crate::jit::NativeF3>(p)(*a,*b,*c),
-                                        [a,b,c,d] => std::mem::transmute::<_, crate::jit::NativeF4>(p)(*a,*b,*c,*d),
-                                        [a,b,c,d,e] => std::mem::transmute::<_, crate::jit::NativeF5>(p)(*a,*b,*c,*d,*e),
-                                        [a,b,c,d,e,f] => std::mem::transmute::<_, crate::jit::NativeF6>(p)(*a,*b,*c,*d,*e,*f),
-                                        _ => -1.0,
-                                    }
-                                };
-                                stack.push(Value::Float(r));
-                            } else if args.iter()
-                                .all(|a| matches!(a, Value::Int(_))) {
-                                let av: Vec<i64> = args.iter().map(|a|
-                                    if let Value::Int(n) = a { *n } else { 0 }
-                                ).collect();
-                                let r = unsafe {
-                                    match av.as_slice() {
-                                        [] => std::mem::transmute::<_, crate::jit::NativeFn0>(p)(),
-                                        [a] => std::mem::transmute::<_, crate::jit::NativeFn1>(p)(*a),
-                                        [a,b] => std::mem::transmute::<_, crate::jit::NativeFn2>(p)(*a,*b),
-                                        [a,b,c] => std::mem::transmute::<_, crate::jit::NativeFn3>(p)(*a,*b,*c),
-                                        [a,b,c,d] => std::mem::transmute::<_, crate::jit::NativeFn4>(p)(*a,*b,*c,*d),
-                                        [a,b,c,d,e] => std::mem::transmute::<_, crate::jit::NativeFn5>(p)(*a,*b,*c,*d,*e),
-                                        [a,b,c,d,e,f] => std::mem::transmute::<_, crate::jit::NativeFn6>(p)(*a,*b,*c,*d,*e,*f),
-                                        _ => -1,
-                                    }
-                                };
-                                stack.push(Value::Int(r));
-                            } else {
-                                // float jit got non-numeric... falls through
-                                // (args checked above so unreachable)
-                                stack.push(Value::Null);
-                            }
-                            return Ok(());
-                        }
+                    let spec = chosen.jit.borrow().as_ref()
+                        .map(|j| (j.code_ptr, j.mode, chosen.code.clone()));
+                    if let Some((p, m, code)) = spec {
+                        let v = self.jit_invoke(p, m, &code, args)?;
+                        stack.push(v);
+                        return Ok(());
                     }
                     let env: Vec<Option<Value>> =
                         args.into_iter().map(Some).collect();
                     frames.push(Frame {
                         code: chosen.code.clone(),   // Rc bump — no alloc
                         pc: 0, env, base: stack.len(), iters: Vec::new(),
-                        try_stack: Vec::new(),
+                        try_stack: Vec::new(), is_main: false,
                     });
                     *code = frames.last().unwrap().code.clone();
                 }
@@ -1135,7 +1104,7 @@ impl Vm {
                     frames.push(Frame {
                         code: chosen.code.clone(),
                         pc: 0, env, base: stack.len(), iters: Vec::new(),
-                        try_stack: Vec::new(),
+                        try_stack: Vec::new(), is_main: false,
                     });
                     *code = frames.last().unwrap().code.clone();
                 }
@@ -1293,14 +1262,19 @@ impl Vm {
                     let f = frames.pop().unwrap();
                     stack.truncate(f.base);
                     if frames.is_empty() {
-                        // program end: export main-frame slots to globals
-                        // by name so callers/tests can inspect results
-                        for (i, val) in f.env.iter().enumerate() {
-                            if let (Some(vv), Some(n)) =
-                                (val, f.code.slot_names.get(i)) {
-                                self.globals.insert(n.clone(), vv.clone());
+                        if f.is_main {
+                            // program end: export main-frame slots to
+                            // globals by name for callers/tests
+                            for (i, val) in f.env.iter().enumerate() {
+                                if let (Some(vv), Some(n)) =
+                                    (val, f.code.slot_names.get(i)) {
+                                    self.globals.insert(n.clone(), vv.clone());
+                                }
                             }
                         }
+                        // result stays on the stack for jit_call; the
+                        // root exec just drops it
+                        stack.push(v);
                         return Ok(());
                     }
                     *code = frames.last().unwrap().code.clone();
@@ -1309,12 +1283,15 @@ impl Vm {
                 Instr::Halt => {
                     if frames.len() == 1 {
                         let f = frames.pop().unwrap();
-                        for (i, val) in f.env.iter().enumerate() {
-                            if let (Some(vv), Some(n)) =
-                                (val, f.code.slot_names.get(i)) {
-                                self.globals.insert(n.clone(), vv.clone());
+                        if f.is_main {
+                            for (i, val) in f.env.iter().enumerate() {
+                                if let (Some(vv), Some(n)) =
+                                    (val, f.code.slot_names.get(i)) {
+                                    self.globals.insert(n.clone(), vv.clone());
+                                }
                             }
                         }
+                        stack.push(Value::Null);
                         return Ok(());
                     }
                     let f = frames.pop().unwrap();
@@ -1334,10 +1311,158 @@ impl Vm {
         Ok(())
     }
 
+    /// Synchronous fn call for the boxed-Value JIT ABI — mirrors the
+    /// Call arm's dispatch (reload -> call_best -> builtin -> fns)
+    /// then runs the callee (JIT'd if hot, else a private frame stack).
+    pub(crate) fn jit_call(&mut self, name: &str, vid: Option<u32>,
+                           args: Vec<Value>) -> Result<Value, String> {
+        if name == "garden_reload" {
+            let g = crate::veldt::Veldt::new();
+            self.load_garden(&g)?;
+            return Ok(Value::Null);
+        }
+        if name == "call_best" {
+            let fname = match args.first() {
+                Some(Value::Str(s)) => (**s).to_string(),
+                _ => return Err("call_best(name, args...)".into()),
+            };
+            return self.jit_call(&fname, None, args[1..].to_vec());
+        }
+        if let Some(v) = self.helper.try_builtin(name, &args)? {
+            return Ok(v);
+        }
+        let variants = self.fns.get(name)
+            .ok_or_else(|| format!("Undefined function: {}", name))?;
+        let chosen = match vid {
+            Some(id) => variants.iter().find(|v| v.id == id)
+                .ok_or_else(|| format!("Variant {}#{} not found", name, id))?,
+            None => variants.iter()
+                .max_by(|a, b| a.fitness.partial_cmp(&b.fitness)
+                    .unwrap_or(std::cmp::Ordering::Equal))
+                .ok_or_else(|| format!("No variants of {}", name))?,
+        };
+        if args.len() != chosen.params.len() {
+            return Err(format!("{} expects {} args, got {}",
+                name, chosen.params.len(), args.len()));
+        }
+        chosen.calls.set(chosen.calls.get() + 1);
+        if chosen.calls.get() >= 64 && !chosen.jit_tried.get() {
+            chosen.jit_tried.set(true);
+            if self.jit_engine.is_none() {
+                self.jit_engine = crate::jit::JitEngine::new();
+            }
+            if let Some(e) = self.jit_engine.as_mut() {
+                *chosen.jit.borrow_mut() = e.compile_fn(name, &self.fns);
+            }
+        }
+        let spec = chosen.jit.borrow().as_ref()
+            .map(|j| (j.code_ptr, j.mode, chosen.code.clone()));
+        if let Some((p, m, code)) = spec {
+            return self.jit_invoke(p, m, &code, args);
+        }
+        self.run_compiled(chosen.code.clone(), args)
+    }
+
+    /// Run a CompiledFn's bytecode on a private frame stack and take
+    /// its Return value — the path JIT'd code uses to call fns that
+    /// aren't (or can't be) in the JIT module.
+    pub(crate) fn run_compiled(&mut self, code: Rc<Chunk>,
+                               args: Vec<Value>) -> Result<Value, String> {
+        let env: Vec<Option<Value>> = args.into_iter().map(Some).collect();
+        let mut stack = Vec::new();
+        let mut frames = vec![Frame {
+            code, pc: 0, env, base: 0,
+            iters: Vec::new(), try_stack: Vec::new(), is_main: false,
+        }];
+        self.run_frames(&mut stack, &mut frames)?;
+        Ok(stack.pop().unwrap_or(Value::Null))
+    }
+
+    /// Invoke JIT'd code by signature mode. Mode 2 takes any args —
+    /// the boxed-Value ABI. Modes 0/1 need scalar args in range and
+    /// fall back to bytecode otherwise.
+    pub(crate) fn jit_invoke(&mut self, p: *const u8, mode: u8,
+                             code: &Rc<Chunk>, args: Vec<Value>)
+        -> Result<Value, String> {
+        match mode {
+            0 if args.len() <= 6
+                && args.iter().all(|a| matches!(a, Value::Int(_))) => {
+                let av: Vec<i64> = args.iter().map(|a|
+                    if let Value::Int(n) = a { *n } else { 0 }).collect();
+                let r = unsafe {
+                    match av.as_slice() {
+                        [] => std::mem::transmute::<_, crate::jit::NativeFn0>(p)(),
+                        [a] => std::mem::transmute::<_, crate::jit::NativeFn1>(p)(*a),
+                        [a,b] => std::mem::transmute::<_, crate::jit::NativeFn2>(p)(*a,*b),
+                        [a,b,c] => std::mem::transmute::<_, crate::jit::NativeFn3>(p)(*a,*b,*c),
+                        [a,b,c,d] => std::mem::transmute::<_, crate::jit::NativeFn4>(p)(*a,*b,*c,*d),
+                        [a,b,c,d,e] => std::mem::transmute::<_, crate::jit::NativeFn5>(p)(*a,*b,*c,*d,*e),
+                        [a,b,c,d,e,f] => std::mem::transmute::<_, crate::jit::NativeFn6>(p)(*a,*b,*c,*d,*e,*f),
+                        _ => 0,
+                    }
+                };
+                Ok(Value::Int(r))
+            }
+            1 if args.len() <= 6 && args.iter().all(|a|
+                matches!(a, Value::Int(_) | Value::Float(_))) => {
+                let af: Vec<f64> = args.iter().map(|a| match a {
+                    Value::Int(n) => *n as f64,
+                    Value::Float(f) => *f,
+                    _ => 0.0,
+                }).collect();
+                let r = unsafe {
+                    match af.as_slice() {
+                        [] => std::mem::transmute::<_, crate::jit::NativeF0>(p)(),
+                        [a] => std::mem::transmute::<_, crate::jit::NativeF1>(p)(*a),
+                        [a,b] => std::mem::transmute::<_, crate::jit::NativeF2>(p)(*a,*b),
+                        [a,b,c] => std::mem::transmute::<_, crate::jit::NativeF3>(p)(*a,*b,*c),
+                        [a,b,c,d] => std::mem::transmute::<_, crate::jit::NativeF4>(p)(*a,*b,*c,*d),
+                        [a,b,c,d,e] => std::mem::transmute::<_, crate::jit::NativeF5>(p)(*a,*b,*c,*d,*e),
+                        [a,b,c,d,e,f] => std::mem::transmute::<_, crate::jit::NativeF6>(p)(*a,*b,*c,*d,*e,*f),
+                        _ => 0.0,
+                    }
+                };
+                Ok(Value::Float(r))
+            }
+            2 => {
+                let mut rt = crate::jit::JitRt {
+                    vm: self as *mut Vm,
+                    consts: code.consts.as_ptr(),
+                    names: code.names.as_ptr(),
+                    arena: Vec::new(), argbuf: Vec::new(),
+                    iters: Vec::new(), err: None,
+                };
+                // args arrive as boxed *mut Value in the arena — the
+                // JIT loads ptr-sized elements, not Value structs
+                let argbox: Vec<*mut Value> = args.into_iter().map(|a| {
+                    let p = Box::into_raw(Box::new(a));
+                    rt.arena.push(p); p
+                }).collect();
+                type VFn = unsafe extern "C" fn(
+                    *mut crate::jit::JitRt, *const *mut Value,
+                    i64) -> *mut Value;
+                let out = unsafe { std::mem::transmute::<_, VFn>(p)(
+                    &mut rt, argbox.as_ptr(), argbox.len() as i64) };
+                let mut res = Value::Null;
+                if !out.is_null() {
+                    res = *unsafe { Box::from_raw(out) };
+                }
+                for q in rt.arena.drain(..) {
+                    if q != out && !q.is_null() {
+                        unsafe { drop(Box::from_raw(q)); }
+                    }
+                }
+                if let Some(e) = rt.err.take() { return Err(e); }
+                Ok(res)
+            }
+            _ => self.run_compiled(code.clone(), args),
+        }
+    }
+
     /// Delegate a method call to the shared interpreter by evaluating a
     /// synthetic MethodCall expr — all method semantics (including the
     /// Phase 6 fast paths) come from the one implementation.
-    fn delegate_method(&mut self, recv: Value, m: &str, args: Vec<Value>)
+    pub(crate) fn delegate_method(&mut self, recv: Value, m: &str, args: Vec<Value>)
         -> Result<Value, String> {
         let mut vars = self.helper.vars.borrow_mut();
         vars.insert("__vm_recv".to_string(), recv);
@@ -1362,7 +1487,7 @@ impl Vm {
 
 // ---------- helpers (pure, no interpreter state) ----------
 
-fn truthy(v: &Value) -> bool {
+pub(crate) fn truthy(v: &Value) -> bool {
     match v {
         Value::Bool(b) => *b,
         Value::Int(n) => *n != 0,
@@ -1376,7 +1501,7 @@ fn truthy(v: &Value) -> bool {
     }
 }
 
-fn values_eq(a: &Value, b: &Value) -> bool {
+pub(crate) fn values_eq(a: &Value, b: &Value) -> bool {
     match (a, b) {
         (Value::Int(x), Value::Int(y)) => x == y,
         (Value::Float(x), Value::Float(y)) => x == y,
@@ -1391,7 +1516,7 @@ fn values_eq(a: &Value, b: &Value) -> bool {
     }
 }
 
-fn index_get(obj: &Value, idx: &Value) -> Result<Value, String> {
+pub(crate) fn index_get(obj: &Value, idx: &Value) -> Result<Value, String> {
     match (obj, idx) {
         (Value::List(l), Value::Int(i)) => {
             let len = l.len() as i64;
@@ -1416,7 +1541,7 @@ fn index_get(obj: &Value, idx: &Value) -> Result<Value, String> {
     }
 }
 
-fn index_set(obj: &Value, idx: &Value, val: &Value) -> Result<Value, String> {
+pub(crate) fn index_set(obj: &Value, idx: &Value, val: &Value) -> Result<Value, String> {
     match (obj, idx) {
         (Value::List(l), Value::Int(i)) => {
             let len = l.len() as i64;
@@ -1437,7 +1562,7 @@ fn index_set(obj: &Value, idx: &Value, val: &Value) -> Result<Value, String> {
     }
 }
 
-fn slice_get(obj: &Value, lo: &Value, hi: &Value) -> Result<Value, String> {
+pub(crate) fn slice_get(obj: &Value, lo: &Value, hi: &Value) -> Result<Value, String> {
     match obj {
         Value::List(l) => {
             let len = l.len() as i64;
@@ -1476,7 +1601,7 @@ fn slice_get(obj: &Value, lo: &Value, hi: &Value) -> Result<Value, String> {
     }
 }
 
-fn obj_tag(v: &Value) -> &'static str {
+pub(crate) fn obj_tag(v: &Value) -> &'static str {
     match v {
         Value::Int(..) => "int", Value::Float(..) => "float",
         Value::Str(..) => "str", Value::Bool(..) => "bool",
@@ -1486,7 +1611,7 @@ fn obj_tag(v: &Value) -> &'static str {
     }
 }
 
-fn binop(l: &Value, op: &BinOp, r: &Value) -> Result<Value, String> {
+pub(crate) fn binop(l: &Value, op: &BinOp, r: &Value) -> Result<Value, String> {
     use Value::*;
     Ok(match (l, op, r) {
         (Int(a), BinOp::Add, Int(b)) => Int(a + b),
