@@ -1302,7 +1302,8 @@ impl Vm {
                 }
                 Instr::PrintOut => {
                     let v = stack.pop().unwrap();
-                    println!("{}", v);
+                    self.helper.emit_line(&format!("{}
+", v));
                 }
                 Instr::Return => {
                     let v = stack.pop().unwrap_or(Value::Null);

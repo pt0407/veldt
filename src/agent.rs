@@ -51,6 +51,13 @@ pub fn execute_source(source: &str, veldt: &mut Veldt) -> ExecResult {
 /// execute_source with capability control — sandboxed callers get a
 /// Stage-0 interpreter (fs/net/proc all denied).
 pub fn execute_source_opts(source: &str, veldt: &mut Veldt, caps: crate::interpreter::Caps) -> ExecResult {
+    execute_source_opts_full(source, veldt, caps, false)
+}
+
+/// Shared run pipeline — `use_vm` routes execution through the
+/// bytecode VM + JIT (`/api/run` `{"vm": true}`); same lex/parse/
+/// capture/events semantics as the interpreter path.
+pub fn execute_source_opts_full(source: &str, veldt: &mut Veldt, caps: crate::interpreter::Caps, use_vm: bool) -> ExecResult {
     let mut output = String::new();
     let mut events = Vec::new();
 
@@ -85,11 +92,26 @@ pub fn execute_source_opts(source: &str, veldt: &mut Veldt, caps: crate::interpr
     interp.caps = caps;
     interp.call_stack.clear();
     veldt.load_into_interpreter(&mut interp);
-
     interp.print_buffer = Some(String::new());
-    let run_res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
-        || interp.run_with_lines(&stmts, &parser_lines)))
-        .unwrap_or_else(|_| Err("interpreter panicked".into()));
+
+    // fast-engine path — same garden, same capture semantics
+    let mut vm_res: Option<Result<(), String>> = None;
+    if use_vm {
+        let mut v = crate::vm::Vm::new();
+        v.helper.print_buffer = Some(String::new());
+        let _ = v.load_garden(veldt);
+        vm_res = Some(std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+            || v.run(&stmts, u64::MAX / 4)))
+            .unwrap_or_else(|_| Err("vm panicked".into())));
+        if let Some(buf) = v.helper.print_buffer.take() { output.push_str(&buf); }
+    }
+
+    let run_res = match vm_res {
+        Some(r) => r,
+        None => std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+            || interp.run_with_lines(&stmts, &parser_lines)))
+            .unwrap_or_else(|_| Err("interpreter panicked".into())),
+    };
     let success = match run_res {
         Ok(()) => true,
         Err(e) => {

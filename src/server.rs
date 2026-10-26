@@ -951,6 +951,8 @@ struct RunRequest {
     source: String,
     #[serde(default)]
     sandbox: bool,
+    #[serde(default)]
+    vm: bool,
 }
 
 #[derive(Serialize)]
@@ -969,9 +971,9 @@ async fn run_program(
         v.clone()
     };
 
-    let result = agent::execute_source_opts(&req.source, &mut veldt,
+    let result = agent::execute_source_opts_full(&req.source, &mut veldt,
         if req.sandbox { crate::interpreter::Caps::sandboxed() }
-        else { crate::interpreter::Caps::allow_all() });
+        else { crate::interpreter::Caps::allow_all() }, req.vm);
 
     veldt.save().unwrap_or_else(|e| eprintln!("Save error: {}", e));
 
