@@ -162,6 +162,20 @@ fn main() {
             }
             adopt_variant(&args[2]);
         }
+        // veldt verify --all — audit every multi-variant family
+        "verify" if args.iter().any(|a| a == "--all") => {
+            let mut veldt = veldt::Veldt::new();
+            if let Err(e) = veldt.load() { eprintln!("Error: {}", e); process::exit(1); }
+            let names: Vec<String> = veldt.functions.iter()
+                .filter(|(_, vs)| vs.len() >= 2)
+                .map(|(n, _)| n.clone()).collect();
+            if names.is_empty() {
+                println!("No families with multiple variants.");
+            } else {
+                println!("Auditing {} families...", names.len());
+                for n in names { verify_family(&n, &args); println!(""); }
+            }
+        }
         // veldt verify <fn> — bounded equivalence check across variants:
         // evaluates each variant on a bounded input domain and reports
         // which provably agree with the fittest (stronger than probes,
