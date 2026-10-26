@@ -2455,6 +2455,14 @@ fn print_stats(veldt: &veldt::Veldt) {
                         println!("    {}", kids.join(" "));
                     }
                 }
+                // code diversity — how much the variants' bodies differ
+                if vs.len() > 1 {
+                    let bodies: Vec<String> = vs.iter()
+                        .map(|e| crate::fmt::format_program(&e.body)).collect();
+                    let unique: std::collections::HashSet<_> = bodies.iter().collect();
+                    let avg_len = bodies.iter().map(|b| b.len()).sum::<usize>() / bodies.len();
+                    println!("  code diversity: {} unique bodies (avg {} chars)", unique.len(), avg_len);
+                }
             }
         }
         if veldt.fitness_history.len() >= 2 {
