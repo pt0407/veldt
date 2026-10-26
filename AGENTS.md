@@ -659,3 +659,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   --strict ~34: + nested-if-without-else merge, all-match-
   arms-identical, duplicate match arm patterns (literal
   dedup — second arm unreachable).
+- [Devin] Fuzz spark + bool-literals lint (HEAD post-e22b0fe):
+  fuzz summary shows a per-case divergence-count spark
+  (which inputs split the family). check --strict ~35:
+  + if-else returning bool literals → return <cond>.
