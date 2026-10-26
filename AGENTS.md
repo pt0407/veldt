@@ -590,3 +590,10 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   usage_rate/size_rate + birth/death/usage timelines. Min/avg/peak
   alone used to hide bimodality and outliers; the spark makes the
   shape visible at a glance.
+- [Devin] Visualization batch (HEAD post-7aca0d1): API parity —
+  /api/family now emits fitness_dist/age_dist/usage_dist/size_dist/
+  eff_dist (sorted vecs, same as CLI --json). IDE Σ view renders
+  them as mini-sparklines via a spark() JS helper. stats --top
+  gets a proportional fitness bar per family; garden + lineage
+  get the same bar per variant (scaled to the family's peak).
+  Every view now shows the shape, not just the numbers.
