@@ -212,8 +212,18 @@ fn main() {
             let quarantine = args.iter().any(|a| a == "--quarantine");
             let mut veldt = veldt::Veldt::new();
             if let Err(e) = veldt.load() { eprintln!("Error: {}", e); process::exit(1); }
+            let or_groups: Option<Vec<Vec<String>>> = args.iter()
+                .position(|a| a == "--filter")
+                .and_then(|p| args.get(p + 1))
+                .map(|expr| expr.split("||")
+                    .map(|g| g.split("&&").map(|s| s.trim().to_string()).collect())
+                    .collect());
             let names: Vec<String> = veldt.functions.iter()
-                .filter(|(_, vs)| vs.len() >= 2)
+                .filter(|(_, vs)| vs.len() >= 2
+                    && or_groups.as_ref().map(|gs| vs.iter().any(|e|
+                        gs.iter().any(|g|
+                            g.iter().all(|c| veldt::variant_matches(e, c)))))
+                    .unwrap_or(true))
                 .map(|(n, _)| n.clone()).collect();
             if names.is_empty() {
                 println!("No families with multiple variants.");
