@@ -919,7 +919,7 @@ fn run_registry(port: u16) {
     });
 }
 
-fn push_garden(url: &str) {
+pub fn push_garden(url: &str) {
     let mut veldt = veldt::Veldt::new();
     if let Err(e) = veldt.load() { eprintln!("Error: {}", e); process::exit(1); }
     let body = match std::fs::read_to_string(veldt.garden_path.join("veldt.json")) {
@@ -937,7 +937,7 @@ fn push_garden(url: &str) {
     }
 }
 
-fn merge_garden(url: &str) {
+pub fn merge_garden(url: &str) {
     // pull the pool and merge its families INTO the local garden —
     // immigrants keep their provenance and get tagged.
     let client = reqwest::blocking::Client::builder()

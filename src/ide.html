@@ -488,6 +488,7 @@
     <button class="btn" id="fuzzBtn" title="boundary-corpus sweep vs every variant">Fuzz</button>
     <button class="btn" id="absorbBtn" title="bake live call traces into probes">Absorb</button>
     <button class="btn" id="tourBtn" title="pull a remote pool, trial, push winners back">Tournament</button>
+    <button class="btn" id="swarmBtn" title="bidirectional genome gossip with a peer">Swarm</button>
     <button class="btn danger" id="clearBtn">Clear Garden</button>
     <button class="btn primary" id="runBtn">▶ Run</button>
     <label style="font-size:11px;opacity:.7;margin-left:6px"><input type="checkbox" id="sandboxChk"> sandbox</label>
@@ -1224,6 +1225,16 @@ document.getElementById('fuzzBtn').addEventListener('click', async () => {
   const d = await res.json();
   document.getElementById('output').innerHTML =
     '<pre style="color:#aef;margin:0">' + (d.report || 'no report') + '</pre>';
+  renderGarden();
+});
+document.getElementById('swarmBtn').addEventListener('click', async () => {
+  const url = prompt('Peer URL', 'http://localhost:7878');
+  if (!url) return;
+  const res = await fetch(API + '/api/swarm', { method: 'POST',
+    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
+  const d = await res.json();
+  document.getElementById('output').innerHTML =
+    '<pre style="color:#8ef;margin:0">swarm sync vs ' + (d.peer || '?') + ' — both gardens merged</pre>';
   renderGarden();
 });
 document.getElementById('tourBtn').addEventListener('click', async () => {
