@@ -1182,3 +1182,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   "warnings" — per-variant warnings + defect-class split,
   or garden census. The Gardener reports code health
   conversationally now.
+- [Devin] veldt tend [family]: on-demand heal — runs the
+  repair+healer-merge on sick variants (previously only
+  triggered inside the grow flow). First run healed 4 sick
+  play_game variants.
