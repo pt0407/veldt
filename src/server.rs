@@ -58,6 +58,7 @@ pub async fn start_server(port: u16) {
         .route("/api/mutation", get(mutation))
         .route("/api/families", get(families))
         .route("/api/variant", get(variant))
+        .route("/api/heal", get(heal))
         .route("/api/run", post(run_program))
         .route("/api/evolve", post(evolve))
         .route("/api/clear", post(clear_veldt))
@@ -425,6 +426,20 @@ async fn variant(
         })),
         None => Json(serde_json::json!({"error": format!("{}#{} not found", req.name, req.id)})),
     }
+}
+
+async fn heal() -> Json<serde_json::Value> {
+    let mut veldt = veldt::Veldt::new();
+    if veldt.load().is_err() {
+        return Json(serde_json::json!({"error": "garden load failed"}));
+    }
+    let heal_data: Vec<serde_json::Value> = veldt.obituaries.iter()
+        .filter(|o| !o.healing_attempts.is_empty())
+        .map(|o| serde_json::json!({
+            "variant": format!("{}#{}", o.name, o.id), "age": o.age,
+            "attempts": o.healing_attempts, "cause": o.cause_of_death,
+        })).collect();
+    Json(serde_json::json!({"healing": heal_data}))
 }
 
 #[derive(Deserialize)]
