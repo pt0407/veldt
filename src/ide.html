@@ -824,6 +824,14 @@ function renderGarden() {
 
   let html = '';
   let totalHealthy = 0, totalSick = 0;
+  let seed = 0, estab = 0, canon = 0;
+  (gardenData.functions || []).forEach(l => l.variants.forEach(v => {
+    if (v.trust === 'Canonical') canon++; else if (v.trust === 'Established') estab++; else seed++;
+  }));
+  if (seed + estab + canon > 0) {
+    html += `<div style="font-size:11px;opacity:.75;padding:4px 0;border-bottom:1px solid #333;margin-bottom:6px">` +
+      `trust ladder: <b style="color:#8ef">${seed}</b> seedling → <b style="color:#fd0">${estab}</b> established → <b style="color:#6f4">${canon}</b> canonical</div>`;
+  }
 
   // Functions — rendered as lineage trees using parent edges
   if (gardenData.functions) {
