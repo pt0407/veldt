@@ -1202,6 +1202,16 @@ fn print_stats(veldt: &veldt::Veldt) {
                         *sizes.iter().max().unwrap_or(&0));
         println!("code size: avg {} chars/variant ({}..{})", avg, lo, hi);
     }
+    // avg variant args — param count distribution (signature complexity)
+    let arg_counts: Vec<usize> = veldt.functions.values()
+        .flat_map(|vs| vs.iter().map(|e| e.params.len()))
+        .collect();
+    if !arg_counts.is_empty() {
+        let avg = arg_counts.iter().sum::<usize>() / arg_counts.len();
+        let (lo, hi) = (*arg_counts.iter().min().unwrap_or(&0),
+                        *arg_counts.iter().max().unwrap_or(&0));
+        println!("arity: avg {} params/variant ({}..{})", avg, lo, hi);
+    }
     // fitness trend — peak per run, is the garden improving?
     if veldt.fitness_history.len() >= 2 {
         let trend: Vec<String> = veldt.fitness_history.iter()
