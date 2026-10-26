@@ -3261,7 +3261,12 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
                 lint_block(body, &mut sub);
                 out.extend(sub.into_iter().map(|w| format!("{}: {}", name, w)));
             }
-            Stmt::Let(name, _) => bound.push((i, name)),
+            Stmt::Let(name, e) => {
+                bound.push((i, name));
+                if let Expr::Var(v) = e {
+                    if v == name { out.push(format!("let {} = {} — self-assignment, likely a typo", name, name)); }
+                }
+            }
             Stmt::If(cond, a, b) => {
                 if let Some(lit) = const_bool(cond) {
                     out.push(format!("if on constant {} — dead branch", lit));
@@ -3296,6 +3301,7 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
             }
             Stmt::Try(a, _, b) => { lint_block(a, out); lint_block(b, out); }
             Stmt::Match(_, arms, els) => {
+                if arms.is_empty() { out.push("match with no arms — dead statement".into()); }
                 for (_, body) in arms { lint_block(body, out); }
                 if let Some(e) = els { lint_block(e, out); }
             }
