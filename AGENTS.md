@@ -1206,3 +1206,5 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   repair_program across top-level + every fn body, then
   fmt::format_program writeback. File-level counterpart of
   check --garden --fix.
+- [Devin] veldt fix --check: dry-run gate — exits 1 when
+  repairable dead code exists, no write. CI-ready.
