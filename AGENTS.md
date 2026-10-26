@@ -865,3 +865,6 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 - [Devin] Lint batch 33 (HEAD post-match-alias): ~64 strict
   checks. New: match on an alias (match a where a is
   let-bound to Var(b) — could match b directly).
+- [Devin] Lint batch 34 (HEAD post-call-alias): ~65 strict
+  checks. New: let a = b where b is bound to a call —
+  the let copies a call result that could be inlined.
