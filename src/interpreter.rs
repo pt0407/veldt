@@ -1061,9 +1061,9 @@ impl Interpreter {
         // Log usage for veldt tracking
         self.usage_log.push((name.to_string(), chosen_id));
 
-        // Create new scope
+        // Create new scope — capacity hint skips the rehash allocs
         let old_vars = self.vars.clone();
-        self.vars = Rc::new(RefCell::new(HashMap::new()));
+        self.vars = Rc::new(RefCell::new(HashMap::with_capacity(params.len() + 4)));
 
         // Bind params
         if args.len() != params.len() {
