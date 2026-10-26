@@ -634,3 +634,9 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   surface in veldt now visualizes shape + delta: distributions
   (sparks), comparisons (fitness bars), diffs (Δ headers),
   trials (Δ per mutation).
+- [Devin] Bench spark coverage (HEAD post-083dc2f): species line
+  gets the ms-distribution spark (which benchmarks are slow vs
+  fast); Intent latency section gets a per-intent latency spark
+  (improve/surprise are the mutation-heavy outliers). Evolve
+  trials carry parent_fitness → Δ ±x.xx per mutation. Every
+  bench/evolve surface now visualizes shape + delta.
