@@ -2432,6 +2432,15 @@ fn print_stats(veldt: &veldt::Veldt) {
                         }
                     }
                 }
+                // born timeline — births per run (the family's growth curve)
+                let mut borns: std::collections::HashMap<u64, usize> = std::collections::HashMap::new();
+                for e in vs.iter() { *borns.entry(e.born).or_insert(0) += 1; }
+                if borns.len() > 1 {
+                    let mut runs: Vec<_> = borns.iter().collect();
+                    runs.sort_by_key(|(r, _)| *r);
+                    let timeline: Vec<_> = runs.iter().map(|(r, n)| format!("{}:{}", r % 100, n)).collect();
+                    println!("  birth timeline: {}", timeline.join(" "));
+                }
             }
         }
         if veldt.fitness_history.len() >= 2 {
