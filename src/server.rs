@@ -35,6 +35,7 @@ pub async fn start_server(port: u16) {
         .route("/api/check", post(check_source))
         .route("/api/tournament", post(tournament))
         .route("/api/call", post(call_fn))
+        .route("/api/adopt", post(adopt_variant))
         .route("/api/run", post(run_program))
         .route("/api/evolve", post(evolve))
         .route("/api/clear", post(clear_veldt))
@@ -66,6 +67,27 @@ async fn fuzz_family(
     let report = resp.reply;
     { let mut v = state.veldt.lock().unwrap(); *v = veldt; }
     Json(serde_json::json!({ "report": report }))
+}
+
+#[derive(Deserialize)]
+struct AdoptRequest { name: String, id: u32 }
+
+async fn adopt_variant(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<AdoptRequest>,
+) -> Json<serde_json::Value> {
+    let mut veldt = state.veldt.lock().unwrap();
+    let found = veldt.functions.get_mut(&req.name)
+        .map(|vs| vs.iter_mut().any(|v| {
+            if v.id == req.id { v.trust = crate::veldt::Trust::Canonical; true } else { false }
+        }))
+        .unwrap_or(false);
+    if found {
+        veldt.save().unwrap_or_else(|e| eprintln!("Save error: {}", e));
+        Json(serde_json::json!({"ok": true}))
+    } else {
+        Json(serde_json::json!({"ok": false, "error": format!("{}#{} not found", req.name, req.id)}))
+    }
 }
 
 #[derive(Deserialize)]

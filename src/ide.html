@@ -721,6 +721,16 @@ async function testFamily(name) {
   renderGarden();
 }
 
+async function adoptVariant(name, id) {
+  const res = await fetch(API + '/api/adopt', { method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, id }) });
+  const d = await res.json();
+  document.getElementById('output').innerHTML =
+    '<pre style="color:#fd0;margin:0">' + (d.ok ? name + '#' + id + ' → Canonical' : 'ERROR: ' + d.error) + '</pre>';
+  renderGarden();
+}
+
 async function whyVariant(name, id) {
   const res = await fetch(API + '/api/agent', { method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -937,6 +947,7 @@ function renderGarden() {
           <span style="float:right;color:var(--text-dim)">${v.fitness}%</span>
           <span class="play" onclick="event.stopPropagation();runVariant('${lineage.name}',${v.id})" title="run this variant">▶</span>
           <span class="play" onclick="event.stopPropagation();whyVariant('${lineage.name}',${v.id})" title="diagnose this variant">?</span>
+          <span class="play" onclick="event.stopPropagation();adoptVariant('${lineage.name}',${v.id})" title="promote to Canonical">★</span>
           ${v.origin && v.origin !== 'seed' ? `<div class="origin-tag">${v.origin}</div>` : ''}
         </div>`;
         if (kids.length) {
