@@ -424,6 +424,8 @@ fn print_docs(topic: Option<&str>) {
         ("join", "join(task_id) -> value", "wait for task"),
         ("pmap", "pmap(\"fn\", list) -> list", "parallel map over garden fn"),
         ("call_best", "call_best(\"name\", args) -> value", "dispatch fittest variant"),
+        ("sandbox_run", "sandbox_run(\"name\", args) -> value", "call fn with all capabilities denied (Stage 0)"),
+        ("shadow_call", "shadow_call(\"name\", args) -> value", "all variants run sandboxed; champion's result returns, divergences logged (Stage 1)"),
         ("read_file", "read_file(path) -> str", ""),
         ("write_file", "write_file(path, content)", ""),
     ];
@@ -484,8 +486,20 @@ fn print_stats(veldt: &veldt::Veldt) {
     }
     best.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     let probe_count: usize = veldt.probes.values().map(|v| v.len()).sum();
+    let (mut seed, mut estab, mut canon) = (0usize, 0usize, 0usize);
+    for vs in veldt.functions.values() {
+        for e in vs {
+            match e.trust {
+                veldt::Trust::Seedling => seed += 1,
+                veldt::Trust::Established => estab += 1,
+                veldt::Trust::Canonical => canon += 1,
+            }
+        }
+    }
     println!("garden: {} lineages, {} variants ({} healthy, {} sick, {} dying)",
         veldt.functions.len(), total, healthy, sick, dying);
+    println!("trust ladder: {} seedling → {} established → {} canonical",
+        seed, estab, canon);
     println!("probes: {} across {} families | deaths: {} | runs: {}",
         probe_count, veldt.probes.len(), veldt.obituaries.len(), veldt.run_count);
     if !best.is_empty() {
@@ -797,7 +811,7 @@ fn start_repl() {
     let names: Vec<String> = ["fn","grow","let","while","for","if","else","return",
         "match","test","try","spawn","import","print","len","push","split","join",
         "sort","map","filter","reduce","keys","values","dict","list","range",
-        "call_best","env","args","exit","fetch","re_match","format","str","int"]
+        "call_best","sandbox_run","shadow_call","env","args","exit","fetch","re_match","format","str","int"]
         .iter().map(|s| s.to_string())
         .chain(veldt.functions.keys().cloned())
         .collect();
