@@ -65,6 +65,27 @@ fn main() {
                 run_program(&args[2], args.iter().any(|a| a == "--trace"), args.iter().any(|a| a == "--evolve"));
             }
         }
+        // veldt compare --all — run every bench/*.veldt on both engines.
+        "compare" if args.iter().any(|a| a == "--all") => {
+            println!("{:>18} {:>12} {:>12} {:>8}",
+                     "bench", "tree-walk", "--vm", "speedup");
+            for entry in std::fs::read_dir("bench").unwrap() {
+                let p = entry.unwrap().path();
+                if p.extension().and_then(|e| e.to_str())
+                    != Some("veldt") { continue; }
+                let f = p.to_str().unwrap().to_string();
+                let t0 = std::time::Instant::now();
+                run_program(&f, false, false);
+                let tree = t0.elapsed();
+                let t1 = std::time::Instant::now();
+                run_program_vm(&f);
+                let vm = t1.elapsed();
+                println!("{:>18} {:>10.0}ms {:>10.0}ms {:>7.1}x",
+                         p.file_name().unwrap().to_str().unwrap(),
+                         tree.as_millis(), vm.as_millis(),
+                         tree.as_secs_f64() / vm.as_secs_f64().max(1e-9));
+            }
+        }
         // veldt compare prog.veldt — run on both engines, report times.
         "compare" => {
             let file = args[2..].iter().find(|a| a.ends_with(".veldt"))
