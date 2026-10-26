@@ -569,11 +569,13 @@ fn main() {
             } else if let Some(expr) = args.iter().position(|a| a == "--filter")
                 .and_then(|p| args.get(p + 1)).cloned() {
                 // --filter <expr> — composable variant query
-                // clauses split on && (AND) — each is `field op value`
+                // expr splits on || (OR groups); each group splits on && (AND clauses)
                 // fields: fitness age usage size args lifespan last_used niches
                 //         health trust origin calls
                 // ops: > < >= <= == != ~ (contains)
-                let clauses: Vec<&str> = expr.split("&&").map(|s| s.trim()).collect();
+                let or_groups: Vec<Vec<&str>> = expr.split("||")
+                    .map(|g| g.split("&&").map(|s| s.trim()).collect())
+                    .collect();
                 let mut filtered = veldt::Veldt::new();
                 filtered.probes = veldt.probes.clone();
                 filtered.obituaries = veldt.obituaries.clone();
@@ -581,7 +583,8 @@ fn main() {
                 filtered.garden_path = veldt.garden_path.clone();
                 for (name, vs) in &veldt.functions {
                     let keep: Vec<_> = vs.iter()
-                        .filter(|e| clauses.iter().all(|c| variant_matches(e, c)))
+                        .filter(|e| or_groups.iter().any(|g|
+                            g.iter().all(|c| variant_matches(e, c))))
                         .cloned().collect();
                     if !keep.is_empty() { filtered.functions.insert(name.clone(), keep); }
                 }
