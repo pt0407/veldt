@@ -2371,6 +2371,12 @@ fn print_stats(veldt: &veldt::Veldt) {
                     let t = match champ.trust { veldt::Trust::Canonical => "canon", veldt::Trust::Established => "estab", _ => "seed" };
                     println!("  champion: {}#{} fit {:.2} | age {} | {} {}", champ.name, champ.id, champ.fitness, champ.age, h, t);
                 }
+                // weakest — the family's weakest link (the triage candidate)
+                if let Some(weak) = vs.iter().min_by(|a, b| a.fitness
+                    .partial_cmp(&b.fitness).unwrap_or(std::cmp::Ordering::Equal)) {
+                    let h = match &weak.health { Health::Healthy => "ok", Health::Sick(_) => "sick", Health::Dying => "dying" };
+                    println!("  weakest: {}#{} fit {:.2} | age {} | {}", weak.name, weak.id, weak.fitness, weak.age, h);
+                }
             }
         }
         if veldt.fitness_history.len() >= 2 {
