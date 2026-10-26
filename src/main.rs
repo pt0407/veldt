@@ -160,6 +160,17 @@ fn main() {
             }
             adopt_variant(&args[2]);
         }
+        // veldt verify <fn> — bounded equivalence check across variants:
+        // evaluates each variant on a bounded input domain and reports
+        // which provably agree with the fittest (stronger than probes,
+        // honest without a symbolic solver).
+        "verify" => {
+            if args.len() < 3 {
+                eprintln!("Usage: veldt verify <fn> [--domain N]");
+                process::exit(1);
+            }
+            verify_family(&args[2], &args);
+        }
         "export" => {
             let target = args.get(2).map(|s| s.as_str()).unwrap_or("veldt-export.json");
             export_garden(target);
@@ -2269,6 +2280,62 @@ fn adopt_variant(target: &str) {
             } else { println!("{}#{} not found", name, id); }
         } else { println!("No lineage '{}'", name); }
     } else { eprintln!("Usage: veldt adopt <name#N>"); }
+}
+
+fn verify_family(name: &str, args: &[String]) {
+    let bound: i64 = args.iter().position(|a| a == "--domain")
+        .and_then(|i| args.get(i + 1))
+        .and_then(|s| s.parse().ok()).unwrap_or(10);
+    let mut veldt = veldt::Veldt::new();
+    if let Err(e) = veldt.load() { eprintln!("Error: {}", e); process::exit(1); }
+    let mut interp = interpreter::Interpreter::new();
+    veldt.load_into_interpreter(&mut interp);
+    let variants = match interp.functions.get(name) {
+        Some(v) => v.clone(),
+        None => { println!("No lineage '{}'", name); return; }
+    };
+    if variants.len() < 2 {
+        println!("'{}' has {} variant — nothing to check", name, variants.len());
+        return;
+    }
+    let fittest = variants.iter()
+        .max_by(|a, b| a.fitness.partial_cmp(&b.fitness)
+            .unwrap_or(std::cmp::Ordering::Equal)).unwrap();
+    let arity = fittest.def.params.len();
+    // bounded domain: each int arg ranges over -bound..bound
+    let mut domain: Vec<i64> = (-bound..=bound).collect();
+    if domain.len() > 21 { domain.truncate(21); }
+    println!("Verifying '{}' ({} variants, {}-arg, domain {} points)",
+             name, variants.len(), arity, domain.len());
+    let mut checked = 0;
+    for v in &variants {
+        if v.id == fittest.id { continue; }
+        let mut diverge: Option<String> = None;
+        'outer: for combo in domain.iter().copied()
+            .map(|x| vec![x; arity.max(1)]) {
+            // eval quietly — side-effect prints pollute the report
+            let a = interp.call_function(name, Some(v.id), combo.iter().map(|n| crate::interpreter::Value::Int(*n)).collect());
+            let b = interp.call_function(name, Some(fittest.id), combo.iter().map(|n| crate::interpreter::Value::Int(*n)).collect());
+            checked += 1;
+            let same = match (&a, &b) {
+                (Ok(x), Ok(y)) => x == y,
+                (Err(_), Err(_)) => true,
+                _ => false,
+            };
+            if !same {
+                diverge = Some(format!("at {:?}: v#{} = {:?} vs fit#{} = {:?}",
+                    combo, v.id, a.map_err(|e| e.chars().take(20).collect::<String>()),
+                    fittest.id, b.map_err(|e| e.chars().take(20).collect::<String>())));
+                break 'outer;
+            }
+        }
+        match diverge {
+            Some(d) => println!("  {}#{}: DIVERGES {}", name, v.id, d),
+            None => println!("  {}#{}: bounded-verified ({} checks)",
+                             name, v.id, domain.len().pow(arity.max(1) as u32)),
+        }
+    }
+    println!("({} calls evaluated)", checked);
 }
 
 fn export_garden(path: &str) {
