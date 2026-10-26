@@ -4839,7 +4839,9 @@ fn print_family_detail(veldt: &veldt::Veldt, fam: &String, vs: &[veldt::Function
     if !sizes.is_empty() {
         let avg = sizes.iter().sum::<usize>() as f64 / sizes.len() as f64;
         let max = sizes.iter().max().unwrap();
-        println!("  size: avg {:.0} chars (peak {})", avg, max);
+        let mut sorted: Vec<f64> = sizes.iter().map(|s| *s as f64).collect();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        println!("  size: avg {:.0} chars (peak {})  {}", avg, max, spark(&sorted));
     }
     // builtin usage — which builtins the family's variants call
     let mut builtins: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
