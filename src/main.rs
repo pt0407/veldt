@@ -3385,6 +3385,7 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
             Stmt::For(name, iter, body) => {
                 if let Expr::List(items) = iter {
                     if items.is_empty() { out.push("for over an empty list — dead loop".into()); }
+                    if items.len() == 1 { out.push("for over a single-element list — one iteration".into()); }
                 }
                 if let Expr::Call(f, _, args) = iter {
                     if f == "range" && args.len() == 2 {
