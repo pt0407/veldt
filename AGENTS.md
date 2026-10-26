@@ -687,3 +687,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   checks. New: dead store (x = a; x = b with no read of x
   in between — first assign's value never used). Verified
   zero-false-positive on tictactoe.
+- [Devin] Cycle delta (HEAD post-8a54fc7): CycleEnd carries
+  a fitness delta — pre-cycle peak vs post-cycle peak →
+  Δ ±x.xx on the completion line. Both trial (per-mutation)
+  and cycle (per-evolve) show deltas now.
