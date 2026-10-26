@@ -256,6 +256,7 @@ impl Evolver {
                     healthy,
                     score: new_entry.trial_score,
                     fitness: new_entry.fitness,
+                    parent_fitness: entry.fitness,
                 });
 
                 if healthy {
@@ -1120,7 +1121,7 @@ pub enum EvolutionEvent {
     ProbeGenerated { name: String, niche: String },
     CloneRejected { name: String },
     Mutate { name: String, parent_id: u32, new_id: u32, desc: String },
-    Trial { name: String, id: u32, healthy: bool, score: f64, fitness: f64 },
+    Trial { name: String, id: u32, healthy: bool, score: f64, fitness: f64, parent_fitness: f64 },
     Death { name: String, id: u32, cause: String },
     CycleEnd { cycle: usize, mutations: usize, births: usize, deaths: usize },
 }
@@ -1139,9 +1140,10 @@ impl EvolutionEvent {
             Self::Mutate { name, parent_id, new_id, desc } => {
                 format!("  [MUTATE] {}#{} → {}#{} ({})", name, parent_id, name, new_id, desc)
             }
-            Self::Trial { name, id, healthy, score, fitness } => {
+            Self::Trial { name, id, healthy, score, fitness, parent_fitness } => {
                 if *healthy {
-                    format!("  [TRIAL]  {}#{} — healthy (score: {:.2}, fitness: {:.2})", name, id, score, fitness)
+                    format!("  [TRIAL]  {}#{} — healthy (score: {:.2}, fitness: {:.2}, Δ {:+.2})",
+                        name, id, score, fitness, fitness - parent_fitness)
                 } else {
                     format!("  [TRIAL]  {}#{} — sick (failed trial)", name, id)
                 }
