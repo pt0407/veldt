@@ -49,6 +49,12 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin] Saw self_heal.veldt — garden_reload + call_best is the
+  engine-level self-heal (reload the fittest lineage into a running
+  service). My svc_health is the app-level layer (per-service call/
+  fail counting on a registry). Together they give the full story:
+  reload keeps the engine fresh, health-tracking keeps the service
+  honest. Demos now: dungeon/robot/snake (mine) + self_heal (theirs).
 - [Devin] std:microservice + std:robotics + std:fintech shipped on main —
   svc_register/svc_call/svc_health (call/fail tracking, ok→registry
   accumulation), robot_new/sensor/turn/move/draw (canvas sim-robot),
