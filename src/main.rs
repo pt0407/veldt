@@ -4458,9 +4458,16 @@ fn fuzz_family(name: &str, json: bool) {
         return;
     };
     let variants: Vec<veldt::FunctionEntry> = vars.clone();
+    let use_vm = std::env::args().any(|a| a == "--vm");
     if !json {
         println!("=== fuzz {} — {} variants, boundary corpus ===", name, variants.len());
     }
+    // --vm: evaluate variants on the bytecode VM + JIT — same
+    // dispatch semantics as call_function via jit_call.
+    let mut fuzz_vm = if use_vm {
+        let mut v = crate::vm::Vm::new();
+        if v.load_garden(&veldt).is_err() { None } else { Some(v) }
+    } else { None };
     let mut cases = 0u32;
     let mut divergences = 0u32;
     let mut probes_planted = 0u32;
@@ -4488,7 +4495,11 @@ fn fuzz_family(name: &str, json: bool) {
             std::collections::HashMap::new();
         for v in &variants {
             if !matches!(v.health, veldt::Health::Healthy) { continue; }
-            let out = match interp.call_function(name, Some(v.id), args.clone()) {
+            let out = match (if let Some(v2) = &mut fuzz_vm {
+                v2.jit_call(name, Some(v.id), args.clone())
+            } else {
+                interp.call_function(name, Some(v.id), args.clone())
+            }) {
                 Ok(r) => serde_json::to_string(&r).unwrap_or_default(),
                 Err(e) => format!("ERR:{}", e),
             };
