@@ -3504,11 +3504,19 @@ fn print_stats(veldt: &veldt::Veldt) {
     let mut healthy = 0usize;
     let mut sick = 0usize;
     let mut dying = 0usize;
-    let mut best: Vec<(String, f64, usize)> = Vec::new();
+    // (name, peak_fitness, count, avg_age, total_usage, avg_size)
+    let mut best: Vec<(String, f64, usize, f64, u64, f64)> = Vec::new();
     for (name, variants) in &veldt.functions {
         let top = variants.iter().map(|e| e.fitness)
             .fold(f64::NEG_INFINITY, f64::max);
-        best.push((name.clone(), if variants.is_empty() { 0.0 } else { top }, variants.len()));
+        let n = variants.len().max(1) as f64;
+        let avg_age = variants.iter().map(|e| e.age as f64).sum::<f64>() / n;
+        let usage = variants.iter().map(|e| e.usage_count).sum::<u64>();
+        let avg_size = variants.iter()
+            .map(|e| crate::fmt::format_program(&e.body).len() as f64)
+            .sum::<f64>() / n;
+        best.push((name.clone(), if variants.is_empty() { 0.0 } else { top },
+            variants.len(), avg_age, usage, avg_size));
         for e in variants {
             total += 1;
             match e.health {
@@ -3519,12 +3527,16 @@ fn print_stats(veldt: &veldt::Veldt) {
         }
     }
     // --sort <field> — top-families sort key: fitness (default) | count | name
+    //                  avg_age | usage | size (per-family aggregates)
     let sort_field = std::env::args().nth(
         std::env::args().position(|a| a == "--sort").map(|p| p + 1).unwrap_or(usize::MAX))
         .unwrap_or_default();
     match sort_field.as_str() {
         "count" => best.sort_by(|a, b| b.2.cmp(&a.2)),
         "name" => best.sort_by(|a, b| a.0.cmp(&b.0)),
+        "avg_age" => best.sort_by(|a, b| b.3.partial_cmp(&a.3).unwrap_or(std::cmp::Ordering::Equal)),
+        "usage" => best.sort_by(|a, b| b.4.cmp(&a.4)),
+        "size" => best.sort_by(|a, b| b.5.partial_cmp(&a.5).unwrap_or(std::cmp::Ordering::Equal)),
         _ => best.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)),
     }
     let probe_count: usize = veldt.probes.values().map(|v| v.len()).sum();
