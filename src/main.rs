@@ -943,6 +943,17 @@ fn print_stats(veldt: &veldt::Veldt) {
             .map(|(n, c)| format!("{}:{}", n, c)).collect();
         println!("probe niches: {}", line.join(" "));
     }
+    // avg variant age — turnover: young garden = active evolution
+    let ages: Vec<u64> = veldt.functions.values()
+        .flat_map(|vs| vs.iter().map(|e| e.age)).collect();
+    if !ages.is_empty() {
+        let avg = ages.iter().sum::<u64>() / ages.len() as u64;
+        let max = ages.iter().max().unwrap_or(&0);
+        let min = ages.iter().min().unwrap_or(&0);
+        println!("variant age: avg {} ({}..{}) — {}% under 20 runs",
+            avg, min, max,
+            ages.iter().filter(|a| **a < 20).count() * 100 / ages.len());
+    }
     // fitness trend — peak per run, is the garden improving?
     if veldt.fitness_history.len() >= 2 {
         let trend: Vec<String> = veldt.fitness_history.iter()
