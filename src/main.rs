@@ -2481,6 +2481,22 @@ fn print_stats(veldt: &veldt::Veldt) {
                 let young_seedling = vs.iter().filter(|e|
                     e.age <= 10 && matches!(e.trust, veldt::Trust::Seedling)).count();
                 println!("  maturity: {} veteran·trusted · {} new·seedling", old_trusted, young_seedling);
+                // niche gaps — which niches have low coverage (the gap analysis)
+                let mut niche_avg: std::collections::HashMap<String, (f64, usize)> = std::collections::HashMap::new();
+                for e in vs.iter() {
+                    for (niche, score) in &e.niche_scores {
+                        let entry = niche_avg.entry(niche.clone()).or_insert((0.0, 0));
+                        entry.0 += score; entry.1 += 1;
+                    }
+                }
+                let gaps: Vec<_> = niche_avg.iter()
+                    .filter(|(_, (t, n))| *n > 0 && *t / *n as f64 < 0.5).collect();
+                if !gaps.is_empty() {
+                    println!("  niche gaps:");
+                    for (niche, (t, n)) in gaps.iter().take(5) {
+                        println!("    {:<20} avg {:.2} ({} variants)", niche, *t / *n as f64, n);
+                    }
+                }
             }
         }
         if veldt.fitness_history.len() >= 2 {
