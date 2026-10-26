@@ -52,7 +52,9 @@ string interpolation `"total: {n}"`, regex, JSON, HTTP client+server,
 SQLite, file I/O, threads via `spawn`/`join`/`pmap`, namespaced imports
 `import "lib.veldt" as lib`.
 
-See `examples/` — `web_server.veldt`, `csv_analysis.veldt`,
+See `examples/` — `evo_dungeon.veldt` (a roguelike where the monsters
+literally evolve between waves — run with `--evolve`), `web_server.veldt`,
+`csv_analysis.veldt`, `data_pipeline.veldt`, `algorithmic_demo.veldt`,
 `dungeon.veldt` all run today.
 
 ## The garden (the point)
