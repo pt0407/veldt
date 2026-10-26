@@ -566,6 +566,22 @@ fn main() {
                 }
                 println!("=== The Veldt (fitness >= {}) ===", min);
                 filtered.print_garden(sick_only, healthy_only);
+            } else if let Some(max_f) = args.iter().position(|a| a == "--max_fit")
+                .and_then(|p| args.get(p + 1)).and_then(|s| s.parse::<f64>().ok()) {
+                // --max_fit <n> — variants with fitness <= n (the weak)
+                let mut filtered = veldt::Veldt::new();
+                filtered.probes = veldt.probes.clone();
+                filtered.obituaries = veldt.obituaries.clone();
+                filtered.run_count = veldt.run_count;
+                filtered.garden_path = veldt.garden_path.clone();
+                for (name, vs) in &veldt.functions {
+                    let keep: Vec<_> = vs.iter()
+                        .filter(|e| e.fitness <= max_f)
+                        .cloned().collect();
+                    if !keep.is_empty() { filtered.functions.insert(name.clone(), keep); }
+                }
+                println!("=== The Veldt (fitness <= {}) ===", max_f);
+                filtered.print_garden(sick_only, healthy_only);
             } else if let Some(max_ls) = args.iter().position(|a| a == "--max_lifespan")
                 .and_then(|p| args.get(p + 1)).and_then(|s| s.parse::<f64>().ok()) {
                 // --max_lifespan <n> — variants with lifespan <= n
