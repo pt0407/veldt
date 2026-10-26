@@ -3552,6 +3552,19 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                                 out.push(format!("let {} = {} — {} is bound to a computed expr, could reuse", name, v, v));
                                 break;
                             }
+                            // let a = b where b was let-bound to Var(c) bound to a literal — transitive const
+                            if n == v {
+                                if let Expr::Var(w) = pe {
+                                    for (_, s2) in stmts.iter().enumerate().take(i) {
+                                        if let Stmt::Let(n2, e2) = s2 {
+                                            if n2 == w && matches!(e2, Expr::Int(_) | Expr::Str(_) | Expr::Bool(_) | Expr::Null) {
+                                                out.push(format!("let {} = {} — {} is bound to a literal through {}", name, v, v, w));
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
