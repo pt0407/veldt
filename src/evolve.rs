@@ -65,15 +65,18 @@ impl Evolver {
             let mut spent = 0;
 
             // Collect candidates: healthy functions with tests, sorted by usage (high usage = important)
-            let clauses: Vec<String> = self.filter.as_ref()
-                .map(|f| f.split("&&").map(|s| s.trim().to_string()).collect())
+            let or_groups: Vec<Vec<String>> = self.filter.as_ref()
+                .map(|f| f.split("||")
+                    .map(|g| g.split("&&").map(|s| s.trim().to_string()).collect())
+                    .collect())
                 .unwrap_or_default();
             let candidates: Vec<(String, u32)> = veldt.functions.iter()
                 .filter(|(name, _)| only.map(|n| n == name.as_str()).unwrap_or(true))
                 .flat_map(|(name, variants)| {
                     variants.iter()
                         .filter(|e| matches!(e.health, Health::Healthy) && !e.tests.is_empty()
-                            && clauses.iter().all(|c| crate::veldt::variant_matches(e, c)))
+                            && (or_groups.is_empty() || or_groups.iter().any(|g|
+                                g.iter().all(|c| crate::veldt::variant_matches(e, c)))))
                         .map(|e| (name.clone(), e.id))
                         .collect::<Vec<_>>()
                 })
