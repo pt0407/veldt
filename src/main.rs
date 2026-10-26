@@ -1047,11 +1047,19 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
                 out.extend(sub.into_iter().map(|w| format!("{}: {}", name, w)));
             }
             Stmt::Let(name, _) => bound.push((i, name)),
-            Stmt::If(_, a, b) => {
+            Stmt::If(cond, a, b) => {
+                if let Some(lit) = const_bool(cond) {
+                    out.push(format!("if on constant {} — dead branch", lit));
+                }
                 lint_block(a, out);
                 if let Some(e) = b { lint_block(e, out); }
             }
-            Stmt::While(_, body) | Stmt::For(_, _, body) => lint_block(body, out),
+            Stmt::While(cond, body) | Stmt::For(_, cond, body) => {
+                if let Some(lit) = const_bool(cond) {
+                    out.push(format!("loop on constant {} — dead or infinite", lit));
+                }
+                lint_block(body, out);
+            }
             Stmt::Try(a, _, b) => { lint_block(a, out); lint_block(b, out); }
             Stmt::Match(_, arms, els) => {
                 for (_, body) in arms { lint_block(body, out); }
@@ -1084,6 +1092,19 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
                 out.push(format!("let {} shadows an earlier binding in this block", name));
             }
         }
+    }
+}
+
+/// Is this expr a compile-time literal? Returns a label for the warning.
+fn const_bool(e: &ast::Expr) -> Option<&'static str> {
+    match e {
+        ast::Expr::Bool(true) => Some("true"),
+        ast::Expr::Bool(false) => Some("false"),
+        ast::Expr::Int(0) => Some("0"),
+        ast::Expr::Null => Some("null"),
+        ast::Expr::UnaryOp(ast::UnaryOp::Not, inner) if const_bool(inner).is_some() =>
+            Some("!const"),
+        _ => None,
     }
 }
 
