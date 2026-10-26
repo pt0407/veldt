@@ -808,3 +808,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   on file mtime change (2s poll) — the file-level
   equivalent of stats/garden/lineage --watch. check is
   now run/print closures + a watch loop.
+- [Devin] veldt test --watch (HEAD post-cadeb14): re-trials
+  on garden-file mtime change — a live test view while
+  evolving. check --watch (file-level) + test --watch
+  (garden-level) both exist now.
