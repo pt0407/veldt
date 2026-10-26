@@ -566,6 +566,22 @@ fn main() {
                 }
                 println!("=== The Veldt (fitness >= {}) ===", min);
                 filtered.print_garden(sick_only, healthy_only);
+            } else if args.iter().any(|a| a == "--probes") {
+                // most-probed families first — sort families by probe count desc
+                let mut sorted = veldt::Veldt::new();
+                sorted.probes = veldt.probes.clone();
+                sorted.obituaries = veldt.obituaries.clone();
+                sorted.run_count = veldt.run_count;
+                sorted.garden_path = veldt.garden_path.clone();
+                let mut fams: Vec<(&String, &Vec<veldt::FunctionEntry>)> =
+                    veldt.functions.iter().collect();
+                fams.sort_by(|a, b| veldt.probes.get(*b.0).map(|p| p.len()).unwrap_or(0)
+                    .cmp(&veldt.probes.get(*a.0).map(|p| p.len()).unwrap_or(0)));
+                for (name, vs) in fams {
+                    sorted.functions.insert(name.clone(), vs.clone());
+                }
+                println!("=== The Veldt (most-probed first) ===");
+                sorted.print_garden(sick_only, healthy_only);
             } else if args.iter().any(|a| a == "--args") {
                 // most-args first — sort each family by param count desc
                 let mut sorted = veldt::Veldt::new();
