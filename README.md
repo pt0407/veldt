@@ -47,10 +47,17 @@ veldt run hello.veldt --vm              # bytecode VM + Cranelift JIT
 `--vm` runs the same source on a stack-based bytecode VM (covers the
 full scripting subset — closures, imports, match, `?.`, slices,
 comprehensions, try/catch, `call_best`). Hot functions compile to
-native via Cranelift after 64 calls — pure-int and pure-float
-functions including recursion and cross-function calls. On
-`dict_ops` that's ~32×, on recursive fib ~88× vs the tree-walk
-reference interpreter.
+native via Cranelift after 64 calls — three signature modes cover
+the ENTIRE instruction set: pure-int (`i64` sigs, fib 88x),
+pure-float (`f64` sigs), and a boxed-Value ABI for everything else
+(strings, lists, dicts, structs, methods incl. write-back, try/catch,
+closures — `garden --jit` reports 37/37 = 100%). Direct native calls
+between value-mode fns share one arena — no clone dance. Also on
+`veldt test/fuzz/evolve/repl/tournament/watch --vm`,
+`veldt run --vm --trace` (per-step instr dump), `stats --verified`
+(bounded-check census), and `POST /api/run {"vm": true}`.
+Honest perf: numeric code 3-88x; string/list/dict ~1.7x (helpers do
+the work — the win is removing dispatch, not making ops faster).
 
 ## The language
 
