@@ -262,6 +262,9 @@ pub fn respond(task: &str, editor_source: &str, veldt: &mut Veldt) -> AgentRespo
             return lineage_intent(&words, veldt);
         }
     }
+    if has(&["most used", "hot", "hottest", "busiest", "workload", "usage"]) {
+        return usage_intent(&words, veldt);
+    }
     if has(&["garden", "status", "alive", "what's growing", "what is growing", "what have you", "ecosystem"]) {
         return status_intent(veldt);
     }
@@ -825,6 +828,33 @@ fn lineage_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
         return plain(&text);
     }
     plain("Whose lineage? e.g. \"fib#145 parents\" or \"fib lineage\".")
+}
+
+/// Usage — the workload leaders (variants by usage_count).
+fn usage_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
+    if let Some(name) = find_lineage(words, veldt) {
+        let vs = match veldt.functions.get(&name) {
+            Some(v) => v,
+            None => return plain(&format!("No lineage called '{}'.", name)),
+        };
+        let mut sorted: Vec<&FunctionEntry> = vs.iter().collect();
+        sorted.sort_by(|a, b| b.usage_count.cmp(&a.usage_count));
+        let total: u64 = vs.iter().map(|e| e.usage_count).sum();
+        let mut text = format!("{} — {} total calls\n", name, total);
+        for e in sorted.iter().take(5) {
+            text.push_str(&format!("  #{} — {} calls (fit {:.2})\n",
+                e.id, e.usage_count, e.fitness));
+        }
+        return plain(&text);
+    }
+    let mut all: Vec<(&String, &FunctionEntry)> = veldt.functions.iter()
+        .flat_map(|(n, vs)| vs.iter().map(move |e| (n, e))).collect();
+    all.sort_by(|a, b| b.1.usage_count.cmp(&a.1.usage_count));
+    let mut text = String::from("Hottest variants:\n");
+    for (n, e) in all.iter().take(8) {
+        text.push_str(&format!("  {}#{} — {} calls\n", n, e.id, e.usage_count));
+    }
+    plain(&text)
 }
 
 /// Parse a bare word that looks like a function name (optionally name#N).
