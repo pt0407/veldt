@@ -1302,3 +1302,6 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 - [Devin] bench --lint: strict-lint is FAST (0.2-2.3ms/file,
   4.8ms garden census) — IDE debounced lint + garden --watch
   are comfortably in budget.
+- [Devin] check --fail: CI gate — exit 1 on defect-class
+  warnings (file/stdin + --garden). Advisory warnings pass;
+  defects fail the build.
