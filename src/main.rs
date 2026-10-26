@@ -1815,6 +1815,16 @@ fn main() {
             } else {
                 print_stats(&veldt);
             }
+            // --watch — re-render on a 2s poll until interrupted
+            if args.iter().any(|a| a == "--watch") {
+                loop {
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                    let mut v2 = veldt::Veldt::new();
+                    if v2.load().is_err() { break; }
+                    print!("\x1b[2J\x1b[H");
+                    print_stats(&v2);
+                }
+            }
         }
         "bench" => {
             // veldt bench <file.veldt> — single-workload timing (N reps)
