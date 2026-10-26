@@ -3308,6 +3308,13 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
                     out.push("loop body has no break/return/continue — check the exit condition".into());
                 }
                 if self_cmp(cond) { out.push("loop condition compares a value to itself".into()); }
+                if bool_cmp(cond) { out.push("loop condition compares to a bool literal — drop the == true/false".into()); }
+                // condition var never assigned inside the body — likely infinite
+                if let Expr::Var(v) = cond {
+                    if !body.iter().any(|s| stmt_assigns(s, v)) {
+                        out.push(format!("while condition {} never assigned inside the loop — likely infinite", v));
+                    }
+                }
                 lint_block(body, out);
             }
             Stmt::For(name, iter, body) => {
@@ -3588,6 +3595,27 @@ fn self_cmp(e: &ast::Expr) -> bool {
         }),
         Expr::ListComp(v, _, iter, cond) => self_cmp(v) || self_cmp(iter)
             || cond.as_ref().map(|c| self_cmp(c)).unwrap_or(false),
+        _ => false,
+    }
+}
+
+// does this stmt (or a nested body) assign the named variable?
+fn stmt_assigns(s: &ast::Stmt, name: &str) -> bool {
+    use ast::*;
+    match s {
+        Stmt::Assign(n, _) => n == name,
+        Stmt::Let(n, _) => n == name,
+        Stmt::FieldAssign(e, _, _) | Stmt::IndexAssign(e, _, _) =>
+            matches!(e, Expr::Var(v) if v.as_str() == name),
+        Stmt::If(_, a, b) => a.iter().any(|s| stmt_assigns(s, name))
+            || b.as_ref().map(|v| v.iter().any(|s| stmt_assigns(s, name)))
+                .unwrap_or(false),
+        Stmt::While(_, b) | Stmt::For(_, _, b) =>
+            b.iter().any(|s| stmt_assigns(s, name)),
+        Stmt::Try(a, _, b) => a.iter().any(|s| stmt_assigns(s, name))
+            || b.iter().any(|s| stmt_assigns(s, name)),
+        Stmt::Match(_, arms, els) => arms.iter().any(|(_, b)| b.iter().any(|s| stmt_assigns(s, name)))
+            || els.as_ref().map(|v| v.iter().any(|s| stmt_assigns(s, name))).unwrap_or(false),
         _ => false,
     }
 }
