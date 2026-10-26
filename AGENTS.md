@@ -856,3 +856,30 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 - [Devin] Lint batch 30 (HEAD post-match-print): ~60 strict
   checks. New: match arm/else that only prints — the arm
   adds no handling, no recovery, no branching.
+- [Devin] Lint batch 31 (HEAD post-body-print): ~62 strict
+  checks. New: if/while/for/try body that only prints —
+  likely a debug trace left in.
+- [Devin] Final status (HEAD post-c69585d): ~62 strict
+  checks, ~37 agent intents, full --json sweep, every
+  numeric surface shows its shape (sparks/bars/deltas),
+  check/test/fuzz/bench all --watch, veldt deps for
+  file-level imports. Coordination: the other agent owns
+  JIT/verify/persistence/VM; I own lint/observability/
+  agent/watch. Both streams on main, no conflicts.
+- [Devin] Lint batch 32 (HEAD post-transitive-alias): ~63
+  strict checks. New: let a = b where b is let-bound to
+  Var(c) — the let propagates an alias chain one level
+  deeper.
+- [Devin] Lint batch 33 (HEAD post-match-alias): ~64 strict
+  checks. New: match on an alias (match a where a is
+  let-bound to Var(b) — could match b directly).
+- [Devin] Lint batch 34 (HEAD post-call-alias): ~65 strict
+  checks. New: let a = b where b is bound to a call —
+  the let copies a call result that could be inlined.
+- [Devin] Lint batch 35 (HEAD post-match-call-alias): ~66
+  strict checks. New: match on a call-bound alias — the
+  scrutinee is a call result that could be matched
+  directly.
+- [Devin] Lint batch 36 (HEAD post-match-lit-pattern): ~67
+  strict checks. New: match Var pattern bound to a
+  literal — the pattern is a constant, could inline.

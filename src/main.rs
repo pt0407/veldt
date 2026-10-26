@@ -3477,6 +3477,16 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                                 out.push(format!("let {} = {} — {} is a constant alias", name, v, v));
                                 break;
                             }
+                            // let a = b where b was let-bound to Var(c) — transitive alias
+                            if n == v && matches!(pe, Expr::Var(_)) {
+                                out.push(format!("let {} = {} — {} is an alias itself", name, v, v));
+                                break;
+                            }
+                            // let a = b where b was let-bound to a call — the let copies a call result
+                            if n == v && matches!(pe, Expr::Call(..) | Expr::MethodCall(..)) {
+                                out.push(format!("let {} = {} — {} is bound to a call, could inline", name, v, v));
+                                break;
+                            }
                         }
                     }
                 }
@@ -3526,6 +3536,10 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                     && b.as_ref().map(|e| e.len() == 1 && matches!(&e[0], Stmt::ExprStmt(x) if is_pure(x))).unwrap_or(true) {
                     out.push("if body is a bare expression — computed and discarded".into());
                 }
+                if a.len() == 1 && matches!(a[0], Stmt::Print(_))
+                    && b.as_ref().map(|e| e.len() == 1 && matches!(e[0], Stmt::Print(_))).unwrap_or(true) {
+                    out.push("if body only prints — likely a debug trace".into());
+                }
                 if b.is_none() && a.len() == 1 {
                     if let Stmt::If(_, _, inner_else) = &a[0] {
                         if inner_else.is_none() {
@@ -3562,6 +3576,9 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
             Stmt::While(cond, body) => {
                 if body.len() == 1 && matches!(body[0], Stmt::ExprStmt(_)) {
                     out.push("loop body is a bare expression — computed and discarded".into());
+                }
+                if body.len() == 1 && matches!(body[0], Stmt::Print(_)) {
+                    out.push("loop body only prints — likely a debug trace".into());
                 }
                 if let Some(lit) = const_bool(cond) {
                     out.push(format!("loop on constant {} — dead or infinite", lit));
@@ -3608,6 +3625,9 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
             Stmt::For(name, iter, body) => {
                 if body.len() == 1 && matches!(body[0], Stmt::ExprStmt(_)) {
                     out.push("loop body is a bare expression — computed and discarded".into());
+                }
+                if body.len() == 1 && matches!(body[0], Stmt::Print(_)) {
+                    out.push("loop body only prints — likely a debug trace".into());
                 }
                 if let Expr::List(items) = iter {
                     if items.is_empty() { out.push("for over an empty list — dead loop".into()); }
@@ -3678,6 +3698,14 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                                 out.push(format!("match on {} — bound to a constant literal", v));
                                 break;
                             }
+                            if n == v && matches!(e, Expr::Var(_)) {
+                                out.push(format!("match on {} — an alias for another var", v));
+                                break;
+                            }
+                            if n == v && matches!(e, Expr::Call(..) | Expr::MethodCall(..)) {
+                                out.push(format!("match on {} — bound to a call, could match the call", v));
+                                break;
+                            }
                         }
                     }
                 }
@@ -3717,6 +3745,15 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                         if v != "_" && !bound.iter().any(|(_, b)| *b == v)
                             && !outer.contains(v.as_str()) {
                             out.push(format!("match pattern {} is unbound — never matches", v));
+                        }
+                        // Var pattern bound to a literal — the pattern is a constant
+                        for (_, s) in stmts.iter().enumerate().take(i) {
+                            if let Stmt::Let(n, pe) = s {
+                                if n == v && matches!(pe, Expr::Int(_) | Expr::Str(_) | Expr::Bool(_) | Expr::Null) {
+                                    out.push(format!("match pattern {} is bound to a literal — inline it", v));
+                                    break;
+                                }
+                            }
                         }
                     }
                 }
