@@ -381,11 +381,12 @@ fn main() {
                     .map(|(n, _)| n.clone())
                     .collect();
                 println!("[fuzz --filter {} — {} families]", expr, names.len());
+                let json = args.iter().any(|a| a == "--json");
                 for name in &names {
-                    fuzz_family(name);
+                    fuzz_family(name, json);
                 }
             } else if args[2] == "--all" || args[2] == "--ci" {
-                fuzz_all();
+                fuzz_all(args.iter().any(|a| a == "--json"));
                 // --ci: exit nonzero if any family diverged — CI gate
                 if args[2] == "--ci" {
                     let mut veldt = veldt::Veldt::new();
@@ -399,7 +400,7 @@ fn main() {
                     }
                 }
             } else {
-                fuzz_family(&args[2]);
+                fuzz_family(&args[2], args.iter().any(|a| a == "--json"));
             }
         }
         "check" => {
@@ -3614,7 +3615,7 @@ fn start_repl() {
                         veldt.merge_traces(&interp.traces);
                         absorb_traces(None); }
                     _ if trimmed.starts_with(":fuzz ") => {
-                        let _ = veldt.load(); fuzz_family(trimmed[6..].trim());
+                        let _ = veldt.load(); fuzz_family(trimmed[6..].trim(), false);
                     }
                     ":help" | _ => {
                         println!(":help  this help"); println!(":quit  exit");
@@ -3737,35 +3738,39 @@ fn tournament(url: &str, only: Option<&str>) {
 /// of a family, group outputs, flag variants that diverge from the
 /// consensus answer — boundary bugs evolution should kill.
 /// Garden-wide boundary sweep — fuzz every family, summary report.
-fn fuzz_all() {
+fn fuzz_all(json: bool) {
     let mut veldt = veldt::Veldt::new();
     if let Err(e) = veldt.load() { eprintln!("Error: {}", e); process::exit(1); }
     let names: Vec<String> = veldt.functions.keys().cloned().collect();
-    println!("=== fuzz --all — {} families ===", names.len());
+    if !json { println!("=== fuzz --all — {} families ===", names.len()); }
     for name in &names {
-        // reuse the single-family sweep but quiet the per-variant banner
-        let before = std::time::Instant::now();
-        // call the same path; it prints its own report
-        println!("--- {}", name);
-        // inline call: fuzz_family reloads the garden — acceptable, keeps logic single-sourced
-        let _ = before;
+        if !json { println!("--- {}", name); }
         drop(veldt);
-        fuzz_family(name);
+        fuzz_family(name, json);
         veldt = veldt::Veldt::new();
         let _ = veldt.load();
     }
 }
 
-fn fuzz_family(name: &str) {
+fn fuzz_family(name: &str, json: bool) {
     let mut veldt = veldt::Veldt::new();
     if let Err(e) = veldt.load() { eprintln!("Error: {}", e); process::exit(1); }
     let Some(vars) = veldt.functions.get(name) else {
-        println!("No variants of '{}'", name); return;
+        if json {
+            println!("{}", serde_json::json!({"family": name, "error": "no variants"}));
+        } else {
+            println!("No variants of '{}'", name);
+        }
+        return;
     };
     let variants: Vec<veldt::FunctionEntry> = vars.clone();
-    println!("=== fuzz {} — {} variants, boundary corpus ===", name, variants.len());
+    if !json {
+        println!("=== fuzz {} — {} variants, boundary corpus ===", name, variants.len());
+    }
     let mut cases = 0u32;
     let mut divergences = 0u32;
+    let mut probes_planted = 0u32;
+    let mut divergent_cases: Vec<serde_json::Value> = Vec::new();
     // sweep each param-position boundary value (up to 8 cases per arg slot)
     for case in 0..8 {
         // build args: boundary value for every param (any/unknown -> int)
@@ -3796,11 +3801,22 @@ fn fuzz_family(name: &str) {
         }
         if by_out.len() > 1 {
             divergences += 1;
-            println!("  case {} args {:?}:", case,
-                args.iter().map(|a| format!("{:?}", a)).collect::<Vec<_>>().join(","));
-            for (out, ids) in &by_out {
-                println!("    {} -> #{}", out, ids.iter().map(|i| i.to_string())
-                    .collect::<Vec<_>>().join(", #"));
+            if json {
+                divergent_cases.push(serde_json::json!({
+                    "case": case,
+                    "args": args.iter().map(|a| serde_json::to_string(a).unwrap_or_default())
+                        .collect::<Vec<_>>(),
+                    "groups": by_out.iter().map(|(out, ids)| serde_json::json!({
+                        "output": out, "variants": ids,
+                    })).collect::<Vec<_>>(),
+                }));
+            } else {
+                println!("  case {} args {:?}:", case,
+                    args.iter().map(|a| format!("{:?}", a)).collect::<Vec<_>>().join(","));
+                for (out, ids) in &by_out {
+                    println!("    {} -> #{}", out, ids.iter().map(|i| i.to_string())
+                        .collect::<Vec<_>>().join(", #"));
+                }
             }
             // divergence -> probe: majority answer becomes expected, so
             // dissenting variants fail this case on their next trial —
@@ -3820,7 +3836,10 @@ fn fuzz_family(name: &str) {
                                 .map(|d| d.as_secs()).unwrap_or(0),
                             scale: 0,
                         });
-                        println!("    ^ probe planted — dissenters will fail it next trial");
+                        probes_planted += 1;
+                        if !json {
+                            println!("    ^ probe planted — dissenters will fail it next trial");
+                        }
                     }
                 }
             }
@@ -3829,7 +3848,16 @@ fn fuzz_family(name: &str) {
     if divergences > 0 {
         veldt.save().unwrap_or_else(|e| eprintln!("Save error: {}", e));
     }
-    println!("{} boundary cases, {} divergent", cases, divergences);
+    if json {
+        println!("{}", serde_json::json!({
+            "family": name, "variants": variants.len(),
+            "cases": cases, "divergences": divergences,
+            "probes_planted": probes_planted,
+            "divergent_cases": divergent_cases,
+        }));
+    } else {
+        println!("{} boundary cases, {} divergent", cases, divergences);
+    }
 }
 
 /// Show two variants' bodies side by side — lines present in only one
