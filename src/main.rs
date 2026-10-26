@@ -1141,6 +1141,19 @@ fn print_stats(veldt: &veldt::Veldt) {
             println!("  {}: {}", name, line.join(" "));
         }
     }
+    // health at death — are the dead mostly sick (working) or healthy (wasteful)
+    if !veldt.obituaries.is_empty() {
+        let (mut h, mut s, mut d) = (0usize, 0usize, 0usize);
+        for o in &veldt.obituaries {
+            match o.health {
+                veldt::Health::Healthy => h += 1,
+                veldt::Health::Sick(_) => s += 1,
+                veldt::Health::Dying => d += 1,
+            }
+        }
+        println!("death health: {} healthy, {} sick, {} dying",
+            h, s, d);
+    }
     // fitness trend — peak per run, is the garden improving?
     if veldt.fitness_history.len() >= 2 {
         let trend: Vec<String> = veldt.fitness_history.iter()
