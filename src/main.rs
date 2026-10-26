@@ -3702,6 +3702,10 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                                 out.push(format!("match on {} — an alias for another var", v));
                                 break;
                             }
+                            if n == v && matches!(e, Expr::Call(..) | Expr::MethodCall(..)) {
+                                out.push(format!("match on {} — bound to a call, could match the call", v));
+                                break;
+                            }
                         }
                     }
                 }
