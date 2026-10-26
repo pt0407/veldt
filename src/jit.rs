@@ -105,7 +105,10 @@ impl JitEngine {
         let ok = self.define(fid, &key, &chosen.code, arity, fns, false);
         self.compiling.remove(&key);
         if ok {
-            if self.module.finalize_definitions().is_err() { return None; }
+            if let Err(e) = self.module.finalize_definitions() {
+                eprintln!("jit: finalize {}: {:?}", key, e);
+                return None;
+            }
             let p = self.module.get_finalized_function(fid);
             self.ptrs.insert(key.clone(), (p, false));
             return Some(JitFn { code_ptr: p, is_float: false });
@@ -142,7 +145,10 @@ impl JitEngine {
         for instr in &chunk.code {
             if let Instr::Call(ni, argc) = instr {
                 let cn = &chunk.names[*ni as usize];
-                if cn != own_name {
+                // inline int builtins (abs/max/min) don't need fns —
+                // they lower to native ops in the Call arm below
+                let inlined = matches!(cn.as_str(), "abs" | "min" | "max");
+                if cn != own_name && !inlined {
                     let vf = match fns.get(cn) {
                         Some(v) => v,
                         None => return false,   // builtin — not jittable
@@ -280,6 +286,33 @@ impl JitEngine {
                     Instr::Call(ni, argc) => {
                         if float { ok = false; break; }
                         let cn = chunk.names[ni as usize].clone();
+                        // inline int builtins — abs/max/min don't need
+                        // fn resolution, they lower to native ops
+                        match (cn.as_str(), argc) {
+                            ("abs", 1) => {
+                                let Some(x) = stack.pop() else {
+                                    fail_pc = pc; ok = false; break; };
+                                let z = b.ins().iconst(types::I64, 0);
+                                let nx = b.ins().isub(z, x);
+                                let neg = b.ins().icmp(IntCC::SignedLessThan, x, z);
+                                stack.push(b.ins().select(neg, nx, x));
+                                pc += 1; continue;
+                            }
+                            ("max", 2) | ("min", 2) => {
+                                let (Some(r), Some(l)) = (stack.pop(), stack.pop())
+                                    else { fail_pc = pc; ok = false; break; };
+                                // max/min = select(l>r / l<r, l, r)
+                                let cc = if cn == "max" {
+                                    IntCC::SignedGreaterThan
+                                } else {
+                                    IntCC::SignedLessThan
+                                };
+                                let cmp = b.ins().icmp(cc, l, r);
+                                stack.push(b.ins().select(cmp, l, r));
+                                pc += 1; continue;
+                            }
+                            _ => {}
+                        }
                         // self-recursion: own_name is `name#id`
                         if cn != own_name.rsplit_once('#')
                             .map(|(n, _)| n).unwrap_or(own_name) {
@@ -367,8 +400,8 @@ impl JitEngine {
                 pc += 1;
             }
             if !ok {
-                self.fail_at.insert(own_name.to_string(),
-                    if fail_pc != usize::MAX { fail_pc } else { pc });
+                let fp = if fail_pc != usize::MAX { fail_pc } else { pc };
+                self.fail_at.insert(own_name.to_string(), fp);
                 return false;
             }
             let blks: Vec<cranelift_codegen::ir::Block> =
