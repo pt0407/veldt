@@ -532,6 +532,7 @@ fn main() {
                     .and_then(|i| args.get(i + 1))
                     .filter(|s| !s.starts_with("--"));
                 let fix = args.iter().any(|a| a == "--fix");
+                let verify = args.iter().any(|a| a == "--verify");
                 let bugs_only = args.iter().any(|a| a == "--bugs");
                 let mut v = veldt::Veldt::new();
                 if v.load().is_err() {
@@ -541,12 +542,14 @@ fn main() {
                 let mut total = 0usize;
                 let mut flagged = 0usize;
                 let mut repaired = 0usize;
+                let mut repaired_ids: Vec<(String, u32)> = Vec::new();
                 for (name, entries) in v.functions.iter_mut() {
                     if let Some(f) = fam { if name != f { continue; } }
                     for e in entries.iter_mut() {
                         if fix && (health::HealthChecker::repair_dead_tail(&mut e.body)
                                 | health::HealthChecker::repair_dead_lets(&mut e.body)) {
                             repaired += 1;
+                            repaired_ids.push((name.clone(), e.id));
                             if !json_out {
                                 eprintln!("  [FIX] {}#{} — removed dead code", name, e.id);
                             }
@@ -578,6 +581,30 @@ fn main() {
                                         .unwrap_or(w.as_str()));
                             }
                         }
+                    }
+                }
+                // --verify: re-trial every repaired variant — proves the
+                // mechanical passes preserved semantics; writes back the
+                // honest post-repair health/fitness
+                if fix && verify && !repaired_ids.is_empty() {
+                    let mut failed = 0usize;
+                    for (name, id) in &repaired_ids {
+                        let mut entry = v.functions[name].iter()
+                            .find(|e| e.id == *id).cloned().unwrap();
+                        health::HealthChecker::check_at_birth_with(&mut entry, &v, false);
+                        if !matches!(entry.health, veldt::Health::Healthy) {
+                            failed += 1;
+                            eprintln!("  ⚠ {}#{} — re-trial FAILED after repair (score {:.2})",
+                                name, id, entry.trial_score);
+                        }
+                        if let Some(vs) = v.functions.get_mut(name) {
+                            for e in vs.iter_mut() {
+                                if e.id == *id { *e = entry.clone(); break; }
+                            }
+                        }
+                    }
+                    if failed == 0 && !json_out {
+                        println!("  verify: {} repaired variant(s) re-trialed healthy", repaired_ids.len());
                     }
                 }
                 if fix && repaired > 0 { let _ = v.save(); }
