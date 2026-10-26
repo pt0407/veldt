@@ -566,6 +566,26 @@ fn main() {
                 }
                 println!("=== The Veldt (fitness >= {}) ===", min);
                 filtered.print_garden(sick_only, healthy_only);
+            } else if let Some(spec) = args.iter().position(|a| a == "--min_niche_score")
+                .and_then(|p| args.get(p + 1)).cloned() {
+                // --min_niche_score <niche:min> — variants scoring >= min on this niche
+                let (niche, min_s) = spec.split_once(':')
+                    .and_then(|(n, s)| s.parse::<f64>().ok().map(|m| (n.to_string(), m)))
+                    .unwrap_or(("".to_string(), 0.0));
+                let mut filtered = veldt::Veldt::new();
+                filtered.probes = veldt.probes.clone();
+                filtered.obituaries = veldt.obituaries.clone();
+                filtered.run_count = veldt.run_count;
+                filtered.garden_path = veldt.garden_path.clone();
+                for (name, vs) in &veldt.functions {
+                    let keep: Vec<_> = vs.iter()
+                        .filter(|e| e.niche_scores.get(&niche)
+                            .map(|s| *s >= min_s).unwrap_or(false))
+                        .cloned().collect();
+                    if !keep.is_empty() { filtered.functions.insert(name.clone(), keep); }
+                }
+                println!("=== The Veldt ({} >= {}) ===", niche, min_s);
+                filtered.print_garden(sick_only, healthy_only);
             } else if let Some(act_n) = args.iter().position(|a| a == "--active")
                 .and_then(|p| args.get(p + 1)).and_then(|s| s.parse::<u64>().ok()) {
                 // --active <n> — variants used within the last n runs
