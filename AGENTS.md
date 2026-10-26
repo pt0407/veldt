@@ -1057,3 +1057,6 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 - [Devin] Lint batch 47 (HEAD post-match-trans-const): ~78
   strict checks. New: match on a transitive-constant var —
   the scrutinee is a constant through an alias chain.
+- [Devin] Lint batch 48 (HEAD post-match-trans-call): ~79
+  strict checks. New: match on a transitive-call var —
+  the scrutinee is a call result through an alias chain.
