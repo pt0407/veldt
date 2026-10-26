@@ -2497,6 +2497,12 @@ fn print_stats(veldt: &veldt::Veldt) {
                         println!("    {:<20} avg {:.2} ({} variants)", niche, *t / *n as f64, n);
                     }
                 }
+                // proven/risky — the family's deployment-readiness split
+                let proven = vs.iter().filter(|e| matches!(e.health, Health::Healthy)
+                    && matches!(e.trust, veldt::Trust::Established | veldt::Trust::Canonical)).count();
+                let risky = vs.iter().filter(|e| matches!(e.health, Health::Sick(_))
+                    && matches!(e.trust, veldt::Trust::Seedling)).count();
+                println!("  proven: {} · risky: {}", proven, risky);
             }
         }
         if veldt.fitness_history.len() >= 2 {
