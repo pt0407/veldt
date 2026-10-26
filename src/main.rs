@@ -424,6 +424,8 @@ fn print_docs(topic: Option<&str>) {
         ("join", "join(task_id) -> value", "wait for task"),
         ("pmap", "pmap(\"fn\", list) -> list", "parallel map over garden fn"),
         ("call_best", "call_best(\"name\", args) -> value", "dispatch fittest variant"),
+        ("sandbox_run", "sandbox_run(\"name\", args) -> value", "call fn with all capabilities denied (Stage 0)"),
+        ("shadow_call", "shadow_call(\"name\", args) -> value", "all variants run sandboxed; champion's result returns, divergences logged (Stage 1)"),
         ("read_file", "read_file(path) -> str", ""),
         ("write_file", "write_file(path, content)", ""),
     ];
@@ -797,7 +799,7 @@ fn start_repl() {
     let names: Vec<String> = ["fn","grow","let","while","for","if","else","return",
         "match","test","try","spawn","import","print","len","push","split","join",
         "sort","map","filter","reduce","keys","values","dict","list","range",
-        "call_best","env","args","exit","fetch","re_match","format","str","int"]
+        "call_best","sandbox_run","shadow_call","env","args","exit","fetch","re_match","format","str","int"]
         .iter().map(|s| s.to_string())
         .chain(veldt.functions.keys().cloned())
         .collect();
