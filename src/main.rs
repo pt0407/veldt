@@ -2114,6 +2114,22 @@ fn print_stats(veldt: &veldt::Veldt) {
                     let t = match e.trust { veldt::Trust::Canonical => "canon", veldt::Trust::Established => "estab", _ => "seed" };
                     println!("    {}#{:<3} fit {:.2} | age {} | usage {} | {} {}", e.name, e.id, e.fitness, e.age, e.usage_count, h, t);
                 }
+                // per-niche avg scores — the family's niche coverage
+                let mut niche_totals: std::collections::HashMap<String, (f64, usize)> = std::collections::HashMap::new();
+                for e in vs.iter() {
+                    for (niche, score) in &e.niche_scores {
+                        let entry = niche_totals.entry(niche.clone()).or_insert((0.0, 0));
+                        entry.0 += score; entry.1 += 1;
+                    }
+                }
+                if !niche_totals.is_empty() {
+                    println!("  niche coverage:");
+                    let mut niches: Vec<_> = niche_totals.iter().collect();
+                    niches.sort_by(|a, b| a.0.cmp(&b.0));
+                    for (niche, (total, count)) in niches.iter().take(10) {
+                        println!("    {:<20} avg {:.2} ({} variants)", niche, total / *count as f64, count);
+                    }
+                }
             }
         }
         if veldt.fitness_history.len() >= 2 {
