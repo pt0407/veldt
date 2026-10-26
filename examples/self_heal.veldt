@@ -1,0 +1,30 @@
+# self_heal.veldt — a service whose responder fn lives in the garden.
+# Run with --evolve and the garden mutates `respond` between cycles;
+# garden_reload() picks up the fittest lineage without a restart.
+#
+#   veldt run examples/self_heal.veldt --evolve
+#   veldt run examples/self_heal.veldt --vm --evolve   (fast engine)
+
+grow fn respond(name: str) {
+    return "hello " + name + " (v1)"
+}
+
+grow fn latency_estimate(ms: int) test latency_estimate(100) == 110 {
+    return ms + ms / 10
+}
+
+let requests = ["ana", "bob", "carol", "dana"]
+let cycle = 0
+
+while cycle < 4 {
+    let r = requests[cycle % requests.len()]
+    let reply = call_best("respond", r)
+    let ms = call_best("latency_estimate", 100 + cycle * 25)
+    print("[" + cycle + "] " + reply + "  ~" + ms + "ms")
+    # pick up any variants the garden evolved since the last cycle —
+    # the running service improves without a redeploy
+    garden_reload()
+    cycle = cycle + 1
+}
+
+print("service ran " + cycle + " cycles; garden kept improving us")
