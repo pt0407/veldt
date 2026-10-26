@@ -566,6 +566,22 @@ fn main() {
                 }
                 println!("=== The Veldt (fitness >= {}) ===", min);
                 filtered.print_garden(sick_only, healthy_only);
+            } else if let Some(fam) = args.iter().position(|a| a == "--lifespan_fam")
+                .and_then(|p| args.get(p + 1)).cloned() {
+                // --lifespan_fam <name> — variants in this family sorted by lifespan
+                let mut sorted = veldt::Veldt::new();
+                sorted.probes = veldt.probes.clone();
+                sorted.obituaries = veldt.obituaries.clone();
+                sorted.run_count = veldt.run_count;
+                sorted.garden_path = veldt.garden_path.clone();
+                if let Some(vs) = veldt.functions.get(&fam) {
+                    let mut sorted_vs = vs.clone();
+                    sorted_vs.sort_by(|a, b| b.lifespan.partial_cmp(&a.lifespan)
+                        .unwrap_or(std::cmp::Ordering::Equal));
+                    sorted.functions.insert(fam.clone(), sorted_vs);
+                }
+                println!("=== The Veldt ({} longest-lived first) ===", fam);
+                sorted.print_garden(sick_only, healthy_only);
             } else if let Some(fam) = args.iter().position(|a| a == "--args_fam")
                 .and_then(|p| args.get(p + 1)).cloned() {
                 // --args_fam <name> — variants in this family sorted by arg count
