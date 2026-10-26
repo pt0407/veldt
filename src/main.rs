@@ -682,11 +682,25 @@ fn main() {
             } else if let Some(fam) = args.iter().position(|a| a == "--family")
                 .and_then(|p| args.get(p + 1)) {
                 // --family <name> — flat census of one lineage
+                // (--filter <expr> scopes to matching variants; --sort <field> orders them)
                 let Some(vs) = veldt.functions.get(fam) else {
                     eprintln!("No family '{}'", fam); process::exit(1);
                 };
+                let mut vs = vs.clone();
+                if let Some(expr) = args.iter().position(|a| a == "--filter")
+                    .and_then(|p| args.get(p + 1)) {
+                    let or_groups: Vec<Vec<&str>> = expr.split("||")
+                        .map(|g| g.split("&&").map(|s| s.trim()).collect())
+                        .collect();
+                    vs.retain(|e| or_groups.iter().any(|g|
+                        g.iter().all(|c| veldt::variant_matches_in(e, fam, c))));
+                }
+                if let Some(field) = args.iter().position(|a| a == "--sort")
+                    .and_then(|p| args.get(p + 1)) {
+                    veldt::sort_variants(&mut vs, field);
+                }
                 println!("=== The Veldt ({}) ===", fam);
-                for e in vs {
+                for e in &vs {
                     let mark = if e.fitness == vs.iter().map(|x| x.fitness)
                         .fold(f64::NEG_INFINITY, f64::max) { " *" } else { "" };
                     println!("  {}#{}{} — {:?} | age: {} | fitness: {:.2} | origin: {}",
