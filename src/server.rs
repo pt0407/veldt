@@ -50,6 +50,7 @@ pub async fn start_server(port: u16) {
         .route("/api/usage", get(usage))
         .route("/api/trend", get(trend))
         .route("/api/sources", get(sources))
+        .route("/api/fitness", get(fitness))
         .route("/api/run", post(run_program))
         .route("/api/evolve", post(evolve))
         .route("/api/clear", post(clear_veldt))
@@ -280,6 +281,23 @@ async fn sources() -> Json<serde_json::Value> {
         "healthy": h, "success_rate": *h as f64 / (*n).max(1) as f64,
     })).collect();
     Json(serde_json::json!({"sources": src}))
+}
+
+async fn fitness() -> Json<serde_json::Value> {
+    let mut veldt = veldt::Veldt::new();
+    if veldt.load().is_err() {
+        return Json(serde_json::json!({"error": "garden load failed"}));
+    }
+    let mut fit_data: Vec<serde_json::Value> = veldt.functions.iter()
+        .flat_map(|(n, vs)| vs.iter().map(|e| serde_json::json!({
+            "variant": format!("{}#{}", n, e.id), "fitness": e.fitness,
+            "health": format!("{:?}", e.health),
+        })).collect::<Vec<_>>())
+        .collect();
+    fit_data.sort_by(|a, b| b["fitness"].as_f64().unwrap_or(0.0)
+        .partial_cmp(&a["fitness"].as_f64().unwrap_or(0.0))
+        .unwrap_or(std::cmp::Ordering::Equal));
+    Json(serde_json::json!({"fitness": fit_data}))
 }
 
 #[derive(Deserialize)]
