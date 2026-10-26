@@ -1068,6 +1068,15 @@ fn print_stats(veldt: &veldt::Veldt) {
         println!("state: {} structs, {} variables",
             veldt.structs.len(), veldt.variables.len());
     }
+    // avg lifespan — how long variants live
+    let lifespans: Vec<f64> = veldt.functions.values()
+        .flat_map(|vs| vs.iter().map(|e| e.lifespan)).collect();
+    if !lifespans.is_empty() {
+        let avg = lifespans.iter().sum::<f64>() / lifespans.len() as f64;
+        let (lo, hi) = (*lifespans.iter().fold(&f64::INFINITY, |a, b| a.min(b)),
+                        *lifespans.iter().fold(&f64::NEG_INFINITY, |a, b| a.max(b)));
+        println!("lifespan: avg {:.0} runs ({}..{})", avg, lo, hi);
+    }
     // fitness trend — peak per run, is the garden improving?
     if veldt.fitness_history.len() >= 2 {
         let trend: Vec<String> = veldt.fitness_history.iter()
