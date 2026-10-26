@@ -2159,6 +2159,14 @@ fn print_stats(veldt: &veldt::Veldt) {
                 let trace_count = veldt.traces.get(fam).map(|t| t.len()).unwrap_or(0);
                 let death_count = veldt.obituaries.iter().filter(|o| o.name == *fam).count();
                 println!("  probes: {} · traces: {} · deaths: {}", probe_count, trace_count, death_count);
+                // age distribution — youngest / oldest / avg
+                let ages: Vec<u64> = vs.iter().map(|e| e.age).collect();
+                if !ages.is_empty() {
+                    let min = ages.iter().min().unwrap();
+                    let max = ages.iter().max().unwrap();
+                    let avg = ages.iter().sum::<u64>() as f64 / ages.len() as f64;
+                    println!("  ages: {} – {} (avg {:.1})", min, max, avg);
+                }
             }
         }
         if veldt.fitness_history.len() >= 2 {
