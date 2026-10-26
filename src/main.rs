@@ -466,9 +466,9 @@ fn print_stats(veldt: &veldt::Veldt) {
         }
     }
 }
-
 fn print_usage() {
     println!("Veldt v0.1.0 — a language where code is alive");
+
     println!();
     println!("Usage:");
     println!("  veldt run <file.veldt>       Run a Veldt program");
