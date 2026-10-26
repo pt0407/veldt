@@ -1077,6 +1077,15 @@ fn print_stats(veldt: &veldt::Veldt) {
                         *lifespans.iter().fold(&f64::NEG_INFINITY, |a, b| a.max(b)));
         println!("lifespan: avg {:.0} runs ({}..{})", avg, lo, hi);
     }
+    // avg niches per variant — niche diversity per variant
+    let niche_counts: Vec<usize> = veldt.functions.values()
+        .flat_map(|vs| vs.iter().map(|e| e.niche_scores.len())).collect();
+    if !niche_counts.is_empty() {
+        let avg = niche_counts.iter().sum::<usize>() / niche_counts.len();
+        let (lo, hi) = (*niche_counts.iter().min().unwrap_or(&0),
+                        *niche_counts.iter().max().unwrap_or(&0));
+        println!("niches: avg {} per variant ({}..{})", avg, lo, hi);
+    }
     // fitness trend — peak per run, is the garden improving?
     if veldt.fitness_history.len() >= 2 {
         let trend: Vec<String> = veldt.fitness_history.iter()
