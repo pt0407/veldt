@@ -757,3 +757,6 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 - [Devin] Lint batch 19 (HEAD post-while-call-cond): ~49
   strict checks. New: while f(x) where x never assigned
   in the body — the call can't change, likely infinite.
+- [Devin] Lint batch 20 (HEAD post-match-const): ~50 strict
+  checks. New: match on a let-bound literal (let x = 5;
+  match x — constant scrutinee, deterministic).
