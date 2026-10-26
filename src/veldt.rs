@@ -692,6 +692,8 @@ impl Veldt {
             Some(variants) => {
                 println!("Lineage: {} ({} variant{})", name, variants.len(),
                     if variants.len() == 1 { "" } else { "s" });
+                let peak = variants.iter().map(|e| e.fitness)
+                    .fold(f64::NEG_INFINITY, f64::max);
                 for entry in variants {
                     let health_str = match &entry.health {
                         Health::Healthy => "healthy".to_string(),
@@ -709,8 +711,10 @@ impl Veldt {
                     let eff_str = if entry.efficiency > 0.0 {
                         format!(" | eff: {:.2}x", entry.efficiency)
                     } else { String::new() };
-                    println!("  {}#{}{}{} — {} | age: {} | usage: {} | fitness: {:.2}{} | born: {}",
-                        name, entry.id, marker, trust_str, health_str, entry.age, entry.usage_count, entry.fitness, eff_str, entry.origin);
+                    let bar = "█".repeat(
+                        ((entry.fitness / peak.max(f64::EPSILON)) * 6.0).round() as usize);
+                    println!("  {}#{}{}{} — {} | age: {} | usage: {} | fitness: {:.2} {}{} | born: {}",
+                        name, entry.id, marker, trust_str, health_str, entry.age, entry.usage_count, entry.fitness, bar, eff_str, entry.origin);
                 }
             }
             None => println!("Lineage '{}' not found in veldt", name),
