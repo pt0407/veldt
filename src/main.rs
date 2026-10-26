@@ -2082,6 +2082,20 @@ fn print_stats(veldt: &veldt::Veldt) {
         for (n, f) in fam.iter().take(5) {
             println!("  {} peak {:.2}", n, f);
         }
+        // --family --top — variant leaderboard within the scoped family
+        let argv: Vec<String> = std::env::args().collect();
+        if let Some(fam) = argv.iter().position(|a| a == "--family")
+            .and_then(|p| argv.get(p + 1)) {
+            if let Some(vs) = veldt.functions.get(fam) {
+                let mut sorted = vs.clone();
+                sorted.sort_by(|a, b| b.fitness.partial_cmp(&a.fitness)
+                    .unwrap_or(std::cmp::Ordering::Equal));
+                println!("  top variants:");
+                for e in sorted.iter().take(5) {
+                    println!("    {}#{} fitness {:.2} (age {})", e.name, e.id, e.fitness, e.age);
+                }
+            }
+        }
         if veldt.fitness_history.len() >= 2 {
             let trend = veldt.fitness_history.iter().map(|f| format!("{:.2}", f))
                 .collect::<Vec<_>>();
