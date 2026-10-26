@@ -3497,6 +3497,9 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                 if b.len() == 1 && matches!(b[0], Stmt::Print(_)) {
                     out.push("catch body only prints the error — shallow error handling".into());
                 }
+                if b.len() == 1 && matches!(b[0], Stmt::Return(_) | Stmt::Break | Stmt::Continue) {
+                    out.push("catch body just exits — try adds no handling".into());
+                }
                 if a.is_empty() { out.push("empty try — nothing to guard".into()); }
                 let mut inner = outer.clone();
                 for (_, n) in &bound { inner.insert((*n).clone()); }
