@@ -1,0 +1,27 @@
+# robot.veldt — std:robotics end-to-end: maze + bt AI + astar + canvas render
+let m = maze_gen(21, 11, "#")
+let r = robot_new(1, 1, "e", 5)
+let tx = 19
+let ty = 9
+let m2 = canvas_set(m, tx, ty, "X")
+
+let chase = ["seq",
+    ["act", fn(_) { return los(m2, r["x"], r["y"], 19, 9, "#") }],
+    ["act", fn(_) { return true }]]
+let seen = bt_tick(chase, r)
+let mode = "navigating"
+if seen { mode = "chasing" }
+
+let path = astar(m2, r["x"], r["y"], tx, ty, " ")
+if path != null and path.len() > 1 {
+    let next = path[1]
+    let nr = dict()
+    nr["x"] = next[0]
+    nr["y"] = next[1]
+    nr["dir"] = r["dir"]
+    nr["range"] = r["range"]
+    r = nr
+}
+let m3 = robot_draw(r, m2)
+canvas_print(m3)
+print("robot at " + r["x"] + "," + r["y"] + " — " + mode)
