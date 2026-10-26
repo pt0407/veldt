@@ -667,3 +667,8 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   strict checks. New: trailing continue in for/while
   bodies (redundant). Verified zero-false-positive on
   tictactoe.
+- [Devin] Lint batch 8 + name:count tail (HEAD post-878a6c4):
+  ~38 strict checks — let shadowing an outer let (same as
+  for-var-shadow, on let). stats' death causes line joins
+  the spark coverage — every name:count section now shows
+  its shape.
