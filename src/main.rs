@@ -3788,6 +3788,11 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                                                 out.push(format!("match on {} — transitive constant through {}", v, w));
                                                 break;
                                             }
+                                            // match a where a is bound to Var(b) bound to a call — transitive call
+                                            if n2 == w && matches!(e2, Expr::Call(..) | Expr::MethodCall(..)) {
+                                                out.push(format!("match on {} — transitive call through {}", v, w));
+                                                break;
+                                            }
                                         }
                                     }
                                 }
