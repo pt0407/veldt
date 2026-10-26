@@ -2083,13 +2083,15 @@ fn print_stats(veldt: &veldt::Veldt) {
             println!("  {} peak {:.2}", n, f);
         }
         // --family --top — variant leaderboard within the scoped family
+        // (--sort <field> picks the leaderboard's sort key; default fitness)
         let argv: Vec<String> = std::env::args().collect();
         if let Some(fam) = argv.iter().position(|a| a == "--family")
             .and_then(|p| argv.get(p + 1)) {
             if let Some(vs) = veldt.functions.get(fam) {
                 let mut sorted = vs.clone();
-                sorted.sort_by(|a, b| b.fitness.partial_cmp(&a.fitness)
-                    .unwrap_or(std::cmp::Ordering::Equal));
+                let sort_field = argv.iter().position(|a| a == "--sort")
+                    .and_then(|p| argv.get(p + 1)).cloned().unwrap_or_default();
+                veldt::sort_variants(&mut sorted, if sort_field.is_empty() { "fitness" } else { &sort_field });
                 println!("  top variants:");
                 for e in sorted.iter().take(5) {
                     println!("    {}#{} fitness {:.2} (age {})", e.name, e.id, e.fitness, e.age);
