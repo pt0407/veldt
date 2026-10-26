@@ -3771,6 +3771,10 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                                 out.push(format!("match on {} — bound to a call, could match the call", v));
                                 break;
                             }
+                            if n == v && matches!(e, Expr::List(_) | Expr::StructLit(..)) {
+                                out.push(format!("match on {} — bound to a container literal", v));
+                                break;
+                            }
                         }
                     }
                 }
