@@ -147,7 +147,9 @@ impl JitEngine {
                 let cn = &chunk.names[*ni as usize];
                 // inline int builtins (abs/max/min) don't need fns —
                 // they lower to native ops in the Call arm below
-                let inlined = matches!(cn.as_str(), "abs" | "min" | "max");
+                let inlined = matches!(cn.as_str(),
+                    "abs" | "min" | "max"
+                    | "floor" | "ceil" | "round" | "sqrt");
                 if cn != own_name && !inlined {
                     let vf = match fns.get(cn) {
                         Some(v) => v,
@@ -284,8 +286,37 @@ impl JitEngine {
                         }
                     }
                     Instr::Call(ni, argc) => {
-                        if float { ok = false; break; }
                         let cn = chunk.names[ni as usize].clone();
+                        if float {
+                            // float builtins — f64 single/dual arg ops
+                            match (cn.as_str(), argc) {
+                                ("floor", 1) | ("ceil", 1) | ("round", 1)
+                                | ("sqrt", 1) | ("abs", 1) => {
+                                    let Some(x) = stack.pop() else {
+                                        fail_pc = pc; ok = false; break; };
+                                    let v = match cn.as_str() {
+                                        "floor" => b.ins().floor(x),
+                                        "ceil" => b.ins().ceil(x),
+                                        "round" => b.ins().nearest(x),
+                                        "sqrt" => b.ins().sqrt(x),
+                                        _ => b.ins().fabs(x),
+                                    };
+                                    stack.push(v); pc += 1; continue;
+                                }
+                                ("max", 2) | ("min", 2) => {
+                                    let (Some(r), Some(l)) =
+                                        (stack.pop(), stack.pop()) else {
+                                            fail_pc = pc; ok = false; break; };
+                                    let v = if cn == "max" {
+                                        b.ins().fmax(l, r)
+                                    } else {
+                                        b.ins().fmin(l, r)
+                                    };
+                                    stack.push(v); pc += 1; continue;
+                                }
+                                _ => { fail_pc = pc; ok = false; break; }
+                            }
+                        }
                         // inline int builtins — abs/max/min don't need
                         // fn resolution, they lower to native ops
                         match (cn.as_str(), argc) {
