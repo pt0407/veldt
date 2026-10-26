@@ -663,3 +663,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   fuzz summary shows a per-case divergence-count spark
   (which inputs split the family). check --strict ~35:
   + if-else returning bool literals → return <cond>.
+- [Devin] Lint batch 7 (HEAD post-trailing-continue): ~36
+  strict checks. New: trailing continue in for/while
+  bodies (redundant). Verified zero-false-positive on
+  tictactoe.
