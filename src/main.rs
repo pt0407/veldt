@@ -532,6 +532,7 @@ fn main() {
                     .and_then(|i| args.get(i + 1))
                     .filter(|s| !s.starts_with("--"));
                 let fix = args.iter().any(|a| a == "--fix");
+                let bugs_only = args.iter().any(|a| a == "--bugs");
                 let mut v = veldt::Veldt::new();
                 if v.load().is_err() {
                     eprintln!("no garden found (nothing to lint)");
@@ -560,6 +561,8 @@ fn main() {
                             .into_iter()
                             .filter(|w| !w.contains("defined but never called")
                                 && !w.contains("no top-level statements"))
+                            .filter(|w| !bugs_only
+                                || crate::evolve::is_realbug_warning(w))
                             .collect();
                         if warns.is_empty() { continue; }
                         flagged += 1;
