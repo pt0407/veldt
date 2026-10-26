@@ -417,10 +417,26 @@ fn main() {
                 let mut engine = crate::jit::JitEngine::new().unwrap();
                 println!("JIT coverage across {} families", veldt.functions.len());
                 let mut native = 0; let mut cold = 0;
+                let why = args.iter().any(|a| a == "--why");
                 for (name, _) in &veldt.functions {
                     match engine.compile_fn(name, &v.fns) {
                         Some(_) => { println!("  {}: native", name); native += 1; }
-                        None => { println!("  {}: bytecode", name); cold += 1; }
+                        None => {
+                            let fit = v.fns.get(name).and_then(|vs|
+                                vs.iter().max_by(|a, b|
+                                    a.fitness.partial_cmp(&b.fitness)
+                                        .unwrap_or(std::cmp::Ordering::Equal)));
+                            let key = fit.map(|f|
+                                format!("{}#{}", name, f.id));
+                            let reason = key.and_then(|k|
+                                engine.fail_at.get(&k).copied())
+                                .and_then(|pc| fit
+                                    .map(|f| format!(" at pc {}: {:?}",
+                                        pc, f.code.code.get(pc))))
+                                .unwrap_or_default();
+                            println!("  {}: bytecode{}", name, reason);
+                            cold += 1;
+                        }
                     }
                 }
                 println!("{} native, {} bytecode ({:.0}% JIT-able)",
