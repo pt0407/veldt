@@ -492,3 +492,8 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   `Rc<str>` map keys (deeper refactor across ast/veldt/interp).
   Bench numbers are noisy on this box (570-814ms same build) —
   treat single-run timings as directional only.
+- [Devin] Agent inspection intents (HEAD post-62c95b8): `veldt agent`
+  gained `family` ("stats fib"/"how is fib doing"/"tell me about
+  fib" → per-family dashboard summary) and `triage` ("what needs
+  attention"/"weakest"/"risky" → dying + sick-with-errors +
+  weakest-per-family). Reuses find_lineage for name extraction.
