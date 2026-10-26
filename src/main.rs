@@ -640,7 +640,13 @@ fn main() {
                     }).collect();
                     if !tier.is_empty() {
                         println!("{}:", name);
-                        for e in tier { println!("  #{} — fitness {:.2}  origin: {}", e.id, e.fitness, e.origin); }
+                        let peak = tier.iter().map(|e| e.fitness)
+                            .fold(f64::NEG_INFINITY, f64::max);
+                        for e in tier {
+                            let bar = "█".repeat(
+                                ((e.fitness / peak.max(f64::EPSILON)) * 6.0).round() as usize);
+                            println!("  #{} — fitness {:.2} {}  origin: {}", e.id, e.fitness, bar, e.origin);
+                        }
                     }
                 }
             } else if args.iter().any(|a| a == "--json") {

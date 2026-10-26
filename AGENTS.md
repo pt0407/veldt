@@ -647,3 +647,8 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   while cond var never assigned (stmt_assigns walks nested
   bodies), nested if without else → merge conditions.
   All verified zero-false-positive on tictactoe.
+- [Devin] Fitness-bar sweep (HEAD post-ef02a65): the
+  proportional bar now appears in test rows and
+  garden --family rows too — every variant listing
+  (garden/lineage/test/garden --family/stats --top)
+  shows the same scaled bar.
