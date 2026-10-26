@@ -754,3 +754,6 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 - [Devin] Lint batch 18 (HEAD post-dup-let): ~48 strict
   checks. New: duplicate let binding (same expr bound
   twice — b could reuse a).
+- [Devin] Lint batch 19 (HEAD post-while-call-cond): ~49
+  strict checks. New: while f(x) where x never assigned
+  in the body — the call can't change, likely infinite.
