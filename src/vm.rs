@@ -43,6 +43,9 @@ enum Instr {
     CallVar(u32, u32),       // slot holding Closure, argc
     GetField(u32),           // name-table idx — obj.field
     SliceGet,                // obj lo hi -> obj[lo:hi] (null bounds = open)
+    ListPush(u32),           // append to list in env slot (in-place)
+    FieldSetVar(u32, u32),   // obj slot, field name idx — obj.f = v
+    MakeStruct(u32, u32),    // name idx, field count (name,val pairs below)                // obj lo hi -> obj[lo:hi] (null bounds = open)
     MethodCallVar(u32, u32, u32), // receiver slot, method name idx, argc
     PrintOut,
     Return,
@@ -233,6 +236,16 @@ impl Compiler {
                     self.emit(Instr::Store(ts));
                 }
             }
+            Stmt::FieldAssign(obj, field, val) => {
+                if let Expr::Var(name) = obj {
+                    self.compile_expr(val)?;
+                    let sl = self.slot(name);
+                    let ni = self.name_idx(field);
+                    self.emit(Instr::FieldSetVar(sl, ni));
+                } else {
+                    return Err("VM subset: field-assign only on variables".into());
+                }
+            }
             Stmt::IndexAssign(obj, idx, val) => {
                 // Var receiver: write goes back through the env so the
                 // persistent structure's new head replaces the var.
@@ -366,6 +379,15 @@ impl Compiler {
                 let ni = self.name_idx(name);
                 self.emit(Instr::GetField(ni));
             }
+            Expr::StructLit(name, fields) => {
+                for (fname, fexpr) in fields {
+                    let k = self.konst(Value::Str(fname.clone().into()));
+                    self.emit(Instr::Const(k));
+                    self.compile_expr(fexpr)?;
+                }
+                let ni = self.name_idx(name);
+                self.emit(Instr::MakeStruct(ni, fields.len() as u32));
+            }
             Expr::SafeGet(o, name, args) => {
                 // obj?.field / obj?.m(args) — null propagates the Null
                 self.compile_expr(o)?;
@@ -383,6 +405,33 @@ impl Compiler {
                 }
                 let end = self.code.len();
                 self.patch(jn, end);
+            }
+            Expr::ListComp(expr, var, iter, cond) => {
+                // [expr for x in iter (if cond)] -> build via ListPush
+                let resn = format!("__lc{}", self.next_slot);
+                let res = self.slot(&resn);
+                self.emit(Instr::MakeList(0));
+                self.emit(Instr::Store(res));
+                self.compile_expr(iter)?;
+                self.emit(Instr::ForIter);
+                let xs = self.slot(var);
+                let start = self.code.len();
+                let next = self.emit(Instr::ForNext(xs, u32::MAX));
+                let mut skip = None;
+                if let Some(c) = cond {
+                    self.compile_expr(c)?;
+                    skip = Some(self.emit(Instr::JumpIfFalse(u32::MAX)));
+                }
+                self.compile_expr(expr)?;
+                self.emit(Instr::ListPush(res));
+                if let Some(j) = skip {
+                    let t = self.code.len();
+                    self.patch(j, t);
+                }
+                self.emit(Instr::Jump(start as u32));
+                let end = self.code.len();
+                self.patch(next, end);
+                self.emit(Instr::Load(res));
             }
             Expr::Lambda(params, body) => {
                 // Closure proto in const pool; CaptureEnv fills its env
@@ -863,6 +912,37 @@ impl Vm {
                     let lo = stack.pop().unwrap();
                     let obj = stack.pop().unwrap();
                     stack.push(slice_get(&obj, &lo, &hi)?);
+                }
+                Instr::ListPush(sl) => {
+                    let v = stack.pop().unwrap();
+                    let frame = frames.last_mut().unwrap();
+                    match frame.env.get_mut(sl as usize)
+                        .and_then(|o| o.as_mut()) {
+                        Some(Value::List(l)) => l.push_back(v),
+                        _ => return Err("list-push on non-list slot".into()),
+                    }
+                }
+                Instr::FieldSetVar(sl, ni) => {
+                    let v = stack.pop().unwrap();
+                    let name = code.names[ni as usize].clone();
+                    let frame = frames.last_mut().unwrap();
+                    match frame.env.get_mut(sl as usize)
+                        .and_then(|o| o.as_mut()) {
+                        Some(Value::Struct(_, f)) => { f.insert(name, v); }
+                        _ => return Err("field-assign on non-struct".into()),
+                    }
+                }
+                Instr::MakeStruct(ni, n) => {
+                    let mut fields = HashMap::new();
+                    for _ in 0..n {
+                        let v = stack.pop().unwrap();
+                        let k = stack.pop().unwrap();
+                        if let Value::Str(fname) = k {
+                            fields.insert((*fname).to_string(), v);
+                        }
+                    }
+                    let sname = code.names[ni as usize].clone();
+                    stack.push(Value::Struct(sname, fields));
                 }
                 Instr::PrintOut => {
                     let v = stack.pop().unwrap();
