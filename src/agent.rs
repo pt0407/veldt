@@ -1709,9 +1709,23 @@ fn fix_intent(words: &[&str], veldt: &mut Veldt) -> AgentResponse {
             .map(|e| e.id).collect())
         .unwrap_or_default();
     if sick.is_empty() {
-        return match want_id {
-            Some(id) => plain(&format!("{}#{} isn't sick (or doesn't exist).", name, id)),
-            None => plain(&format!("No sick variants in the {} lineage — it's healthy.", name)),
+        // nothing sick — try mechanical dead-code repair on the
+        // (healthy) variants instead; "fix fib" covers both senses
+        let mut cleaned = 0usize;
+        if let Some(vs) = veldt.functions.get_mut(&name) {
+            for e in vs.iter_mut()
+                .filter(|e| want_id.map(|i| i == e.id).unwrap_or(true)) {
+                let mut c = HealthChecker::repair_dead_tail(&mut e.body);
+                c |= HealthChecker::repair_dead_lets(&mut e.body);
+                if c { cleaned += 1; }
+            }
+        }
+        return match (want_id, cleaned) {
+            (Some(id), 0) => plain(&format!("{}#{} isn't sick and has no repairable dead code.", name, id)),
+            (Some(id), n) => plain(&format!("{}#{} isn't sick — cleaned dead code from it.", name, id)),
+            (None, 0) => plain(&format!("No sick variants in the {} lineage and no repairable dead code — it's clean.", name)),
+            (None, n) => plain(&format!("No sick variants in {} — but cleaned dead code from {} variant{}.",
+                                        name, n, if n == 1 { "" } else { "s" })),
         };
     }
     let mut steps = vec![step("plan", format!("Attempting hybrid-merge heal on {} sick variant{} of {}.", sick.len(), if sick.len() == 1 { "" } else { "s" }, name))];
