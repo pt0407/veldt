@@ -103,7 +103,9 @@ loads the garden. **Only garden-persisted functions can be spawned.**
 `veldt watch <file>` rerun on save; `veldt fmt <file> --check` CI gate;
 `veldt registry [port]` shared garden pool; `veldt push/pull <url>`;
 `veldt pull <url> --merge` adds immigrants (provenance-tagged);
-`veldt search <url> <name>` query families.
+`veldt search <url> <name>` query families;
+`veldt evolve N --seed S` deterministic evolution;
+`veldt repl` `:load <file>` runs a file in the session.
 
 ## The garden
 
