@@ -3429,6 +3429,13 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                     if items.len() == 1 {
                         out.push(format!("let {} = [v] — a 1-element list, could be let {} = v", name, name));
                     }
+                    if items.is_empty() {
+                        let assigned = stmts.iter().skip(i + 1)
+                            .any(|s| stmt_assigns(s, name) || matches!(s, Stmt::ExprStmt(Expr::MethodCall(o, m, _)) if matches!(o.as_ref(), Expr::Var(v) if v == name) && m == "push"));
+                        if !assigned {
+                            out.push(format!("let {} = [] — an empty list that never grows", name));
+                        }
+                    }
                 }
                 // duplicate let — same expression bound twice in this block
                 for (j, s) in stmts.iter().enumerate().take(i) {
