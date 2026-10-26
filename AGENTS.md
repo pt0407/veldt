@@ -610,3 +610,9 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   assigned (stmt_assigns walks nested bodies). ~26 lint
   checks; every diff/stats/garden/lineage surface shows
   shape + delta, not just raw numbers.
+- [Devin] Name:count sparks (HEAD post-1187659): stats'
+  builtin_usage/probe_coverage/avg niche scores/mutation
+  success lines show a spark() shape next to the data —
+  the spread across names at a glance. Every numeric
+  surface in veldt now visualizes its shape (distributions,
+  bars, deltas, sparks) rather than raw numbers alone.
