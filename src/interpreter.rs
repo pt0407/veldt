@@ -1184,12 +1184,16 @@ impl Interpreter {
         };
         self.call_stack.pop();
 
-        // Restore param bindings in the shared env (prevent param leakage),
-        // then restore caller scope
+        // Restore pre-existing bindings (a param shadowing a captured
+        // var gets its original value back), but never DELETE a param
+        // that wasn't there before — the captured env is shared by
+        // reference, so inner closures may still need that binding.
+        // Removing it corrupted nested closures (fn(n){fn(x){x+n}}
+        // broke because `n` was deleted before the inner call).
         for (pname, old_val) in param_restore {
             match old_val {
                 Some(v) => { self.vars.borrow_mut().insert(pname, v); }
-                None => { self.vars.borrow_mut().remove(&pname); }
+                None => {}
             }
         }
         self.vars = old_vars;
