@@ -2683,6 +2683,61 @@ impl Interpreter {
                 Ok(Some(Value::List(points.into_iter()
                     .map(|(x, y)| Value::List(im::vector![Value::Int(x as i64), Value::Int(y as i64)])).collect())))
             }
+            "ui_menu" => {
+                // ui_menu(c, x, y, items, selected) — list with > on selected
+                let (d, x0, y0, items, sel) = match (args.get(0), args.get(1), args.get(2), args.get(3), args.get(4)) {
+                    (Some(Value::Dict(d)), Some(Value::Int(x)), Some(Value::Int(y)),
+                     Some(Value::List(items)), Some(Value::Int(s)))
+                        => (d.clone(), *x as usize, *y as usize, items.clone(), *s as usize),
+                    _ => return Err("ui_menu(c, x, y, items, sel) expects dict + 2 ints + list + int".into()),
+                };
+                let Some(Value::List(rows)) = d.get("cells") else { return Err("canvas: no cells".into()) };
+                let mut rows2 = rows.clone();
+                for (i, it) in items.iter().enumerate() {
+                    let yy = y0 + i;
+                    if yy >= rows2.len() { break; }
+                    let label = if let Value::Str(s) = it { s.clone() } else { continue };
+                    let rendered = if i == sel { format!("> {}", label) } else { format!("  {}", label) };
+                    if let Value::List(r) = &rows2[yy] {
+                        let mut nr = r.clone();
+                        for (dx, ch) in rendered.chars().enumerate() {
+                            if x0 + dx < nr.len() { nr[x0 + dx] = Value::Str(ch.to_string().into()); }
+                        }
+                        rows2[yy] = Value::List(nr);
+                    }
+                }
+                let mut d2 = d.clone();
+                d2.insert("cells".to_string(), Value::List(rows2));
+                Ok(Some(Value::Dict(d2)))
+            }
+            "ui_progress" => {
+                // ui_progress(c, x, y, w, cur, max) — [====>   ] bar
+                let (d, x0, y0, w, cur, max) = match (args.get(0), args.get(1), args.get(2), args.get(3), args.get(4), args.get(5)) {
+                    (Some(Value::Dict(d)), Some(Value::Int(x)), Some(Value::Int(y)),
+                     Some(Value::Int(w)), Some(Value::Int(cur)), Some(Value::Int(max)))
+                        => (d.clone(), *x as usize, *y as usize, *w as usize, *cur, *max),
+                    _ => return Err("ui_progress(c, x, y, w, cur, max) expects dict + 4 ints".into()),
+                };
+                let Some(Value::List(rows)) = d.get("cells") else { return Err("canvas: no cells".into()) };
+                let mut rows2 = rows.clone();
+                let filled = if max > 0 { ((cur.max(0) as f64 / max.max(1) as f64) * w as f64) as usize } else { 0 };
+                if y0 < rows2.len() {
+                    if let Value::List(r) = &rows2[y0] {
+                        let mut nr = r.clone();
+                        for i in 0..w {
+                            if x0 + i < nr.len() {
+                                nr[x0 + i] = Value::Str(if i < filled {
+                                    if i == filled - 1 { ">".into() } else { "=".into() }
+                                } else { " ".into() });
+                            }
+                        }
+                        rows2[y0] = Value::List(nr);
+                    }
+                }
+                let mut d2 = d.clone();
+                d2.insert("cells".to_string(), Value::List(rows2));
+                Ok(Some(Value::Dict(d2)))
+            }
             "dist_stats" => {
                 // dist_stats(fn, trials) — mean/stddev/min/max over n samples
                 let (f, trials) = match (args.get(0), args.get(1)) {
