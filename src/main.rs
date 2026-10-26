@@ -1,6 +1,7 @@
 // Veldt CLI — main entry point
 
 mod jit;
+mod smt;
 mod agent;
 mod ast;
 mod evolve;
@@ -5412,6 +5413,24 @@ fn adopt_variant(target: &str) {
 }
 
 fn verify_family(name: &str, args: &[String]) {
+    // --exact — the SMT gate: z3 proves f == g or finds the real
+    // counterexample. Falls back to the bounded sweep when a variant
+    // uses ops we don't encode (strings, floats, loops, match).
+    if args.iter().any(|a| a == "--exact") {
+        match smt::verify_exact(name) {
+            Ok(Some((id, cex))) => {
+                println!("{}#{}: PROVABLY DIVERGENT — counterexample: {}",
+                         name, id, cex.join(", "));
+            }
+            Ok(None) => {
+                println!("{}: PROVABLY EQUIVALENT — all variants agree", name);
+            }
+            Err(why) => {
+                println!("{}: bails to bounded ({})", name, why);
+            }
+        }
+        return;
+    }
     let bound: i64 = args.iter().position(|a| a == "--domain")
         .and_then(|i| args.get(i + 1))
         .and_then(|s| s.parse().ok()).unwrap_or(10);

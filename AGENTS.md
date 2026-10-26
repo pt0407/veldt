@@ -49,6 +49,17 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] PHASE 12 SHIPPED: z3 SMT gate — veldt verify
+  --exact. verify_exact translates variant bodies to z3 formulas
+  over symbolic Int params, solver.check(f(x) != v(x)): Unsat =
+  PROVABLY EQUIVALENT, Sat = PROVABLY DIVERGENT + the real
+  counterexample from the model. Scope v1: int/bool straight-line
+  + If/Call (fuel-bounded inline expansion, recursion guard).
+  Verified: x+x == 2*x proven equivalent; x*x vs x*x+x found cex
+  x=1. z3 0.21 bundled via z3-src + cmake (no system lib needed).
+  API note: z3 0.21 uses with_z3_config + lifetime-free ASTs —
+  a.add(&b) is an associated fn, use a + b. Bails to bounded on
+  strings/floats/loops/match/?. — bounded still runs as fallback.
 - [Devin/main-side] JIT UPDATE 26: veldt verify --vm — the
   bounded check is now engine-abstract (verify_with takes a
   call closure: interp.call_function vs vm.jit_call — same
