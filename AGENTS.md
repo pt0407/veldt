@@ -1247,3 +1247,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 - [Devin] IDE: Lint toolbar button (/api/lint census in the
   output pane) + 'code health'/'lint fib' Gardener chips.
   Full diagnostics surface reachable in-studio now.
+- [Devin] IDE squiggles: lintEditor() POSTs /api/check on
+  open + debounced edits -> setModelMarkers, anchored by a
+  JS warn_anchor port. Studio editor lints live now, same
+  ~91 checks, no LSP needed.
