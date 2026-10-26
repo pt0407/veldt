@@ -5414,9 +5414,14 @@ fn print_family_detail(veldt: &veldt::Veldt, fam: &String, vs: &[veldt::Function
     let errs: Vec<_> = vs.iter().filter_map(|e|
         if let Health::Sick(err) = &e.health { Some(err) } else { None }).collect();
     if !errs.is_empty() {
-        println!("  sick errors:");
-        for err in errs.iter().take(5) {
-            println!("    {}", err);
+        let mut err_counts: std::collections::HashMap<&String, usize> = std::collections::HashMap::new();
+        for err in &errs { *err_counts.entry(err).or_default() += 1; }
+        let mut sorted: Vec<_> = err_counts.iter().collect();
+        sorted.sort_by(|a, b| b.1.cmp(&a.1));
+        let counts: Vec<f64> = sorted.iter().take(5).map(|(_, n)| **n as f64).collect();
+        println!("  sick errors: {}", spark(&counts));
+        for (err, n) in sorted.iter().take(5) {
+            println!("    {} ({}x)", err, n);
         }
     }
     // lifecycle — growing (age < lifespan) vs aging (age >= lifespan)
