@@ -2400,6 +2400,14 @@ fn print_stats(veldt: &veldt::Veldt) {
                     let avg = size_rates.iter().sum::<f64>() / size_rates.len() as f64;
                     println!("  size_rate: avg {:.1} chars/run", avg);
                 }
+                // pressure — the family's selection pressure (fitness spread)
+                if vs.len() > 1 {
+                    let fits: Vec<f64> = vs.iter().map(|e| e.fitness).collect();
+                    let mean = fits.iter().sum::<f64>() / fits.len() as f64;
+                    let variance = fits.iter().map(|f| (f - mean).powi(2)).sum::<f64>() / fits.len() as f64;
+                    let stddev = variance.sqrt();
+                    println!("  pressure: σ{:.3} fitness spread ({} rivals)", stddev, vs.len() - 1);
+                }
             }
         }
         if veldt.fitness_history.len() >= 2 {
