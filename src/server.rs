@@ -76,6 +76,7 @@ pub async fn start_server(port: u16) {
         .route("/api/champions", get(champions))
         .route("/api/summary", get(summary))
         .route("/api/why", get(why_variant))
+        .route("/api/species", get(species))
         .route("/api/run", post(run_program))
         .route("/api/evolve", post(evolve))
         .route("/api/clear", post(clear_veldt))
@@ -1245,6 +1246,15 @@ async fn why_variant(
     }
     let answer = crate::agent::respond(&task, "", &mut veldt);
     Json(serde_json::json!({"diagnosis": answer}))
+}
+
+async fn species() -> Json<serde_json::Value> {
+    let specs: Vec<serde_json::Value> = crate::agent::catalog().iter()
+        .map(|t| serde_json::json!({
+            "name": t.canonical, "desc": t.desc,
+            "keywords": t.keywords, "needs": t.needs,
+        })).collect();
+    Json(serde_json::json!({"species": specs}))
 }
 
 // --- IDE HTML ---

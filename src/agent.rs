@@ -1003,17 +1003,17 @@ print("@N@(97) = " + @N@(97))
 
 // === Code generation ===
 
-struct Template {
-    keywords: &'static [&'static str],
-    canonical: &'static str,
-    desc: &'static str,
+pub struct Template {
+    pub keywords: &'static [&'static str],
+    pub canonical: &'static str,
+    pub desc: &'static str,
     // canonical names of garden lineages this one calls — planted first if absent
-    needs: &'static [&'static str],
+    pub needs: &'static [&'static str],
     // Veldt source with @N@ as the function-name placeholder
-    make: &'static str,
+    pub make: &'static str,
 }
 
-fn catalog() -> Vec<Template> {
+pub fn catalog() -> Vec<Template> {
     vec![
         Template {
             keywords: &["fib", "fibonacci"],
