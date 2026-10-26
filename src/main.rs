@@ -2254,6 +2254,21 @@ fn print_stats(veldt: &veldt::Veldt) {
                     let max = niche_counts.iter().max().unwrap();
                     println!("  niches: avg {:.1} (peak {})", avg, max);
                 }
+                // efficiency — the family's steps-efficiency profile
+                let effs: Vec<f64> = vs.iter().map(|e| e.efficiency).collect();
+                if !effs.is_empty() {
+                    let avg = effs.iter().sum::<f64>() / effs.len() as f64;
+                    let max = effs.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+                    let min = effs.iter().cloned().fold(f64::INFINITY, f64::min);
+                    println!("  efficiency: {:.2}x – {:.2}x (avg {:.2}x)", min, max, avg);
+                }
+                // born — the family's birth timeline
+                let borns: Vec<u64> = vs.iter().map(|e| e.born).collect();
+                if !borns.is_empty() {
+                    let min = borns.iter().min().unwrap();
+                    let max = borns.iter().max().unwrap();
+                    println!("  born: run {} – {}", min, max);
+                }
             }
         }
         if veldt.fitness_history.len() >= 2 {
