@@ -184,7 +184,17 @@ impl JitEngine {
             }
             let mut block_for: HashMap<usize, cranelift_codegen::ir::Block> =
                 HashMap::new();
-            block_for.insert(0, entry);
+            // entry can't be a branch target — if pc 0 is a leader
+            // (loop head), give it its own block and jump to it
+            if leaders.contains(&0) && chunk.code.len() > 1 {
+                let head = b.create_block();
+                block_for.insert(0, head);
+                b.ins().jump(head, &[]);
+                // pc 0's code goes in head, not the now-filled entry
+                b.switch_to_block(head);
+            } else {
+                block_for.insert(0, entry);
+            }
             let mut get_block =
                 |b: &mut FunctionBuilder,
                  fm: &mut HashMap<usize, cranelift_codegen::ir::Block>,

@@ -408,6 +408,26 @@ fn main() {
             let sick_only = args.iter().any(|a| a == "--sick");
             let healthy_only = args.iter().any(|a| a == "--healthy");
             let obituaries = args.iter().any(|a| a == "--obituaries");
+            let jit_census = args.iter().any(|a| a == "--jit");
+            if jit_census {
+                // Which fns compile to native — build a fresh VM with the
+                // garden loaded and try each family's fittest variant.
+                let mut v = vm::Vm::new();
+                v.load_garden(&veldt).ok();
+                let mut engine = crate::jit::JitEngine::new().unwrap();
+                println!("JIT coverage across {} families", veldt.functions.len());
+                let mut native = 0; let mut cold = 0;
+                for (name, _) in &veldt.functions {
+                    match engine.compile_fn(name, &v.fns) {
+                        Some(_) => { println!("  {}: native", name); native += 1; }
+                        None => { println!("  {}: bytecode", name); cold += 1; }
+                    }
+                }
+                println!("{} native, {} bytecode ({:.0}% JIT-able)",
+                         native, cold,
+                         native as f64 / (native + cold).max(1) as f64 * 100.0);
+                return;
+            }
             let trust_filter = args.iter().position(|a| a == "--trust")
                 .and_then(|p| args.get(p + 1));
             if let Some(t) = trust_filter {
