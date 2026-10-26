@@ -268,6 +268,9 @@ pub fn respond(task: &str, editor_source: &str, veldt: &mut Veldt) -> AgentRespo
     if has(&["fastest", "most efficient", "efficient", "speed", "performant"]) {
         return efficiency_intent(&words, veldt);
     }
+    if has(&["canonical", "trust", "trusted", "trust levels", "established"]) {
+        return trust_intent(&words, veldt);
+    }
     if has(&["garden", "status", "alive", "what's growing", "what is growing", "what have you", "ecosystem"]) {
         return status_intent(veldt);
     }
@@ -885,6 +888,40 @@ fn efficiency_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
     for (n, e) in all.iter().take(8) {
         text.push_str(&format!("  {}#{} — {:.4} eff (fit {:.2})\n",
             n, e.id, e.efficiency, e.fitness));
+    }
+    plain(&text)
+}
+
+/// Trust — "what's canonical" / "trust levels" — scoped or global.
+fn trust_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
+    use crate::veldt::Trust;
+    let tag = |e: &FunctionEntry| match e.trust {
+        Trust::Canonical => "canonical",
+        Trust::Established => "established",
+        Trust::Seedling => "seedling",
+    };
+    if let Some(name) = find_lineage(words, veldt) {
+        let vs = match veldt.functions.get(&name) {
+            Some(v) => v,
+            None => return plain(&format!("No lineage called '{}'.", name)),
+        };
+        let mut text = format!("{} — trust levels\n", name);
+        for e in vs {
+            text.push_str(&format!("  #{} — {} (fit {:.2})\n", e.id, tag(e), e.fitness));
+        }
+        return plain(&text);
+    }
+    let canon: Vec<(&String, &FunctionEntry)> = veldt.functions.iter()
+        .flat_map(|(n, vs)| vs.iter().filter_map(move |e|
+            if matches!(e.trust, Trust::Canonical) { Some((n, e)) } else { None })).collect();
+    let estab: usize = veldt.functions.values().flatten()
+        .filter(|e| matches!(e.trust, Trust::Established)).count();
+    let seed: usize = veldt.functions.values().flatten()
+        .filter(|e| matches!(e.trust, Trust::Seedling)).count();
+    let mut text = format!("Trust: {} canonical, {} established, {} seedling\n",
+        canon.len(), estab, seed);
+    for (n, e) in &canon {
+        text.push_str(&format!("  {}#{} — canonical (fit {:.2})\n", n, e.id, e.fitness));
     }
     plain(&text)
 }
