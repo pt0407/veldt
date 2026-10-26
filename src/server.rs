@@ -77,6 +77,7 @@ pub async fn start_server(port: u16) {
         .route("/api/summary", get(summary))
         .route("/api/why", get(why_variant))
         .route("/api/species", get(species))
+        .route("/api/find", get(find_family))
         .route("/api/run", post(run_program))
         .route("/api/evolve", post(evolve))
         .route("/api/clear", post(clear_veldt))
@@ -1259,6 +1260,25 @@ async fn species() -> Json<serde_json::Value> {
             "keywords": t.keywords, "needs": t.needs,
         })).collect();
     Json(serde_json::json!({"species": specs}))
+}
+
+#[derive(Deserialize)]
+struct FindRequest { q: String }
+
+async fn find_family(
+    axum::extract::Query(req): axum::extract::Query<FindRequest>,
+) -> Json<serde_json::Value> {
+    let mut veldt = veldt::Veldt::new();
+    if veldt.load().is_err() {
+        return Json(serde_json::json!({"error": "garden load failed"}));
+    }
+    let hits: Vec<serde_json::Value> = veldt.functions.keys()
+        .filter(|n| n.contains(&req.q))
+        .map(|n| serde_json::json!({
+            "name": n, "variants": veldt.functions[n].len(),
+            "probes": veldt.probes.get(n).map(|p| p.len()).unwrap_or(0),
+        })).collect();
+    Json(serde_json::json!({"matches": hits}))
 }
 
 // --- IDE HTML ---
