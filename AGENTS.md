@@ -680,3 +680,6 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   strict checks. New: for-loop variable assigned inside
   the body (mutating the iteration var). Verified
   zero-false-positive on tictactoe.
+- [Devin] Lint batch 11 (HEAD post-single-elem-for): ~41
+  strict checks. New: for over a single-element list
+  (one-iteration loop → unwrap inline).
