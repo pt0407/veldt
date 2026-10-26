@@ -69,6 +69,7 @@ pub async fn start_server(port: u16) {
         .route("/api/deaths", get(deaths))
         .route("/api/selection", get(selection))
         .route("/api/mutation_rate", get(mutation_rate))
+        .route("/api/turnover", get(turnover))
         .route("/api/run", post(run_program))
         .route("/api/evolve", post(evolve))
         .route("/api/clear", post(clear_veldt))
@@ -612,6 +613,27 @@ async fn mutation_rate() -> Json<serde_json::Value> {
         "rate": *h as f64 / (*t).max(1) as f64,
     })).collect();
     Json(serde_json::json!({"mutation_rate": rates}))
+}
+
+async fn turnover() -> Json<serde_json::Value> {
+    let mut veldt = veldt::Veldt::new();
+    if veldt.load().is_err() {
+        return Json(serde_json::json!({"error": "garden load failed"}));
+    }
+    let ages: Vec<u64> = veldt.functions.values()
+        .flat_map(|vs| vs.iter().map(|e| e.age)).collect();
+    let avg_age = ages.iter().sum::<u64>() / ages.len().max(1) as u64;
+    let dead_age: f64 = if !veldt.obituaries.is_empty() {
+        veldt.obituaries.iter().map(|o| o.age as f64).sum::<f64>()
+            / veldt.obituaries.len() as f64
+    } else { 0.0 };
+    let stale: Vec<u64> = veldt.functions.values()
+        .flat_map(|vs| vs.iter().map(|e| veldt.run_count.saturating_sub(e.last_used)))
+        .collect();
+    let avg_stale = stale.iter().sum::<u64>() / stale.len().max(1) as u64;
+    Json(serde_json::json!({
+        "avg_age": avg_age, "avg_death_age": dead_age, "avg_staleness": avg_stale,
+    }))
 }
 
 #[derive(Deserialize)]
