@@ -566,6 +566,21 @@ fn main() {
                 }
                 println!("=== The Veldt (fitness >= {}) ===", min);
                 filtered.print_garden(sick_only, healthy_only);
+            } else if let Some(max_v) = args.iter().position(|a| a == "--max_variants")
+                .and_then(|p| args.get(p + 1)).and_then(|s| s.parse::<usize>().ok()) {
+                // --max_variants <n> — families with at most n variants
+                let mut filtered = veldt::Veldt::new();
+                filtered.probes = veldt.probes.clone();
+                filtered.obituaries = veldt.obituaries.clone();
+                filtered.run_count = veldt.run_count;
+                filtered.garden_path = veldt.garden_path.clone();
+                for (name, vs) in &veldt.functions {
+                    if vs.len() <= max_v {
+                        filtered.functions.insert(name.clone(), vs.clone());
+                    }
+                }
+                println!("=== The Veldt (variants <= {}) ===", max_v);
+                filtered.print_garden(sick_only, healthy_only);
             } else if let Some(min_v) = args.iter().position(|a| a == "--min_variants")
                 .and_then(|p| args.get(p + 1)).and_then(|s| s.parse::<usize>().ok()) {
                 // --min_variants <n> — families with at least n variants
