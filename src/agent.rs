@@ -286,6 +286,9 @@ pub fn respond(task: &str, editor_source: &str, veldt: &mut Veldt) -> AgentRespo
     if has(&["pressure", "rivals", "competition", "who competes", "selection"]) {
         return pressure_intent(&words, veldt);
     }
+    if has(&["healing", "heal", "recovering", "recovery", "being fixed"]) {
+        return healing_intent(&words, veldt);
+    }
     if has(&["garden", "status", "alive", "what's growing", "what is growing", "what have you", "ecosystem"]) {
         return status_intent(veldt);
     }
@@ -1138,6 +1141,30 @@ fn pressure_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
     let mut text = String::from("Selection pressure (tightest first):\n");
     for (n, sd, r) in rows.iter().take(8) {
         text.push_str(&format!("  {} — σ {:.4} ({} rivals)\n", n, sd, r));
+    }
+    plain(&text)
+}
+
+/// Healing — "who's healing" — variants with healing attempts logged.
+fn healing_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
+    let scoped = find_lineage(words, veldt);
+    let scoped_ref = &scoped;
+    let mut rows: Vec<(&String, &FunctionEntry)> = veldt.functions.iter()
+        .flat_map(|(n, vs)| vs.iter().filter_map(move |e|
+            if !e.healing_attempts.is_empty()
+                && scoped_ref.as_ref().map(|f| f == n).unwrap_or(true) {
+                Some((n, e))
+            } else { None })).collect();
+    if rows.is_empty() {
+        return plain("Nobody's healing — no healing attempts logged.");
+    }
+    rows.sort_by(|a, b| b.1.healing_attempts.len().cmp(&a.1.healing_attempts.len()));
+    let mut text = String::from("Healing log:\n");
+    for (n, e) in rows.iter().take(10) {
+        let state = if matches!(e.health, Health::Healthy) { "recovered" } else { "still sick" };
+        text.push_str(&format!("  {}#{} — {} attempts, {} (last: {})\n",
+            n, e.id, e.healing_attempts.len(), state,
+            e.healing_attempts.last().map(|s| s.as_str()).unwrap_or("")));
     }
     plain(&text)
 }
