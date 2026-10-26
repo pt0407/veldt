@@ -750,8 +750,11 @@ impl Interpreter {
                 Ok(Value::Struct(name.clone(), field_map))
             }
             Expr::Lambda(params, body) => {
-                // Capture current variables as closure environment
-                Ok(Value::Closure(params.clone(), body.clone(), Rc::clone(&self.vars)))
+                // Snapshot the env at creation — each closure owns its
+                // own view so later calls to the SAME outer fn don't
+                // rewrite earlier closures' captured params.
+                Ok(Value::Closure(params.clone(), body.clone(),
+                    Rc::new(RefCell::new(self.vars.borrow().clone()))))
             }
             Expr::ListComp(expr, var, iter, cond) => {
                 let iter_val = self.eval_expr(iter)?;
@@ -1159,13 +1162,9 @@ impl Interpreter {
             return Err(format!("Closure expects {} args but got {}", params.len(), args.len()));
         }
 
-        // Save current vars, set up closure scope with captured vars + params
+        // Save current vars; the closure runs with its own snapshot
+        // env + params — no sharing, no restore bookkeeping.
         let old_vars = self.vars.clone();
-        // save param bindings that exist in the captured env so we can restore them
-        let mut param_restore: Vec<(String, Option<Value>)> = Vec::new();
-        for param in &params {
-            param_restore.push((param.name.clone(), captured.borrow().get(&param.name).cloned()));
-        }
         self.vars = captured;
         for (param, val) in params.iter().zip(args.into_iter()) {
             self.vars.borrow_mut().insert(param.name.clone(), val);
@@ -1183,19 +1182,6 @@ impl Interpreter {
             }
         };
         self.call_stack.pop();
-
-        // Restore pre-existing bindings (a param shadowing a captured
-        // var gets its original value back), but never DELETE a param
-        // that wasn't there before — the captured env is shared by
-        // reference, so inner closures may still need that binding.
-        // Removing it corrupted nested closures (fn(n){fn(x){x+n}}
-        // broke because `n` was deleted before the inner call).
-        for (pname, old_val) in param_restore {
-            match old_val {
-                Some(v) => { self.vars.borrow_mut().insert(pname, v); }
-                None => {}
-            }
-        }
         self.vars = old_vars;
         Ok(result)
     }
