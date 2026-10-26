@@ -907,3 +907,6 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   strict checks. New: match Var pattern bound to a
   container — the pattern is a list/struct literal,
   could inline.
+- [Devin] Lint batch 41 (HEAD post-empty-list): ~72 strict
+  checks. New: let x = [] that never grows — an empty
+  list that never gets pushed/assigned.
