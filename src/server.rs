@@ -52,6 +52,7 @@ pub async fn start_server(port: u16) {
         .route("/api/sources", get(sources))
         .route("/api/fitness", get(fitness))
         .route("/api/health", get(health))
+        .route("/api/trust", get(trust))
         .route("/api/run", post(run_program))
         .route("/api/evolve", post(evolve))
         .route("/api/clear", post(clear_veldt))
@@ -317,6 +318,24 @@ async fn health() -> Json<serde_json::Value> {
         }
     }
     Json(serde_json::json!({"healthy": healthy, "sick": sick, "dying": dying}))
+}
+
+async fn trust() -> Json<serde_json::Value> {
+    let mut veldt = veldt::Veldt::new();
+    if veldt.load().is_err() {
+        return Json(serde_json::json!({"error": "garden load failed"}));
+    }
+    let mut seed = 0usize; let mut estab = 0usize; let mut canon = 0usize;
+    for vs in veldt.functions.values() {
+        for e in vs {
+            match e.trust {
+                crate::veldt::Trust::Seedling => seed += 1,
+                crate::veldt::Trust::Established => estab += 1,
+                crate::veldt::Trust::Canonical => canon += 1,
+            }
+        }
+    }
+    Json(serde_json::json!({"seedling": seed, "established": estab, "canonical": canon}))
 }
 
 #[derive(Deserialize)]
