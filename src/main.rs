@@ -3526,6 +3526,7 @@ fn print_stats(veldt: &veldt::Veldt) {
             "immigrants" => variants.iter().filter(|e| e.origin.contains("immigrant")).count() as f64,
             "sick" => variants.iter().filter(|e| matches!(e.health, Health::Sick(_))).count() as f64,
             "healthy" => variants.iter().filter(|e| matches!(e.health, Health::Healthy)).count() as f64,
+            "dying" => variants.iter().filter(|e| matches!(e.health, Health::Dying)).count() as f64,
             "canonical" => variants.iter().filter(|e| matches!(e.trust, veldt::Trust::Canonical)).count() as f64,
             "established" => variants.iter().filter(|e| matches!(e.trust, veldt::Trust::Established)).count() as f64,
             "seedling" => variants.iter().filter(|e| matches!(e.trust, veldt::Trust::Seedling)).count() as f64,
