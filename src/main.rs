@@ -566,6 +566,22 @@ fn main() {
                 }
                 println!("=== The Veldt (fitness >= {}) ===", min);
                 filtered.print_garden(sick_only, healthy_only);
+            } else if let Some(min_rate) = args.iter().position(|a| a == "--fit_rate")
+                .and_then(|p| args.get(p + 1)).and_then(|s| s.parse::<f64>().ok()) {
+                // --fit_rate <n> — variants with fitness/age >= n (fast-learners)
+                let mut filtered = veldt::Veldt::new();
+                filtered.probes = veldt.probes.clone();
+                filtered.obituaries = veldt.obituaries.clone();
+                filtered.run_count = veldt.run_count;
+                filtered.garden_path = veldt.garden_path.clone();
+                for (name, vs) in &veldt.functions {
+                    let keep: Vec<_> = vs.iter()
+                        .filter(|e| e.age > 0 && (e.fitness / e.age as f64) >= min_rate)
+                        .cloned().collect();
+                    if !keep.is_empty() { filtered.functions.insert(name.clone(), keep); }
+                }
+                println!("=== The Veldt (fitness/age >= {}) ===", min_rate);
+                filtered.print_garden(sick_only, healthy_only);
             } else if args.iter().any(|a| a == "--overworked") {
                 // overworked variants — usage_count > lifespan (carrying the load)
                 let mut filtered = veldt::Veldt::new();
