@@ -2167,6 +2167,11 @@ fn print_stats(veldt: &veldt::Veldt) {
                     let avg = ages.iter().sum::<u64>() as f64 / ages.len() as f64;
                     println!("  ages: {} – {} (avg {:.1})", min, max, avg);
                 }
+                // usage distribution — total calls + per-variant avg + most-called
+                let total_usage = vs.iter().map(|e| e.usage_count).sum::<u64>();
+                let avg_usage = total_usage as f64 / vs.len().max(1) as f64;
+                let max_usage = vs.iter().map(|e| e.usage_count).max().unwrap_or(0);
+                println!("  usage: {} calls (avg {:.1}, peak {})", total_usage, avg_usage, max_usage);
             }
         }
         if veldt.fitness_history.len() >= 2 {
