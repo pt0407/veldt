@@ -5486,6 +5486,26 @@ fn adopt_variant(target: &str) {
                          name, id);
             }
         }
+        // --lint: strict-lint the variant's body — refuse to promote
+        // code carrying defect-class warnings (same filter as the
+        // evolve birth-gate)
+        if std::env::args().any(|a| a == "--lint") {
+            if let Some(entry) = veldt.functions.get(name)
+                .and_then(|vs| vs.iter().find(|e| e.id == id)) {
+                let wrapped = ast::Stmt::Grow(ast::GrowItem::Fn(
+                    name.to_string(), entry.params.clone(),
+                    entry.body.clone(), entry.tests.clone()));
+                let bugs: Vec<String> = lint(&[wrapped]).into_iter()
+                    .filter(|w| crate::evolve::is_realbug_warning(w))
+                    .collect();
+                if !bugs.is_empty() {
+                    println!("{}#{} carries {} defect-class warning(s) — NOT promoting:", name, id, bugs.len());
+                    for b in &bugs { eprintln!("  ⚠ {}", b); }
+                    return;
+                }
+                println!("{}#{} lint-clean — safe to promote", name, id);
+            }
+        }
         let json = std::env::args().any(|a| a == "--json");
         if let Some(variants) = veldt.functions.get_mut(name) {
             let mut found = false;

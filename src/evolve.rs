@@ -1367,7 +1367,7 @@ fn mutant_realbugs(name: &str, params: &[Param], body: &[Stmt],
 /// almost certainly shouldn't carry: arity mismatches, unbound
 /// reads/assigns, null binds, fn shadowing, wrong-fn tests,
 /// unreachable code, never-matching patterns
-fn is_realbug_warning(w: &str) -> bool {
+pub(crate) fn is_realbug_warning(w: &str) -> bool {
     w.contains("args, got")
         || w.contains("shadows fn")
         || w.contains("never returns a value")
