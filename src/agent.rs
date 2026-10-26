@@ -254,6 +254,9 @@ pub fn respond(task: &str, editor_source: &str, veldt: &mut Veldt) -> AgentRespo
             return compare_intent(&words, veldt);
         }
     }
+    if has(&["coverage", "covered", "tested", "probes", "test suite", "test coverage"]) {
+        return coverage_intent(&words, veldt);
+    }
     if has(&["garden", "status", "alive", "what's growing", "what is growing", "what have you", "ecosystem"]) {
         return status_intent(veldt);
     }
@@ -720,6 +723,53 @@ fn compare_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
         for l in &only_b { text.push_str(&format!("  + {}\n", l.trim())); }
         text.push_str(&format!("  {} lines only in #{}, {} only in #{}",
             only_a.len(), id_a, only_b.len(), id_b));
+    }
+    plain(&text)
+}
+
+/// Coverage — probe/test coverage for one family or the whole garden.
+fn coverage_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
+    if let Some(name) = find_lineage(words, veldt) {
+        // scoped — this family's probes + which niches they target
+        let probes = veldt.probes.get(&name).map(|p| p.as_slice()).unwrap_or(&[]);
+        let vs = match veldt.functions.get(&name) {
+            Some(v) if !v.is_empty() => v,
+            _ => return plain(&format!("No lineage called '{}'.", name)),
+        };
+        let mut niche_counts: std::collections::HashMap<&str, usize> =
+            std::collections::HashMap::new();
+        for p in probes { *niche_counts.entry(p.niche.as_str()).or_insert(0) += 1; }
+        let covered: std::collections::HashSet<&String> = vs.iter()
+            .flat_map(|e| e.niche_scores.keys()).collect();
+        let mut text = format!("{} — {} probes, {} niches covered\n",
+            name, probes.len(), covered.len());
+        let mut sorted: Vec<(&str, usize)> = niche_counts.iter()
+            .map(|(n, c)| (*n, *c)).collect();
+        sorted.sort_by(|a, b| b.1.cmp(&a.1));
+        for (n, c) in sorted.iter().take(8) {
+            text.push_str(&format!("  {} — {} probes\n", n, c));
+        }
+        let gaps: Vec<&&String> = covered.iter()
+            .filter(|n| !niche_counts.contains_key(n.as_str())).collect();
+        if !gaps.is_empty() {
+            text.push_str(&format!("  gaps: {}", gaps.iter().map(|n| n.as_str())
+                .collect::<Vec<_>>().join(", ")));
+        }
+        return plain(&text);
+    }
+    // global — total probes, families covered, niche distribution
+    let total: usize = veldt.probes.values().map(|p| p.len()).sum();
+    let mut niche_hist: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    for p in veldt.probes.values() {
+        for pr in p { *niche_hist.entry(pr.niche.clone()).or_insert(0) += 1; }
+    }
+    let mut text = format!("{} probes across {} families\n", total, veldt.probes.len());
+    let mut sorted: Vec<(&String, usize)> = niche_hist.iter()
+        .map(|(n, c)| (n, *c)).collect();
+    sorted.sort_by(|a, b| b.1.cmp(&a.1));
+    for (n, c) in sorted.iter().take(8) {
+        text.push_str(&format!("  {} — {}\n", n, c));
     }
     plain(&text)
 }
