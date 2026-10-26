@@ -510,10 +510,11 @@ fn main() {
                 for (name, entries) in v.functions.iter_mut() {
                     if let Some(f) = fam { if name != f { continue; } }
                     for e in entries.iter_mut() {
-                        if fix && health::HealthChecker::repair_dead_tail(&mut e.body) {
+                        if fix && (health::HealthChecker::repair_dead_tail(&mut e.body)
+                                | health::HealthChecker::repair_dead_lets(&mut e.body)) {
                             repaired += 1;
                             if !json_out {
-                                eprintln!("  [FIX] {}#{} — truncated dead code", name, e.id);
+                                eprintln!("  [FIX] {}#{} — removed dead code", name, e.id);
                             }
                         }
                         let wrapped = ast::Stmt::Grow(ast::GrowItem::Fn(
