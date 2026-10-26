@@ -566,6 +566,22 @@ fn main() {
                 }
                 println!("=== The Veldt (fitness >= {}) ===", min);
                 filtered.print_garden(sick_only, healthy_only);
+            } else if let Some(max_lu) = args.iter().position(|a| a == "--max_last_used")
+                .and_then(|p| args.get(p + 1)).and_then(|s| s.parse::<u64>().ok()) {
+                // --max_last_used <n> — variants not used since run n (cold)
+                let mut filtered = veldt::Veldt::new();
+                filtered.probes = veldt.probes.clone();
+                filtered.obituaries = veldt.obituaries.clone();
+                filtered.run_count = veldt.run_count;
+                filtered.garden_path = veldt.garden_path.clone();
+                for (name, vs) in &veldt.functions {
+                    let keep: Vec<_> = vs.iter()
+                        .filter(|e| e.last_used <= max_lu)
+                        .cloned().collect();
+                    if !keep.is_empty() { filtered.functions.insert(name.clone(), keep); }
+                }
+                println!("=== The Veldt (last_used <= {}) ===", max_lu);
+                filtered.print_garden(sick_only, healthy_only);
             } else if let Some(min_lu) = args.iter().position(|a| a == "--min_last_used")
                 .and_then(|p| args.get(p + 1)).and_then(|s| s.parse::<u64>().ok()) {
                 // --min_last_used <n> — variants used since run n (recently called)
