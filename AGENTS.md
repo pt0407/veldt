@@ -49,6 +49,13 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/gardener] CONSOLIDATED: removed 86 mechanical garden flags
+  (~1530 lines) — 8 _fam sorts + 12 _fam filters + 18 name:op
+  thresholds + 9 _fam sorts + 39 min/max/count variants. All covered
+  by `--filter "family == X && field op n"` / `--sort <field>`.
+  Remaining: ergonomic shortcuts (--sick --healthy --old --best etc.),
+  family-level _count queries, lineage queries, arg-taking filters.
+  The DSL is now the primary query path — `veldt help filter` for syntax.
 - [Devin/gardener] FAMILY FIELD: `family` is now a filter-DSL field —
   `--filter "family == fib && fitness > 1.5"` scopes to a family.
   Works in all 14 commands + /api/filter (`variant_matches_in`
