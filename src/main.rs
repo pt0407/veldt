@@ -311,7 +311,25 @@ fn main() {
                 eprintln!("Usage: veldt fuzz <name>|--all  (boundary corpus vs every variant)");
                 process::exit(1);
             }
-            if args[2] == "--all" || args[2] == "--ci" {
+            if args[2] == "--filter" {
+                // --filter <expr> — fuzz only families with matching variants
+                let expr = args.get(3).map(|s| s.as_str()).unwrap_or("");
+                let mut veldt = veldt::Veldt::new();
+                if let Err(e) = veldt.load() { eprintln!("Error: {}", e); process::exit(1); }
+                let or_groups: Vec<Vec<&str>> = expr.split("||")
+                    .map(|g| g.split("&&").map(|s| s.trim()).collect())
+                    .collect();
+                let names: Vec<String> = veldt.functions.iter()
+                    .filter(|(_, vs)| vs.iter().any(|e|
+                        or_groups.iter().any(|g|
+                            g.iter().all(|c| veldt::variant_matches(e, c)))))
+                    .map(|(n, _)| n.clone())
+                    .collect();
+                println!("[fuzz --filter {} — {} families]", expr, names.len());
+                for name in &names {
+                    fuzz_family(name);
+                }
+            } else if args[2] == "--all" || args[2] == "--ci" {
                 fuzz_all();
                 // --ci: exit nonzero if any family diverged — CI gate
                 if args[2] == "--ci" {
