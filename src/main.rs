@@ -65,6 +65,24 @@ fn main() {
                 run_program(&args[2], args.iter().any(|a| a == "--trace"), args.iter().any(|a| a == "--evolve"));
             }
         }
+        // veldt compare prog.veldt — run on both engines, report times.
+        "compare" => {
+            let file = args[2..].iter().find(|a| a.ends_with(".veldt"))
+                .cloned().unwrap_or_else(|| args[2].clone());
+            println!("=== tree-walk ===");
+            let t0 = std::time::Instant::now();
+            run_program(&file, false, false);
+            let tree = t0.elapsed();
+            println!("=== bytecode VM + JIT ===");
+            let t1 = std::time::Instant::now();
+            run_program_vm(&file);
+            let vm = t1.elapsed();
+            let speed = tree.as_secs_f64() / vm.as_secs_f64().max(1e-9);
+            println!("--- compare ---");
+            println!("  tree-walk: {:?}", tree);
+            println!("  --vm:      {:?}", vm);
+            println!("  speedup:   {:.1}x", speed);
+        }
         "--version" | "-V" | "version" => {
             println!("veldt {}", env!("CARGO_PKG_VERSION"));
         }
