@@ -2801,7 +2801,7 @@ fn verify_family(name: &str, args: &[String]) {
 
 // Run the bounded check on `name`, return the first divergent
 // variant id (or None if all agree). Used by verify --quarantine.
-fn verify_family_find_divergent(name: &str) -> Option<u32> {
+pub fn verify_family_find_divergent(name: &str) -> Option<u32> {
     let mut veldt = veldt::Veldt::new();
     if veldt.load().is_err() { return None; }
     let mut interp = interpreter::Interpreter::new();

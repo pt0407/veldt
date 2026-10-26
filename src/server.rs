@@ -39,6 +39,7 @@ pub async fn start_server(port: u16) {
         .route("/api/game", post(game_step))
         .route("/api/call", post(call_fn))
         .route("/api/adopt", post(adopt_variant))
+        .route("/api/verify", post(verify_family))
         .route("/api/run", post(run_program))
         .route("/api/evolve", post(evolve))
         .route("/api/clear", post(clear_veldt))
@@ -91,6 +92,16 @@ async fn adopt_variant(
     } else {
         Json(serde_json::json!({"ok": false, "error": format!("{}#{} not found", req.name, req.id)}))
     }
+}
+
+#[derive(Deserialize)]
+struct VerifyRequest { name: String }
+
+async fn verify_family(
+    Json(req): Json<VerifyRequest>,
+) -> Json<serde_json::Value> {
+    let divergent = crate::verify_family_find_divergent(&req.name);
+    Json(serde_json::json!({"verified": divergent.is_none(), "divergent": divergent}))
 }
 
 #[derive(Deserialize)]
