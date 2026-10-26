@@ -1059,6 +1059,9 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
                 if let Some(lit) = const_bool(cond) {
                     out.push(format!("loop on constant {} — dead or infinite", lit));
                 }
+                if !body.iter().any(|s| has_exit(s)) {
+                    out.push("loop body has no break/return/continue — check the exit condition".into());
+                }
                 lint_block(body, out);
             }
             Stmt::Try(a, _, b) => { lint_block(a, out); lint_block(b, out); }
@@ -1107,6 +1110,21 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
         if !called {
             out.push(format!("fn {} defined but never called", name));
         }
+    }
+}
+
+/// Does this block contain a loop-exit statement (break/return/continue)?
+fn has_exit(s: &ast::Stmt) -> bool {
+    use ast::*;
+    match s {
+        Stmt::Break | Stmt::Continue | Stmt::Return(_) => true,
+        Stmt::If(_, a, b) => a.iter().any(has_exit)
+            || b.as_ref().map(|x| x.iter().any(has_exit)).unwrap_or(false),
+        Stmt::While(_, body) | Stmt::For(_, _, body) => body.iter().any(has_exit),
+        Stmt::Try(a, _, b) => a.iter().any(has_exit) || b.iter().any(has_exit),
+        Stmt::Match(_, arms, els) => arms.iter().any(|(_, b)| b.iter().any(has_exit))
+            || els.as_ref().map(|x| x.iter().any(has_exit)).unwrap_or(false),
+        _ => false,
     }
 }
 
