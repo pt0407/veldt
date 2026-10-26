@@ -1758,17 +1758,30 @@ fn main() {
             if let Some(file) = args.get(2).filter(|a| a.ends_with(".veldt")) {
                 let reps: usize = args.iter().position(|a| a == "--reps")
                     .and_then(|p| args.get(p + 1)).and_then(|s| s.parse().ok()).unwrap_or(5);
+                let vm = args.iter().any(|a| a == "--vm");
                 let mut times: Vec<u128> = Vec::new();
                 for _ in 0..reps {
                     let t0 = std::time::Instant::now();
-                    run_program(file, false, false);
+                    if vm { run_program_vm(file, false) } else { run_program(file, false, false) };
                     times.push(t0.elapsed().as_millis());
                 }
                 let min = times.iter().min().copied().unwrap_or(0);
                 let max = times.iter().max().copied().unwrap_or(0);
                 let avg = times.iter().sum::<u128>() / times.len().max(1) as u128;
-                println!("bench {} — {} reps | min {}ms avg {}ms max {}ms",
-                    file, reps, min, avg, max);
+                println!("bench {} — {} reps{} | min {}ms avg {}ms max {}ms",
+                    file, reps, if vm { " (vm)" } else { "" }, min, avg, max);
+                // --vm --compare — run both engines and report the speedup
+                if vm && args.iter().any(|a| a == "--compare") {
+                    let mut tree: Vec<u128> = Vec::new();
+                    for _ in 0..reps {
+                        let t0 = std::time::Instant::now();
+                        run_program(file, false, false);
+                        tree.push(t0.elapsed().as_millis());
+                    }
+                    let tavg = tree.iter().sum::<u128>() / tree.len().max(1) as u128;
+                    println!("  tree-walk avg {}ms vs vm avg {}ms → {:.2}x",
+                        tavg, avg, tavg as f64 / (avg as f64).max(1.0));
+                }
                 return;
             }
             let mut veldt = veldt::Veldt::new();
