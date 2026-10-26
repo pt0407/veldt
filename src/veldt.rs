@@ -886,6 +886,13 @@ pub fn sort_variants(vs: &mut Vec<FunctionEntry>, field: &str) {
                 let bscore = b.niche_scores.values().sum::<f64>() / b.niche_scores.len().max(1) as f64;
                 bscore.partial_cmp(&ascore)
             }
+            _ if field.starts_with("niche:") => {
+                // niche:<name> — sort by per-niche score
+                let niche = &field[6..];
+                let ascore = a.niche_scores.get(niche).copied().unwrap_or(0.0);
+                let bscore = b.niche_scores.get(niche).copied().unwrap_or(0.0);
+                bscore.partial_cmp(&ascore)
+            }
             "id" => a.id.cmp(&b.id),
             "born" => b.born.cmp(&a.born),
             "trial_score" => b.trial_score.partial_cmp(&a.trial_score),
