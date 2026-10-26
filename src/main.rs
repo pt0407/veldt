@@ -162,8 +162,11 @@ fn main() {
             }
             adopt_variant(&args[2]);
         }
-        // veldt verify --all — audit every multi-variant family
+        // veldt verify --all [--quarantine] — audit every multi-variant
+        // family; --quarantine demotes divergent variants to Dying so
+        // call_best stops dispatching to them.
         "verify" if args.iter().any(|a| a == "--all") => {
+            let quarantine = args.iter().any(|a| a == "--quarantine");
             let mut veldt = veldt::Veldt::new();
             if let Err(e) = veldt.load() { eprintln!("Error: {}", e); process::exit(1); }
             let names: Vec<String> = veldt.functions.iter()
@@ -173,7 +176,26 @@ fn main() {
                 println!("No families with multiple variants.");
             } else {
                 println!("Auditing {} families...", names.len());
-                for n in names { verify_family(&n, &args); println!(""); }
+                let mut demoted = Vec::new();
+                for n in &names {
+                    if let Some(id) = verify_family_find_divergent(n) {
+                        if quarantine {
+                            if let Some(vs) = veldt.functions.get_mut(n) {
+                                for v in vs.iter_mut() {
+                                    if v.id == id {
+                                        v.health = veldt::Health::Dying;
+                                        demoted.push(format!("{}#{}", n, id));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if quarantine && !demoted.is_empty() {
+                    veldt.save().unwrap_or_else(
+                        |e| eprintln!("Save error: {}", e));
+                    println!("Quarantined (Dying): {}", demoted.join(", "));
+                }
             }
         }
         // veldt verify <fn> — bounded equivalence check across variants:
@@ -2594,6 +2616,46 @@ fn verify_family(name: &str, args: &[String]) {
         }
     }
     println!("({} calls evaluated)", checked);
+}
+
+// Run the bounded check on `name`, return the first divergent
+// variant id (or None if all agree). Used by verify --quarantine.
+fn verify_family_find_divergent(name: &str) -> Option<u32> {
+    let mut veldt = veldt::Veldt::new();
+    if veldt.load().is_err() { return None; }
+    let mut interp = interpreter::Interpreter::new();
+    veldt.load_into_interpreter(&mut interp);
+    let variants = interp.functions.get(name)?.clone();
+    if variants.len() < 2 { return None; }
+    let fittest = variants.iter()
+        .max_by(|a, b| a.fitness.partial_cmp(&b.fitness)
+            .unwrap_or(std::cmp::Ordering::Equal))?;
+    let arity = fittest.def.params.len();
+    let mut found = None;
+    for v in &variants {
+        if v.id == fittest.id { continue; }
+        for x in -10..=10i64 {
+            let args: Vec<crate::interpreter::Value> =
+                vec![crate::interpreter::Value::Int(x); arity.max(1)];
+            let a = interp.call_function(name, Some(v.id), args.clone());
+            let b = interp.call_function(name, Some(fittest.id), args);
+            let same = match (&a, &b) {
+                (Ok(p), Ok(q)) => p == q,
+                (Err(_), Err(_)) => true,
+                _ => false,
+            };
+            if !same {
+                println!("  {}#{}: DIVERGES", name, v.id);
+                found = Some(v.id);
+                break;
+            }
+        }
+        if found.is_none() {
+            println!("  {}#{}: bounded-verified", name, v.id);
+        }
+        if found.is_some() { break; }
+    }
+    found
 }
 
 fn export_garden(path: &str) {
