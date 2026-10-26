@@ -3363,6 +3363,9 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
                         out.push("loop condition repeats the same operand — x && x / x || x".into());
                     }
                 }
+                if matches!(body.last(), Some(Stmt::Continue)) {
+                    out.push("continue as the last statement of a loop body — redundant".into());
+                }
                 // condition var never assigned inside the body — likely infinite
                 if let Expr::Var(v) = cond {
                     if !body.iter().any(|s| stmt_assigns(s, v)) {
@@ -3387,6 +3390,9 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
                 }
                 if !body.iter().any(|s| has_exit(s)) {
                     out.push("loop body has no break/return/continue — check the exit condition".into());
+                }
+                if matches!(body.last(), Some(Stmt::Continue)) {
+                    out.push("continue as the last statement of a loop body — redundant".into());
                 }
                 if !name.starts_with('_')
                     && !body.iter().any(|s| stmt_mentions(s, name)) {
