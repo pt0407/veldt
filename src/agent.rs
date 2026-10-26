@@ -1467,6 +1467,75 @@ print("results: " + results)
 print(@N@([5, 2, 9, 1, 7, 3]))
 "#,
         },
+        Template {
+            keywords: &["median"],
+            canonical: "median",
+            desc: "median of a list",
+            needs: &[],
+            make: r#"grow fn @N@(xs: list) test @N@([3, 1, 2]) == 2, @N@([4, 1, 3, 2]) == 2 {
+    let s = xs.sort()
+    let n = s.len()
+    if n == 0 { return 0 }
+    return s[(n - 1) / 2]
+}
+
+print(@N@([7, 3, 1, 9, 5]))
+"#,
+        },
+        Template {
+            keywords: &["sorted", "is_sorted", "check sorted"],
+            canonical: "is_sorted",
+            desc: "sorted-ness check",
+            needs: &[],
+            make: r#"grow fn @N@(xs: list) test @N@([1, 2, 3]) == true, @N@([3, 1]) == false, @N@([]) == true {
+    let i = 1
+    while i < xs.len() {
+        if xs[i] < xs[i - 1] { return false }
+        i = i + 1
+    }
+    return true
+}
+
+print(@N@([1, 2, 2, 5]))
+"#,
+        },
+        Template {
+            keywords: &["binary search", "bsearch", "binary_search"],
+            canonical: "binary_search",
+            desc: "binary search on a sorted list",
+            needs: &[],
+            make: r#"grow fn @N@(xs: list, target: int) test @N@([1, 3, 5, 7], 5) == 2, @N@([1, 3, 5, 7], 4) == -1 {
+    let lo = 0
+    let hi = xs.len() - 1
+    while lo <= hi {
+        let mid = (lo + hi) / 2
+        if xs[mid] == target { return mid }
+        if xs[mid] < target { lo = mid + 1 } else { hi = mid - 1 }
+    }
+    return -1
+}
+
+print(@N@([1, 3, 5, 7, 9], 7))
+"#,
+        },
+        Template {
+            keywords: &["flatten", "concat lists", "join lists"],
+            canonical: "flatten",
+            desc: "flatten a list of lists",
+            needs: &[],
+            make: r#"grow fn @N@(xss: list) test @N@([[1, 2], [3], []]) == [1, 2, 3], @N@([[]]) == [] {
+    let out = []
+    for xs in xss {
+        for x in xs {
+            out = out.push(x)
+        }
+    }
+    return out
+}
+
+print(@N@([[1, 2], [3, 4], [5]]))
+"#,
+        },
     ]
 }
 
