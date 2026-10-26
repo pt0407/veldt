@@ -1036,6 +1036,15 @@ fn print_stats(veldt: &veldt::Veldt) {
         println!("healing: {} of {} deaths tried (avg {} attempts, max {})",
             healed_once, attempts.len(), avg, max);
     }
+    // avg usage per variant — selection pressure intensity
+    let used: Vec<u64> = veldt.functions.values()
+        .flat_map(|vs| vs.iter().map(|e| e.usage_count)).collect();
+    if !used.is_empty() {
+        let avg = used.iter().sum::<u64>() / used.len() as u64;
+        let called = used.iter().filter(|u| **u > 0).count();
+        println!("usage rate: avg {} calls/variant ({} of {} called)",
+            avg, called, used.len());
+    }
     // fitness trend — peak per run, is the garden improving?
     if veldt.fitness_history.len() >= 2 {
         let trend: Vec<String> = veldt.fitness_history.iter()
