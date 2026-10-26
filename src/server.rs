@@ -57,6 +57,7 @@ pub async fn start_server(port: u16) {
         .route("/api/immigrants", get(immigrants))
         .route("/api/mutation", get(mutation))
         .route("/api/families", get(families))
+        .route("/api/filter", get(filter_garden))
         .route("/api/variant", get(variant))
         .route("/api/heal", get(heal))
         .route("/api/ages", get(ages))
@@ -415,6 +416,38 @@ async fn mutation() -> Json<serde_json::Value> {
     Json(serde_json::json!({"sources": src.iter()
         .map(|(s, c)| serde_json::json!({"source": s, "count": c}))
         .collect::<Vec<_>>()}))
+}
+
+#[derive(Deserialize)]
+struct FilterRequest {
+    expr: Option<String>,
+}
+
+async fn filter_garden(
+    axum::extract::Query(req): axum::extract::Query<FilterRequest>,
+) -> Json<serde_json::Value> {
+    let mut veldt = Veldt::new();
+    if veldt.load().is_err() {
+        return Json(serde_json::json!({"error": "garden load failed"}));
+    }
+    let expr = req.expr.unwrap_or_default();
+    let or_groups: Vec<Vec<&str>> = expr.split("||")
+        .map(|g| g.split("&&").map(|s| s.trim()).collect())
+        .collect();
+    let mut out = serde_json::Map::new();
+    for (name, vs) in &veldt.functions {
+        let keep: Vec<_> = vs.iter()
+            .filter(|e| or_groups.iter().any(|g|
+                g.iter().all(|c| crate::veldt::variant_matches(e, c))))
+            .map(|e| serde_json::json!({
+                "id": e.id, "fitness": e.fitness, "age": e.age,
+                "usage": e.usage_count, "trust": format!("{:?}", e.trust),
+                "health": format!("{:?}", e.health), "origin": e.origin,
+            }))
+            .collect();
+        if !keep.is_empty() { out.insert(name.clone(), serde_json::json!(keep)); }
+    }
+    Json(serde_json::json!({"expr": expr, "families": out}))
 }
 
 async fn families() -> Json<serde_json::Value> {
