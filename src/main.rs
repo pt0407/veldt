@@ -590,13 +590,24 @@ fn main() {
                 }
                 return;
             }
+            // --suppress <substr> (repeatable) — pragmatic escape
+            // hatch: drop any warning containing the substring
+            let suppresses: Vec<String> = args.iter().enumerate()
+                .filter_map(|(i, a)| (a == "--suppress")
+                    .then(|| args.get(i + 1)).flatten().cloned())
+                .collect();
             let run = |src: &str| -> Result<(usize, Vec<String>), String> {
                 let mut lx = lexer::Lexer::new(src);
                 let toks = lx.tokenize().map_err(|e| format!("Lex error: {}", e))?;
                 let mut p = parser::Parser::new_with_lines(toks, lx.token_lines.clone());
                 let stmts = p.parse_program().map_err(|e| format!("Parse error: {}", e))?;
                 let n = stmts.len();
-                if strict { Ok((n, lint(&stmts))) } else { Ok((n, vec![])) }
+                if strict {
+                    let warns = lint(&stmts).into_iter()
+                        .filter(|w| !suppresses.iter().any(|s| w.contains(s.as_str())))
+                        .collect();
+                    Ok((n, warns))
+                } else { Ok((n, vec![])) }
             };
             let print = |path: &str, src: &str| {
                 match run(src) {
