@@ -3879,6 +3879,41 @@ fn diff_variants(a: &str, b: &str) {
     let eb = vs.iter().find(|e| e.id == bid).unwrap_or_else(|| { eprintln!("no {}#{}", bn, bid); process::exit(1); });
     let sa = crate::fmt::format_program(&ea.body);
     let sb = crate::fmt::format_program(&eb.body);
+    if std::env::args().any(|a| a == "--json") {
+        // JSON diff — LCS-aligned records for tooling
+        let pa: Vec<&str> = sa.lines().collect();
+        let pb: Vec<&str> = sb.lines().collect();
+        let n = pa.len(); let m = pb.len();
+        let mut dp = vec![vec![0usize; m + 1]; n + 1];
+        for i in (0..n).rev() {
+            for j in (0..m).rev() {
+                dp[i][j] = if pa[i] == pb[j] { dp[i+1][j] + 1 }
+                    else { dp[i+1][j].max(dp[i][j+1]) };
+            }
+        }
+        let mut lines: Vec<serde_json::Value> = Vec::new();
+        let (mut i, mut j) = (0usize, 0usize);
+        while i < n && j < m {
+            if pa[i] == pb[j] {
+                lines.push(serde_json::json!({"tag": " ", "text": pa[i]})); i += 1; j += 1;
+            } else if dp[i+1][j] >= dp[i][j+1] {
+                lines.push(serde_json::json!({"tag": "-", "text": pa[i]})); i += 1;
+            } else {
+                lines.push(serde_json::json!({"tag": "+", "text": pb[j]})); j += 1;
+            }
+        }
+        while i < n { lines.push(serde_json::json!({"tag": "-", "text": pa[i]})); i += 1; }
+        while j < m { lines.push(serde_json::json!({"tag": "+", "text": pb[j]})); j += 1; }
+        println!("{}", serde_json::json!({
+            "a": format!("{}#{}", an, aid), "b": format!("{}#{}", bn, bid),
+            "fitness_a": ea.fitness, "fitness_b": eb.fitness,
+            "removed": lines.iter().filter(|l| l["tag"] == "-").count(),
+            "added": lines.iter().filter(|l| l["tag"] == "+").count(),
+            "shared": lines.iter().filter(|l| l["tag"] == " ").count(),
+            "lines": lines,
+        }));
+        return;
+    }
     if std::env::args().any(|a| a == "--unified") {
         // single interleaved diff — common context once, changes -/+
         let mut out: Vec<(char, String)> = Vec::new();
