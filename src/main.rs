@@ -628,6 +628,14 @@ fn print_stats(veldt: &veldt::Veldt) {
         seed, estab, canon);
     println!("probes: {} across {} families | deaths: {} | runs: {}",
         probe_count, veldt.probes.len(), veldt.obituaries.len(), veldt.run_count);
+    // coverage line — which families carry probe mass vs bare lineages
+    let bare: Vec<&String> = veldt.functions.keys()
+        .filter(|n| veldt.probes.get(*n).map(|p| p.is_empty()).unwrap_or(true))
+        .collect();
+    if !bare.is_empty() {
+        println!("bare lineages (no probes — zero selection pressure): {}",
+            bare.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", "));
+    }
     if !best.is_empty() {
         println!("top families:");
         for (name, fit, n) in best.iter().take(10) {
