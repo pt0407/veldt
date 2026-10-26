@@ -2387,6 +2387,19 @@ fn print_stats(veldt: &veldt::Veldt) {
                         .unwrap_or(std::cmp::Ordering::Equal)).unwrap();
                     println!("  fit_rate: avg {:.3} (peak {:.3} — {}#{})", avg, max, fastest.name, fastest.id);
                 }
+                // usage_rate + size_rate — the throughput + growth-rate profile
+                let usage_rates: Vec<f64> = vs.iter()
+                    .map(|e| e.usage_count as f64 / (e.age as f64 + 1.0)).collect();
+                if !usage_rates.is_empty() {
+                    let avg = usage_rates.iter().sum::<f64>() / usage_rates.len() as f64;
+                    println!("  usage_rate: avg {:.2} calls/run", avg);
+                }
+                let size_rates: Vec<f64> = vs.iter()
+                    .map(|e| crate::fmt::format_program(&e.body).len() as f64 / (e.age as f64 + 1.0)).collect();
+                if !size_rates.is_empty() {
+                    let avg = size_rates.iter().sum::<f64>() / size_rates.len() as f64;
+                    println!("  size_rate: avg {:.1} chars/run", avg);
+                }
             }
         }
         if veldt.fitness_history.len() >= 2 {
