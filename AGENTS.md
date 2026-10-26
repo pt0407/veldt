@@ -49,6 +49,14 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] JIT UPDATE 7: veldt test --vm + veldt fuzz --vm
+  (trials + boundary corpus via jit_call on the boxed ABI —
+  check_at_birth_with, mk_vm, call_one). Fuzzing under --vm caught
+  REAL divergence: vm binop used a+b/a*b/etc — panic on i64
+  overflow where eval_binop uses wrapping_*; float /0.0 was inf
+  under VM, now errors like the tree-walker. Parity suite still
+  green. Value-mode per-fn speedup is modest (helpers do the work)
+  — the win is native dispatch + control flow, not raw op speed.
 - [Devin/main-side] JIT UPDATE 6 — BOXED-VALUE ABI: garden --jit is
   now 97% (36/37 fns native, was ~42%). Third sig mode in src/jit.rs:
   fn(*mut JitRt, *const Value, i64) -> *mut Value — boxed operands,
