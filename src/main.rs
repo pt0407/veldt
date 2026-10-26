@@ -566,6 +566,27 @@ fn main() {
                 }
                 println!("=== The Veldt (fitness >= {}) ===", min);
                 filtered.print_garden(sick_only, healthy_only);
+            } else if let Some(fam) = args.iter().position(|a| a == "--niche_score_fam")
+                .and_then(|p| args.get(p + 1)).cloned() {
+                // --niche_score_fam <name> — variants in this family sorted by avg niche score
+                let mut sorted = veldt::Veldt::new();
+                sorted.probes = veldt.probes.clone();
+                sorted.obituaries = veldt.obituaries.clone();
+                sorted.run_count = veldt.run_count;
+                sorted.garden_path = veldt.garden_path.clone();
+                if let Some(vs) = veldt.functions.get(&fam) {
+                    let mut sorted_vs = vs.clone();
+                    sorted_vs.sort_by(|a, b| {
+                        let ra = if a.niche_scores.is_empty() { 0.0 } else {
+                            a.niche_scores.values().sum::<f64>() / a.niche_scores.len() as f64 };
+                        let rb = if b.niche_scores.is_empty() { 0.0 } else {
+                            b.niche_scores.values().sum::<f64>() / b.niche_scores.len() as f64 };
+                        rb.partial_cmp(&ra).unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                    sorted.functions.insert(fam.clone(), sorted_vs);
+                }
+                println!("=== The Veldt ({} highest-niche first) ===", fam);
+                sorted.print_garden(sick_only, healthy_only);
             } else if let Some(fam) = args.iter().position(|a| a == "--efficiency_fam")
                 .and_then(|p| args.get(p + 1)).cloned() {
                 // --efficiency_fam <name> — variants in this family sorted by fitness/size
