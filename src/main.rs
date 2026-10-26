@@ -3768,6 +3768,11 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                                     out.push(format!("match pattern {} is bound to an alias — inline it", v));
                                     break;
                                 }
+                                // Var pattern bound to a container — the pattern is a list/struct
+                                if n == v && matches!(pe, Expr::List(_) | Expr::StructLit(..)) {
+                                    out.push(format!("match pattern {} is bound to a container — inline it", v));
+                                    break;
+                                }
                             }
                         }
                     }
