@@ -949,6 +949,15 @@ impl Vm {
                     let name = code.names[ni as usize].clone();
                     // call_best dispatches on the VM's own table — the
                     // helper interpreter has no functions loaded.
+                    if name == "garden_reload" {
+                        // Reload the garden into THIS vm's fn table —
+                        // delegating to the helper would update the
+                        // wrong interpreter's functions.
+                        let g = crate::veldt::Veldt::new();
+                        self.load_garden(&g)?;
+                        stack.push(Value::Null);
+                        return Ok(());
+                    }
                     if name == "call_best" {
                         let fname = match args.first() {
                             Some(Value::Str(s)) => (**s).to_string(),
