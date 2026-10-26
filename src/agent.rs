@@ -415,11 +415,16 @@ fn evolve_intent(words: &[&str], veldt: &mut Veldt) -> AgentResponse {
         .find_map(|w| w.parse().ok())
         .unwrap_or(3);
     let llm = words.contains(&"llm") || words.contains(&"ai") || words.contains(&"llms");
-    let mut steps = vec![step("plan", format!("Running {} evolution cycle{}{}.", cycles, if cycles == 1 { "" } else { "s" },
-        if llm && crate::llm::configured() { " (LLM mutations)" } else { "" }))];
+    // "evolve fib" — scoped to one family when a known lineage is named
+    let family = words.iter()
+        .find(|w| veldt.functions.contains_key(**w))
+        .map(|s| s.to_string());
+    let mut steps = vec![step("plan", format!("Running {} evolution cycle{}{}{}.", cycles, if cycles == 1 { "" } else { "s" },
+        if llm && crate::llm::configured() { " (LLM mutations)" } else { "" },
+        family.as_deref().map(|f| format!(" on {}", f)).unwrap_or_default()))];
     let mut evolver = Evolver::new();
     evolver.llm = llm;
-    let events = evolver.evolve(veldt, cycles);
+    let events = evolver.evolve_scoped(veldt, cycles, family.as_deref());
     for ev in &events {
         steps.push(step("obs", ev.format()));
     }

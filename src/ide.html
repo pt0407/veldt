@@ -701,6 +701,16 @@ async function fetchGarden() {
   renderGarden();
 }
 
+async function evolveFamily(name) {
+  const res = await fetch(API + '/api/agent', { method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ task: `evolve ${name}`, source: editor.getValue() }) });
+  const d = await res.json();
+  document.getElementById('output').innerHTML =
+    '<pre style="color:#8ef;margin:0">' + (d.reply || 'no events') + '</pre>';
+  renderGarden();
+}
+
 async function testFamily(name) {
   const res = await fetch(API + '/api/agent', { method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -903,6 +913,7 @@ function renderGarden() {
         <span class="name">${lineage.name}</span>
         <span class="meta">${lineage.variants.length}v${probeStr}</span>
         <span class="play" onclick="event.stopPropagation();testFamily('${lineage.name}')" title="re-trial all variants">⟳</span>
+        <span class="play" onclick="event.stopPropagation();evolveFamily('${lineage.name}')" title="evolve this family">⇌</span>
       </div>`;
 
       // Build tree: roots = no parents in-family; children attach to first parent
