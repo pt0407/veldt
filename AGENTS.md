@@ -49,6 +49,12 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] JIT UPDATE 13: veldt evolve --vm (birth-trials
+  through jit_call via evolver.use_vm). Honest value-mode perf:
+  string-method code ~1.7x vs tree-walk (boxed helpers dominate;
+  specialization is the next win — inline the int/float path when
+  the Value tag is provable). Scalar sigs remain much faster for
+  pure-numeric code.
 - [Devin/main-side] JIT UPDATE 12: duplicate-define fix — a fn
   already compiled under name#id$v got re-declared+re-defined
   when compile_variant ran again (bare-key miss), cranelift
