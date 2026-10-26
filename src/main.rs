@@ -566,6 +566,21 @@ fn main() {
                 }
                 println!("=== The Veldt (fitness >= {}) ===", min);
                 filtered.print_garden(sick_only, healthy_only);
+            } else if args.iter().any(|a| a == "--llm") {
+                // LLM-bred variants only — the BYOK mutations
+                let mut filtered = veldt::Veldt::new();
+                filtered.probes = veldt.probes.clone();
+                filtered.obituaries = veldt.obituaries.clone();
+                filtered.run_count = veldt.run_count;
+                filtered.garden_path = veldt.garden_path.clone();
+                for (name, vs) in &veldt.functions {
+                    let keep: Vec<_> = vs.iter()
+                        .filter(|e| e.origin.contains("llm"))
+                        .cloned().collect();
+                    if !keep.is_empty() { filtered.functions.insert(name.clone(), keep); }
+                }
+                println!("=== The Veldt (LLM-bred) ===");
+                filtered.print_garden(sick_only, healthy_only);
             } else if args.iter().any(|a| a == "--bred") {
                 // bred variants only — mutation/crossover/recombine, not seeds/immigrants
                 let mut filtered = veldt::Veldt::new();
