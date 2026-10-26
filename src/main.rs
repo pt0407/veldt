@@ -566,6 +566,19 @@ fn main() {
                 }
                 println!("=== The Veldt (fitness >= {}) ===", min);
                 filtered.print_garden(sick_only, healthy_only);
+            } else if args.iter().any(|a| a == "--dead") {
+                // extinct lineages — names in obituaries but not in functions
+                let extinct: std::collections::BTreeSet<&String> = veldt.obituaries.iter()
+                    .map(|o| &o.name)
+                    .filter(|n| !veldt.functions.contains_key(*n))
+                    .collect();
+                println!("=== Extinct lineages ({} lineages) ===", extinct.len());
+                for n in &extinct {
+                    let deaths: Vec<&veldt::Obituary> = veldt.obituaries.iter()
+                        .filter(|o| o.name == **n).collect();
+                    let last = deaths.iter().map(|o| o.age).max().unwrap_or(0);
+                    println!("  {} — {} variants died, last at age {}", n, deaths.len(), last);
+                }
             } else {
                 println!("=== The Veldt ===");
                 veldt.print_garden(sick_only, healthy_only);
