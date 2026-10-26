@@ -64,6 +64,10 @@ pub fn run_lsp() {
                         "referencesProvider": true,
                         "signatureHelpProvider": {"triggerCharacters": ["(", ","]},
                         "codeLensProvider": {"resolveProvider": false},
+                        "semanticTokensProvider": {
+                            "legend": {"tokenTypes": ["keyword","function","variable","string","number","comment","property","operator"], "tokenModifiers": []},
+                            "full": true,
+                        },
                         "completionProvider": {"triggerCharacters": [".", ":"]}
                     },
                     "serverInfo": {"name": "veldt-lsp", "version": env!("CARGO_PKG_VERSION")}
@@ -80,6 +84,7 @@ pub fn run_lsp() {
                 "textDocument/references" => references(params, &docs),
                 "textDocument/signatureHelp" => signature_help(params, &docs),
                 "textDocument/codeLens" => code_lens(params, &docs),
+                "textDocument/semanticTokens/full" => semantic_tokens(params, &docs),
                 _ => None,
             };
 
@@ -408,6 +413,59 @@ fn code_lens(params: &Value, docs: &HashMap<String, Doc>) -> Option<Value> {
         }));
     }
     Some(Value::Array(out))
+}
+
+/// Full-document semantic tokens — a lightweight line scan that maps
+/// keywords/fn names/strings/numbers/comments to the declared legend.
+/// delta-encoded (line, startChar, len, tokenType, modifiers).
+fn semantic_tokens(params: &Value, docs: &HashMap<String, Doc>) -> Option<Value> {
+    let doc = doc_of(params, docs)?;
+    let kw = ["let","fn","grow","if","else","while","for","return","print","test",
+        "try","catch","struct","match","in","break","continue","import","as","null","true","false"];
+    let is_word = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
+    let mut data: Vec<u32> = Vec::new();
+    let mut prev = (0usize, 0usize);
+    for (line, text) in doc.text.lines().enumerate() {
+        let bytes = text.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            let c = bytes[i] as char;
+            if c == '"' { // string literal
+                let start = i;
+                i += 1;
+                while i < bytes.len() && bytes[i] != b'"' { i += 1; }
+                emit(&mut data, line, start, (i - start + 1).min(text.len() - start), 3, &mut prev);
+            } else if c.is_digit(10) && (i == 0 || !is_word(bytes[i-1])) { // number
+                let start = i;
+                while i < bytes.len() && (bytes[i].is_ascii_digit() || bytes[i] == b'.') { i += 1; }
+                emit(&mut data, line, start, i - start, 4, &mut prev);
+            } else if c.is_alphabetic() || c == '_' { // identifier-ish
+                let start = i;
+                while i < bytes.len() && is_word(bytes[i]) { i += 1; }
+                let w = &text[start..i];
+                let kind = if kw.contains(&w) { 0 }
+                    else if i < bytes.len() && bytes[i] == b'(' { 1 }
+                    else { 2 };
+                emit(&mut data, line, start, i - start, kind, &mut prev);
+            } else if text[i..].starts_with("//") { // comment — rest of line
+                emit(&mut data, line, i, text.len() - i, 5, &mut prev); break;
+            } else if "+-*/%<>!=&|?".contains(c) {
+                emit(&mut data, line, i, 1, 7, &mut prev);
+            }
+            i += 1;
+        }
+    }
+    Some(json!({"data": data}))
+}
+
+fn emit(data: &mut Vec<u32>, line: usize, col: usize, len: usize, tt: u32, prev: &mut (usize, usize)) {
+    // LSP spec: tokens are delta-encoded — (deltaLine, deltaStartChar,
+    // len, type, mods) relative to the previous token.
+    let dl = line.saturating_sub(prev.0);
+    let dc = if dl == 0 { col.saturating_sub(prev.1) } else { col };
+    data.push(dl as u32); data.push(dc as u32); data.push(len as u32);
+    data.push(tt); data.push(0);
+    *prev = (line, col);
 }
 
 fn hover(params: &Value, docs: &HashMap<String, Doc>) -> Option<Value> {
