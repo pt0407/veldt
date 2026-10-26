@@ -271,6 +271,9 @@ pub fn respond(task: &str, editor_source: &str, veldt: &mut Veldt) -> AgentRespo
     if has(&["canonical", "trust", "trusted", "trust levels", "established"]) {
         return trust_intent(&words, veldt);
     }
+    if has(&["oldest", "newest", "youngest", "eldest", "age of", "how old"]) {
+        return age_intent(&words, veldt);
+    }
     if has(&["garden", "status", "alive", "what's growing", "what is growing", "what have you", "ecosystem"]) {
         return status_intent(veldt);
     }
@@ -922,6 +925,42 @@ fn trust_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
         canon.len(), estab, seed);
     for (n, e) in &canon {
         text.push_str(&format!("  {}#{} — canonical (fit {:.2})\n", n, e.id, e.fitness));
+    }
+    plain(&text)
+}
+
+/// Age — "oldest variants" / "newest fib" — scoped or global.
+fn age_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
+    let want_newest = words.iter().any(|w| matches!(*w, "newest" | "youngest"));
+    if let Some(name) = find_lineage(words, veldt) {
+        let vs = match veldt.functions.get(&name) {
+            Some(v) => v,
+            None => return plain(&format!("No lineage called '{}'.", name)),
+        };
+        let mut sorted: Vec<&FunctionEntry> = vs.iter().collect();
+        if want_newest {
+            sorted.sort_by(|a, b| a.age.cmp(&b.age));
+        } else {
+            sorted.sort_by(|a, b| b.age.cmp(&a.age));
+        }
+        let mut text = format!("{} — by age\n", name);
+        for e in sorted.iter().take(5) {
+            text.push_str(&format!("  #{} — {} runs (fit {:.2})\n",
+                e.id, e.age, e.fitness));
+        }
+        return plain(&text);
+    }
+    let mut all: Vec<(&String, &FunctionEntry)> = veldt.functions.iter()
+        .flat_map(|(n, vs)| vs.iter().map(move |e| (n, e))).collect();
+    if want_newest {
+        all.sort_by(|a, b| a.1.age.cmp(&b.1.age));
+    } else {
+        all.sort_by(|a, b| b.1.age.cmp(&a.1.age));
+    }
+    let label = if want_newest { "Newest" } else { "Oldest" };
+    let mut text = format!("{} variants:\n", label);
+    for (n, e) in all.iter().take(8) {
+        text.push_str(&format!("  {}#{} — {} runs\n", n, e.id, e.age));
     }
     plain(&text)
 }
