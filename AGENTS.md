@@ -739,3 +739,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   no overlap. Undeclared-assign check now threads outer
   scope through lint_block (lets + params + loop/catch
   vars all visible to nested bodies).
+- [Devin] Lint batch 15 (HEAD post-unbound-var-pattern): ~45
+  strict checks. New: unbound Var pattern in match arms
+  (non-_ var that isn't bound — evaluates to nothing,
+  never matches → dead arm).
