@@ -507,3 +507,20 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   parse_variant_ref; scoped-or-global pattern throughout. Also
   evolve --dry-run is an alias for --dry (banner makes the
   no-persist behavior explicit).
+- [Devin] Observability + intent batch 3 (HEAD post-0d03d49):
+  `stats --watch`, `garden --watch`, `lineage --watch` — 2s-poll
+  live re-render (clear + reload + redraw) for observing the
+  garden while evolve runs elsewhere. Fitness-trend sparkline
+  (spark() helper — last 24 history points → block chars) on
+  all three trend print sites. `check --strict` gained:
+  self-comparison (x == x via self_cmp expr walker — NaN aside,
+  always a bug), unused for-variable. Agent intents batch 3:
+  compare ("compare fib#1 fib#2"), coverage ("coverage for fib"
+  /"what's tested" — scoped probe/niche or global histogram),
+  lineage ("fib#145 parents"/"fib lineage" — variant tree or
+  full breeding map), usage ("most used fib"/"hot functions"),
+  efficiency ("fastest fib"/"most efficient"), trust ("fib
+  trust"/"what's canonical"), age ("newest fib"/"oldest").
+  evolve --dry-run alias for --dry. IDE: Σ button on the garden
+  row → /api/family dashboard (endpoint existed, UI never
+  called it before). help_intent documents all of it.
