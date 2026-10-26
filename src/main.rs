@@ -3280,6 +3280,9 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
                 if bool_cmp(cond) { out.push("condition compares to a bool literal — drop the == true/false".into()); }
                 if let Some(e) = b {
                     if *a == *e { out.push("if branches are identical — dead conditional".into()); }
+                    if a.is_empty() && !e.is_empty() {
+                        out.push("if with empty then + non-empty else — negate the condition".into());
+                    }
                     lint_block(e, out);
                 }
                 lint_block(a, out);
