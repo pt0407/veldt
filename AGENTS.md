@@ -166,3 +166,14 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 - [Devin] gardener branch: Gardener agent (IDE chat + `veldt agent` CLI),
   bench_report(), BYOK LLM mutation via VELDT_LLM_*, execute_source
   shared pipeline now owns call-tracing merge.
+- [Devin/main] Phase 3+6 perf landed: FunctionDef.body Rc, by-ref
+  method dispatch, Value::List=im::Vector, Value::Dict=im::HashMap,
+  Value::Str=Arc<str>, alloc-weighed --steps. list_ops 40s->620ms,
+  dict_ops 43x, numeric_loop ~2x. Phase 7 mutation ops (union w/ main
+  lane): 10 total — DeadBranch, ConstProp, ConstFold, HoistInvariant,
+  EarlyExit + basics. Phase 9: veldt lsp (diagnostics/hover/def/
+  completion) + REPL tab-completion. Phase 10: veldt tournament.
+  Phase 8: docs site + bin/veldtx. LEFT FOR USER: crates.io publish,
+  v0.3.0 tag, brew, hosted pool endpoint, VELDT_LLM_KEY e2e.
+  One flake note: test_evolution_creates_mutants was RNG-flaky —
+  mutate_retry re-rolls no-op mutations now.

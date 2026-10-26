@@ -1,0 +1,4 @@
+#!/bin/sh
+# veldtx - run a .veldt file like a script:
+#   chmod +x prog.veldt && ./prog.veldt   (with #!/usr/bin/env veldtx shebang)
+exec veldt run "$@"
