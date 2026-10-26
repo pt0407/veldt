@@ -693,24 +693,25 @@ fn watch_file(path: &str) {
 }
 
 fn start_repl() {
-    use std::io::{BufRead, Write};
+    use rustyline::DefaultEditor;
     let mut veldt = veldt::Veldt::new();
     let _ = veldt.load();
     let mut interp = interpreter::Interpreter::new();
     veldt.load_into_interpreter(&mut interp);
 
     println!("veldt {} — repl. :help for commands, ctrl-d to quit", env!("CARGO_PKG_VERSION"));
-    let stdin = std::io::stdin();
+    let mut rl = DefaultEditor::new().expect("rustyline init");
+    let hist = std::path::PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into()))
+        .join(".veldt").join("repl_history.txt");
+    let _ = rl.load_history(&hist);
     let mut buf = String::new();
     let mut depth: i64 = 0;
     loop {
-        print!("{}", if buf.is_empty() { "veldt> " } else { "  ... " });
-        std::io::stdout().flush().ok();
-        let mut line = String::new();
-        match stdin.lock().read_line(&mut line) {
-            Ok(0) | Err(_) => { println!(); break; }
-            Ok(_) => {}
-        }
+        let prompt = if buf.is_empty() { "veldt> " } else { "  ... " };
+        let line = match rl.readline(prompt) {
+            Ok(l) => { let _ = rl.add_history_entry(l.as_str()); l }
+            Err(_) => { println!(); break; }
+        };
         let trimmed = line.trim();
         if buf.is_empty() {
             if trimmed.is_empty() { continue; }
