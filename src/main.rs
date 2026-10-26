@@ -795,6 +795,26 @@ fn print_stats(veldt: &veldt::Veldt) {
             .map(|(b, c)| format!("{}×{}", b, c)).collect();
         println!("builtin usage (living variants): {}", line.join(" "));
     }
+    // fitness per mutation source — which operators produce FIT variants
+    let mut fit_by_source: std::collections::HashMap<String, Vec<f64>> =
+        std::collections::HashMap::new();
+    for vs in veldt.functions.values() {
+        for e in vs {
+            let src = e.origin.split(' ').next().unwrap_or("seed").to_string();
+            fit_by_source.entry(src).or_default().push(e.fitness);
+        }
+    }
+    let mut src_fit: Vec<(String, f64, usize)> = fit_by_source.into_iter()
+        .map(|(s, fits)| {
+            let avg = fits.iter().sum::<f64>() / fits.len().max(1) as f64;
+            (s, avg, fits.len())
+        }).collect();
+    src_fit.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    if !src_fit.is_empty() {
+        let line: Vec<String> = src_fit.iter().take(8)
+            .map(|(s, f, n)| format!("{}→{:.2}({})", s, f, n)).collect();
+        println!("fitness by mutation source: {}", line.join(" "));
+    }
     // coverage line — which families carry probe mass vs bare lineages
     let bare: Vec<&String> = veldt.functions.keys()
         .filter(|n| veldt.probes.get(*n).map(|p| p.is_empty()).unwrap_or(true))
