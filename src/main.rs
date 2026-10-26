@@ -1073,8 +1073,8 @@ fn print_stats(veldt: &veldt::Veldt) {
         .flat_map(|vs| vs.iter().map(|e| e.lifespan)).collect();
     if !lifespans.is_empty() {
         let avg = lifespans.iter().sum::<f64>() / lifespans.len() as f64;
-        let (lo, hi) = (*lifespans.iter().fold(&f64::INFINITY, |a, b| a.min(b)),
-                        *lifespans.iter().fold(&f64::NEG_INFINITY, |a, b| a.max(b)));
+        let (lo, hi) = (lifespans.iter().copied().fold(f64::INFINITY, f64::min),
+                        lifespans.iter().copied().fold(f64::NEG_INFINITY, f64::max));
         println!("lifespan: avg {:.0} runs ({}..{})", avg, lo, hi);
     }
     // avg niches per variant — niche diversity per variant
@@ -1085,6 +1085,16 @@ fn print_stats(veldt: &veldt::Veldt) {
         let (lo, hi) = (*niche_counts.iter().min().unwrap_or(&0),
                         *niche_counts.iter().max().unwrap_or(&0));
         println!("niches: avg {} per variant ({}..{})", avg, lo, hi);
+    }
+    // obituary staleness — runs since last use before death
+    if !veldt.obituaries.is_empty() {
+        let stale: Vec<u64> = veldt.obituaries.iter()
+            .map(|o| o.timestamp.saturating_sub(o.last_used)).collect();
+        let avg = stale.iter().sum::<u64>() / stale.len() as u64;
+        let max = stale.iter().max().unwrap_or(&0);
+        let stale_10 = stale.iter().filter(|s| **s >= 10).count();
+        println!("staleness: {} of {} deaths sat 10+ runs idle (avg {}, max {})",
+            stale_10, veldt.obituaries.len(), avg, max);
     }
     // fitness trend — peak per run, is the garden improving?
     if veldt.fitness_history.len() >= 2 {
