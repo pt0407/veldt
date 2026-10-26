@@ -2172,6 +2172,42 @@ impl Interpreter {
                 d.insert("cells".to_string(), Value::List(cells));
                 Ok(Some(Value::Dict(d)))
             }
+            "rand_gauss" => {
+                // rand_gauss(mean, stddev) — Box-Muller on two uniform draws
+                let (mean, sd) = match (args.get(0), args.get(1)) {
+                    (Some(Value::Int(m)), Some(Value::Int(s))) => (*m as f64, *s as f64),
+                    (Some(Value::Float(m)), Some(Value::Float(s))) => (*m, *s),
+                    (Some(Value::Int(m)), Some(Value::Float(s))) => (*m as f64, *s),
+                    (Some(Value::Float(m)), Some(Value::Int(s))) => (*m, *s as f64),
+                    _ => return Err("rand_gauss(mean, stddev) expects two numbers".into()),
+                };
+                let mut u = || {
+                    let mut x = self.rng_state;
+                    x ^= x << 13; x ^= x >> 7; x ^= x << 17;
+                    self.rng_state = x;
+                    (x % 1_000_000) as f64 / 1_000_000.0
+                };
+                let (u1, u2) = (u().max(1e-9), u());
+                let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
+                Ok(Some(Value::Float(mean + sd * z)))
+            }
+            "fsm_next" => {
+                // fsm_next(transitions, state, event) — dict-of-dicts FSM:
+                // {state: {event: next_state}}. Returns next state or null.
+                let (d, state, event) = match (args.get(0), args.get(1), args.get(2)) {
+                    (Some(Value::Dict(d)), Some(Value::Str(s)), Some(Value::Str(e)))
+                        => (d, s.clone(), e.clone()),
+                    _ => return Err("fsm_next(transitions, state, event) expects dict + 2 strs".into()),
+                };
+                let Some(Value::Dict(row)) = d.get(state.as_ref() as &str) else {
+                    return Ok(Some(Value::Null));
+                };
+                match row.get(event.as_ref() as &str) {
+                    Some(Value::Str(next)) => Ok(Some(Value::Str(next.clone()))),
+                    Some(v) => Ok(Some(v.clone())),
+                    None => Ok(Some(Value::Null)),
+                }
+            }
             "dist_stats" => {
                 // dist_stats(fn, trials) — mean/stddev/min/max over n samples
                 let (f, trials) = match (args.get(0), args.get(1)) {
