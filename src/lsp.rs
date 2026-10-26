@@ -61,6 +61,7 @@ pub fn run_lsp() {
                         "workspaceSymbolProvider": true,
                         "documentHighlightProvider": true,
                         "renameProvider": true,
+                        "referencesProvider": true,
                         "completionProvider": {"triggerCharacters": [".", ":"]}
                     },
                     "serverInfo": {"name": "veldt-lsp", "version": env!("CARGO_PKG_VERSION")}
@@ -74,6 +75,7 @@ pub fn run_lsp() {
                 "workspace/symbol" => workspace_symbol(params, &docs),
                 "textDocument/documentHighlight" => document_highlight(params, &docs),
                 "textDocument/rename" => rename(params, &docs),
+                "textDocument/references" => references(params, &docs),
                 _ => None,
             };
 
@@ -300,6 +302,36 @@ fn rename(params: &Value, docs: &HashMap<String, Doc>) -> Option<Value> {
         }
     }
     Some(json!({ "changes": { uri: edits } }))
+}
+
+/// Find every occurrence of the word under the cursor across all open
+/// docs — Location[] {uri, range} in LSP shape.
+fn references(params: &Value, docs: &HashMap<String, Doc>) -> Option<Value> {
+    let doc = doc_of(params, docs)?;
+    let line = params["position"]["line"].as_u64()? as usize;
+    let ch = params["position"]["character"].as_u64()? as usize;
+    let word = word_at(&doc.text, line as u32, ch as u32);
+    if word.is_empty() { return Some(json!([])); }
+    let mut out = Vec::new();
+    for (uri, d) in docs {
+        for (l, line_text) in d.text.lines().enumerate() {
+            let mut start = 0;
+            while let Some(pos) = line_text[start..].find(word.as_str()) {
+                let col = start + pos;
+                let before = line_text[..col].chars().last().unwrap_or(' ');
+                let after = line_text[col + word.len()..].chars().next().unwrap_or(' ');
+                if !before.is_alphanumeric() && before != '_' && !after.is_alphanumeric() && after != '_' {
+                    out.push(json!({
+                        "uri": uri,
+                        "range": {"start": {"line": l as u32, "character": col as u32},
+                                  "end": {"line": l as u32, "character": (col + word.len()) as u32}},
+                    }));
+                }
+                start = col + word.len();
+            }
+        }
+    }
+    Some(Value::Array(out))
 }
 
 fn hover(params: &Value, docs: &HashMap<String, Doc>) -> Option<Value> {
