@@ -22,6 +22,15 @@ pub enum Value {
     Null,
 }
 
+/// Extract a numeric arg (Int or Float) as f64 — used by game-math builtins.
+fn num_at(args: &[Value], i: usize) -> Result<f64, String> {
+    match args.get(i) {
+        Some(Value::Int(n)) => Ok(*n as f64),
+        Some(Value::Float(f)) => Ok(*f),
+        _ => Err(format!("arg {} expects a number", i)),
+    }
+}
+
 impl std::fmt::Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
@@ -1735,6 +1744,48 @@ impl Interpreter {
                 out.insert("b_wins".to_string(), Value::Int(b_wins as i64));
                 out.insert("draws".to_string(), Value::Int(draws as i64));
                 out.insert("winner".to_string(), Value::Str(if a_wins > b_wins { "a".into() } else if b_wins > a_wins { "b".into() } else { "draw".into() }));
+                Ok(Some(Value::Dict(out)))
+            }
+            "lerp" => {
+                let (a, b, t) = (num_at(args, 0)?, num_at(args, 1)?, num_at(args, 2)?);
+                Ok(Some(Value::Float(a + (b - a) * t)))
+            }
+            "clamp" => {
+                let (v, lo, hi) = (num_at(args, 0)?, num_at(args, 1)?, num_at(args, 2)?);
+                Ok(Some(Value::Float(v.max(lo).min(hi))))
+            }
+            "dist" => {
+                let (x1, y1, x2, y2) = (num_at(args, 0)?, num_at(args, 1)?, num_at(args, 2)?, num_at(args, 3)?);
+                Ok(Some(Value::Float(((x2 - x1).powi(2) + (y2 - y1).powi(2)).sqrt())))
+            }
+            "aabb" => {
+                // aabb(ax,ay,aw,ah, bx,by,bw,bh) — rect overlap
+                let (ax, ay, aw, ah, bx, by, bw, bh) = (
+                    num_at(args, 0)?, num_at(args, 1)?, num_at(args, 2)?, num_at(args, 3)?,
+                    num_at(args, 4)?, num_at(args, 5)?, num_at(args, 6)?, num_at(args, 7)?);
+                Ok(Some(Value::Bool(ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by)))
+            }
+            "dist_stats" => {
+                // dist_stats(fn, trials) — mean/stddev/min/max over n samples
+                let (f, trials) = match (args.get(0), args.get(1)) {
+                    (Some(f @ Value::Closure(_, _, _)), Some(Value::Int(t))) => (f, *t as usize),
+                    _ => return Err("dist_stats(fn, trials) expects a closure + int".into()),
+                };
+                let mut vals: Vec<f64> = Vec::with_capacity(trials);
+                for _ in 0..trials {
+                    let v = self.call_closure_value(f, vec![])?;
+                    let n = match v { Value::Int(i) => i as f64, Value::Float(f) => f, _ => return Err("fn must return a number".into()) };
+                    vals.push(n);
+                }
+                let mean = vals.iter().sum::<f64>() / vals.len().max(1) as f64;
+                let var = vals.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / vals.len().max(1) as f64;
+                let (mn, mx) = vals.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), &v| (a.min(v), b.max(v)));
+                let mut out = im::HashMap::new();
+                out.insert("mean".to_string(), Value::Float(mean));
+                out.insert("stddev".to_string(), Value::Float(var.sqrt()));
+                out.insert("min".to_string(), Value::Float(if vals.is_empty() { 0.0 } else { mn }));
+                out.insert("max".to_string(), Value::Float(if vals.is_empty() { 0.0 } else { mx }));
+                out.insert("n".to_string(), Value::Int(vals.len() as i64));
                 Ok(Some(Value::Dict(out)))
             }
             "canvas_clear" => {
