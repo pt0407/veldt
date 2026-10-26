@@ -566,6 +566,22 @@ fn main() {
                 }
                 println!("=== The Veldt (fitness >= {}) ===", min);
                 filtered.print_garden(sick_only, healthy_only);
+            } else if let Some(niche) = args.iter().position(|a| a == "--niche")
+                .and_then(|p| args.get(p + 1)).cloned() {
+                // --niche <niche> — variants that score on this niche
+                let mut filtered = veldt::Veldt::new();
+                filtered.probes = veldt.probes.clone();
+                filtered.obituaries = veldt.obituaries.clone();
+                filtered.run_count = veldt.run_count;
+                filtered.garden_path = veldt.garden_path.clone();
+                for (name, vs) in &veldt.functions {
+                    let keep: Vec<_> = vs.iter()
+                        .filter(|e| e.niche_scores.contains_key(&niche))
+                        .cloned().collect();
+                    if !keep.is_empty() { filtered.functions.insert(name.clone(), keep); }
+                }
+                println!("=== The Veldt (niche: {}) ===", niche);
+                filtered.print_garden(sick_only, healthy_only);
             } else if args.iter().any(|a| a == "--llm") {
                 // LLM-bred variants only — the BYOK mutations
                 let mut filtered = veldt::Veldt::new();
