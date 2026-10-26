@@ -100,6 +100,7 @@ impl JitEngine {
         jb.symbol("veldt_rt_callvar", veldt_rt_callvar as *const u8);
         jb.symbol("veldt_rt_intbox", veldt_rt_intbox as *const u8);
         jb.symbol("veldt_rt_boolbox", veldt_rt_boolbox as *const u8);
+        jb.symbol("veldt_rt_floatbox", veldt_rt_floatbox as *const u8);
         let mut module = JITModule::new(jb);
         let rt = RtIds::declare(&mut module);
         Some(JitEngine {
@@ -893,15 +894,26 @@ impl JitEngine {
                             let li = b.ins().icmp(IntCC::Equal, lt, z);
                             let ri = b.ins().icmp(IntCC::Equal, rtg, z);
                             let both = b.ins().band(li, ri);
+                            // Float/Float: tag 1, f64 payload @8
+                            let one = b.ins().iconst(types::I8, 1);
+                            let lf = b.ins().icmp(IntCC::Equal, lt, one);
+                            let rf = b.ins().icmp(IntCC::Equal, rtg, one);
+                            let bothf = b.ins().band(lf, rf);
                             let fb = b.create_block();
+                            let ffb = b.create_block();
+                            let tryf = b.create_block();
                             let hb = b.create_block();
                             let mb = b.create_block();
                             let arg = b.append_block_param(mb, types::I64);
-                            b.ins().brif(both, fb, &[], hb, &[]);
-                            // fb seals now; hb gets a SECOND predecessor
-                            // from the Div/Mod zero-check — seal_all_blocks
-                            // catches it at the end instead
-                            b.seal_block(fb);
+                            b.ins().brif(both, fb, &[], tryf, &[]);
+                            b.seal_block(fb); b.seal_block(tryf);
+                            // sequential float check — its own block,
+                            // no nesting inside a fast block
+                            b.switch_to_block(tryf);
+                            b.ins().brif(bothf, ffb, &[], hb, &[]);
+                            // ffb seals AFTER the brif that targets it —
+                            // sealing before creates a predecessor-after-seal
+                            b.seal_block(ffb);
                             // fast: native op on the int payloads
                             b.switch_to_block(fb);
                             let a = b.ins().load(types::I64,
@@ -963,6 +975,36 @@ impl JitEngine {
                             if !matches!(chunk.code[pc], Instr::Div|Instr::Mod) {
                                 b.ins().jump(mb, &[cranelift_codegen::ir::BlockArg::Value(fv)]);
                             }
+                            // Float/Float fast block — f64 payloads @8
+                            b.switch_to_block(ffb);
+                            let fa = b.ins().load(types::F64,
+                                cranelift_codegen::ir::MemFlagsData::trusted(), l, 8);
+                            let fc2 = b.ins().load(types::F64,
+                                cranelift_codegen::ir::MemFlagsData::trusted(), r, 8);
+                            use cranelift_codegen::ir::condcodes::FloatCC;
+                            let fv = if is_cmp {
+                                let cc = match chunk.code[pc] {
+                                    Instr::Eq => FloatCC::Equal,
+                                    Instr::Neq => FloatCC::NotEqual,
+                                    Instr::Lt => FloatCC::LessThan,
+                                    Instr::Gt => FloatCC::GreaterThan,
+                                    Instr::Le => FloatCC::LessThanOrEqual,
+                                    _ => FloatCC::GreaterThanOrEqual,
+                                };
+                                let c8 = b.ins().fcmp(cc, fa, fc2);
+                                let c64 = b.ins().uextend(types::I64, c8);
+                                ecall!(rt.boolbox, rtv, c64)
+                                    .unwrap_or_else(|| b.ins().iconst(types::I64, 0))
+                            } else {
+                                let res = match chunk.code[pc] {
+                                    Instr::Add => b.ins().fadd(fa, fc2),
+                                    Instr::Sub => b.ins().fsub(fa, fc2),
+                                    _ => b.ins().fmul(fa, fc2),
+                                };
+                                ecall!(rt.floatbox, rtv, res)
+                                    .unwrap_or_else(|| b.ins().iconst(types::I64, 0))
+                            };
+                            b.ins().jump(mb, &[cranelift_codegen::ir::BlockArg::Value(fv)]);
                             // slow: helper covers every other type pair
                             b.switch_to_block(hb);
                             let hv = ecall!(rt.binop, rtv, o, l, r)
@@ -1788,6 +1830,10 @@ pub unsafe extern "C" fn veldt_rt_intbox(rt: *mut JitRt, i: i64) -> *mut Value {
     mk(rt, Value::Int(i))
 }
 #[no_mangle]
+pub unsafe extern "C" fn veldt_rt_floatbox(rt: *mut JitRt, f: f64) -> *mut Value {
+    mk(rt, Value::Float(f))
+}
+#[no_mangle]
 pub unsafe extern "C" fn veldt_rt_boolbox(rt: *mut JitRt, i: i64) -> *mut Value {
     mk(rt, Value::Bool(i != 0))
 }
@@ -1824,7 +1870,7 @@ struct RtIds {
     iterpop: FuncId, append: FuncId, insert: FuncId, insertdyn: FuncId,
     fieldset: FuncId, take_err: FuncId, nullbox: FuncId,
     capture: FuncId, callvar: FuncId,
-    intbox: FuncId, boolbox: FuncId,
+    intbox: FuncId, boolbox: FuncId, floatbox: FuncId,
 }
 
 impl RtIds {
@@ -1877,6 +1923,16 @@ impl RtIds {
             callvar: d(m, "veldt_rt_callvar", 3, true),
             intbox: d(m, "veldt_rt_intbox", 2, true),
             boolbox: d(m, "veldt_rt_boolbox", 2, true),
+            floatbox: {
+                // (i64, f64) -> i64 — the d() helper makes all-i64 sigs
+                let sig = Signature {
+                    params: vec![AbiParam::new(types::I64),
+                                 AbiParam::new(types::F64)],
+                    returns: vec![AbiParam::new(types::I64)],
+                    call_conv: CallConv::SystemV,
+                };
+                m.declare_function("veldt_rt_floatbox", Linkage::Import, &sig).unwrap()
+            },
         }
     }
 }
