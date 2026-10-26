@@ -1197,3 +1197,8 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   while/for bodies (loop-body scope only — `if{continue}` can
   skip stmts, kept). Now: dead-tail + dead-lets + trailing
   continue in heal() and check --garden --fix.
+- [Devin] evolve normalization: repair passes run on every
+  candidate pre-dedup — dead-code-only mutants normalize back
+  to parent (CloneRejected) instead of being born dirty. Live
+  run culled 2 undeclared-assign mutants via the lint gate.
+  The loop is complete: repair -> dedup -> lint-gate -> birth.
