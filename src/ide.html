@@ -484,6 +484,7 @@
     <button class="btn" id="saveBtn">Save</button>
     <button class="btn amber" id="evolveBtn">Evolve</button>
     <button class="btn" id="fuzzBtn" title="boundary-corpus sweep vs every variant">Fuzz</button>
+    <button class="btn" id="absorbBtn" title="bake live call traces into probes">Absorb</button>
     <button class="btn danger" id="clearBtn">Clear Garden</button>
     <button class="btn primary" id="runBtn">▶ Run</button>
     <label style="font-size:11px;opacity:.7;margin-left:6px"><input type="checkbox" id="sandboxChk"> sandbox</label>
@@ -1160,6 +1161,13 @@ document.getElementById('fuzzBtn').addEventListener('click', async () => {
   const d = await res.json();
   document.getElementById('output').innerHTML =
     '<pre style="color:#aef;margin:0">' + (d.report || 'no report') + '</pre>';
+  renderGarden();
+});
+document.getElementById('absorbBtn').addEventListener('click', async () => {
+  const res = await fetch(API + '/api/absorb', { method: 'POST' });
+  const d = await res.json();
+  document.getElementById('output').innerHTML =
+    '<pre style="color:#8ef;margin:0">absorbed traces — ' + (d.absorbed || 0) + ' probes now in the pool</pre>';
   renderGarden();
 });
 document.getElementById('clearBtn').addEventListener('click', clearGarden);
