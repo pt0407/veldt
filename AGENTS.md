@@ -1268,3 +1268,6 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 - [Devin] stats --lint kind tally: top warning shapes
   (34x compound-assign, 28x loop-no-exit, 10x property-only
   tests) — shows which repair pass pays off next.
+- [Devin] check --garden --fix --verify: re-trials repaired
+  variants post-fix, writes honest health back — repairs are
+  proven semantics-preserving, not just asserted.
