@@ -498,6 +498,7 @@ fn main() {
                 let fam = args.iter().position(|a| a == "--garden")
                     .and_then(|i| args.get(i + 1))
                     .filter(|s| !s.starts_with("--"));
+                let fix = args.iter().any(|a| a == "--fix");
                 let mut v = veldt::Veldt::new();
                 if v.load().is_err() {
                     eprintln!("no garden found (nothing to lint)");
@@ -505,9 +506,16 @@ fn main() {
                 }
                 let mut total = 0usize;
                 let mut flagged = 0usize;
-                for (name, entries) in &v.functions {
+                let mut repaired = 0usize;
+                for (name, entries) in v.functions.iter_mut() {
                     if let Some(f) = fam { if name != f { continue; } }
-                    for e in entries {
+                    for e in entries.iter_mut() {
+                        if fix && health::HealthChecker::repair_dead_tail(&mut e.body) {
+                            repaired += 1;
+                            if !json_out {
+                                eprintln!("  [FIX] {}#{} — truncated dead code", name, e.id);
+                            }
+                        }
                         let wrapped = ast::Stmt::Grow(ast::GrowItem::Fn(
                             name.clone(), e.params.clone(),
                             e.body.clone(), e.tests.clone()));
@@ -535,7 +543,11 @@ fn main() {
                         }
                     }
                 }
+                if fix && repaired > 0 { let _ = v.save(); }
                 if !json_out {
+                    if fix {
+                        println!("garden lint — repaired {} variant(s)", repaired);
+                    }
                     println!("garden lint — {} warnings across {} variant(s)",
                              total, flagged);
                 }

@@ -476,7 +476,7 @@ impl HealthChecker {
     /// Truncate statements after the first `return` in every block
     /// (recursively), and drop a trailing bare `return` — the dead
     /// code mutations splice in. Returns true if anything changed.
-    fn repair_dead_tail(stmts: &mut Vec<Stmt>) -> bool {
+    pub(crate) fn repair_dead_tail(stmts: &mut Vec<Stmt>) -> bool {
         let mut changed = false;
         for s in stmts.iter_mut() {
             changed |= Self::repair_in_stmt(s);
