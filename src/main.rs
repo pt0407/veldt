@@ -4948,7 +4948,9 @@ fn print_family_detail(veldt: &veldt::Veldt, fam: &String, vs: &[veldt::Function
     if !parent_counts.is_empty() {
         let avg = parent_counts.iter().sum::<usize>() as f64 / parent_counts.len() as f64;
         let max = parent_counts.iter().max().unwrap();
-        println!("  parents: avg {:.1} (peak {})", avg, max);
+        let mut sorted: Vec<f64> = parent_counts.iter().map(|p| *p as f64).collect();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        println!("  parents: avg {:.1} (peak {})  {}", avg, max, spark(&sorted));
     }
     // turnover — the family's churn (born vs died)
     let born_n = vs.len();
