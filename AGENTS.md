@@ -838,3 +838,10 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   regression detection while evolving. --watch sweep:
   stats/garden/lineage + check (file) + test + fuzz +
   bench (garden) all live-re-render.
+- [Devin] Comprehensive surface complete (HEAD post-6b3dcb3):
+  ~59 strict lint checks, ~37 agent intents, full --json
+  sweep, every numeric surface shows its shape (sparks/
+  bars/deltas), check/test/fuzz/bench all --watch.
+  veldt deps for file-level imports. Coordination: the
+  other agent owns JIT/verify/persistence; I own lint/
+  observability/agent/watch. Both streams on main.
