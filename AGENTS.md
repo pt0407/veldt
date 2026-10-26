@@ -546,3 +546,8 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   ("who's winning"/"leaderboard" → peak-per-family ranked +
   scoped top-3). ~32 intents total — the agent answers nearly
   every garden inspection question the CLI can ask.
+- [Devin] Agent proven/risky pair (HEAD post-857fc6b): proven
+  ("what's proven" → healthy + established/canonical) and
+  risky ("what's risky" → sick/dying OR seedling — the flip).
+  risky/riskiest removed from triage's triggers so they route
+  here. ~35 intents — the inspection surface is exhaustive.
