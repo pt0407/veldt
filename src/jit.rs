@@ -43,6 +43,8 @@ pub struct JitEngine {
     fe_cfg: TargetFrontendConfig,
     ids: HashMap<String, FuncId>,
     ptrs: HashMap<String, (*const u8, bool)>,
+    /// name#id -> bytecode pc that made the function unJITable
+    pub fail_at: HashMap<String, usize>,
     compiling: HashSet<String>,
 }
 
@@ -59,7 +61,7 @@ impl JitEngine {
             isa, cranelift_module::default_libcall_names()));
         Some(JitEngine {
             module, fe_cfg, ids: HashMap::new(), ptrs: HashMap::new(),
-            compiling: HashSet::new(),
+            compiling: HashSet::new(), fail_at: HashMap::new(),
         })
     }
 
@@ -183,6 +185,7 @@ impl JitEngine {
                 };
             let mut stack: Vec<cranelift_codegen::ir::Value> = Vec::new();
             let mut pc = 0usize;
+            let mut fail_pc = usize::MAX;
             let mut terminated = false;
             let mut ok = true;
             while pc < chunk.code.len() {
@@ -212,12 +215,12 @@ impl JitEngine {
                     Instr::Store(sl) => {
                         match stack.pop() {
                             Some(v) => b.def_var(vars[sl as usize], v),
-                            None => { ok = false; break; }
+                            None => { fail_pc = pc; ok = false; break; }
                         }
                     }
                     Instr::Add | Instr::Sub | Instr::Mul | Instr::Div | Instr::Mod => {
                         let (Some(r), Some(l)) = (stack.pop(), stack.pop()) else {
-                            ok = false; break;
+                            fail_pc = pc; ok = false; break;
                         };
                         let v = match (chunk.code[pc], float) {
                             (Instr::Add, false) => b.ins().iadd(l, r),
@@ -229,13 +232,13 @@ impl JitEngine {
                             (Instr::Sub, true) => b.ins().fsub(l, r),
                             (Instr::Mul, true) => b.ins().fmul(l, r),
                             (Instr::Div, true) => b.ins().fdiv(l, r),
-                            _ => { ok = false; break; }
+                            _ => { fail_pc = pc; ok = false; break; }
                         };
                         stack.push(v);
                     }
                     Instr::Eq | Instr::Neq | Instr::Lt | Instr::Gt | Instr::Le | Instr::Ge => {
                         let (Some(r), Some(l)) = (stack.pop(), stack.pop()) else {
-                            ok = false; break;
+                            fail_pc = pc; ok = false; break;
                         };
                         if float {
                             use cranelift_codegen::ir::condcodes::FloatCC;
@@ -266,7 +269,7 @@ impl JitEngine {
                         }
                     }
                     Instr::Neg => {
-                        let Some(v) = stack.pop() else { ok = false; break; };
+                        let Some(v) = stack.pop() else { fail_pc = pc; ok = false; break; };
                         if float {
                             stack.push(b.ins().fneg(v));
                         } else {
@@ -282,7 +285,7 @@ impl JitEngine {
                             .map(|(n, _)| n).unwrap_or(own_name) {
                             match self.compile_fn(&cn, fns) {
                                 Some(_) => {}
-                                None => { ok = false; break; }
+                                None => { fail_pc = pc; ok = false; break; }
                             }
                             // callee's key is cn#its-chosen-id
                             let ckey = fns.get(&cn).and_then(|vf|
@@ -293,7 +296,7 @@ impl JitEngine {
                             let Some(ckey) = ckey else { ok = false; break; };
                             let cfid = match self.ids.get(&ckey) {
                                 Some(&f) => f,
-                                None => { ok = false; break; }
+                                None => { fail_pc = pc; ok = false; break; }
                             };
                             let fref = self.module.declare_func_in_func(
                                 cfid, b.func);
@@ -301,7 +304,7 @@ impl JitEngine {
                             for _ in 0..argc {
                                 match stack.pop() {
                                     Some(v) => cargs.push(v),
-                                    None => { ok = false; break; }
+                                    None => { fail_pc = pc; ok = false; break; }
                                 }
                             }
                             if !ok { break; }
@@ -314,7 +317,7 @@ impl JitEngine {
                         // self-recursion — own key
                         let cfid = match self.ids.get(own_name) {
                             Some(&f) => f,
-                            None => { ok = false; break; }
+                            None => { fail_pc = pc; ok = false; break; }
                         };
                         let fref = self.module.declare_func_in_func(
                             cfid, b.func);
@@ -322,7 +325,7 @@ impl JitEngine {
                         for _ in 0..argc {
                             match stack.pop() {
                                 Some(v) => cargs.push(v),
-                                None => { ok = false; break; }
+                                None => { fail_pc = pc; ok = false; break; }
                             }
                         }
                         if !ok { break; }
@@ -336,7 +339,7 @@ impl JitEngine {
                         terminated = true;
                     }
                     Instr::JumpIfFalse(t) => {
-                        let Some(c) = stack.pop() else { ok = false; break; };
+                        let Some(c) = stack.pop() else { fail_pc = pc; ok = false; break; };
                         let is_false = if float {
                             let z = b.ins().f64const(0.0);
                             b.ins().fcmp(
@@ -359,11 +362,15 @@ impl JitEngine {
                         b.ins().return_(&[v]);
                         terminated = true;
                     }
-                    _ => { ok = false; break; }
+                    _ => { fail_pc = pc; ok = false; break; }
                 }
                 pc += 1;
             }
-            if !ok { return false; }
+            if !ok {
+                self.fail_at.insert(own_name.to_string(),
+                    if fail_pc != usize::MAX { fail_pc } else { pc });
+                return false;
+            }
             let blks: Vec<cranelift_codegen::ir::Block> =
                 block_for.values().copied().collect();
             for bl in blks {
