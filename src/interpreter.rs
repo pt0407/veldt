@@ -2334,6 +2334,46 @@ impl Interpreter {
                 path.reverse();
                 Ok(Some(Value::List(path.into_iter().collect())))
             }
+            "turn" => {
+                // turn(units) — initiative order: sort by unit["speed"] desc.
+                // Each unit is a dict with a "speed" field.
+                let Value::List(units) = args.get(0).cloned().unwrap_or(Value::Null) else {
+                    return Err("turn(units) expects a list of dicts with .speed".into())
+                };
+                let mut sorted: Vec<Value> = units.iter().cloned().collect();
+                sorted.sort_by(|a, b| {
+                    let sa = if let Value::Dict(d) = a {
+                        d.get("speed").and_then(|v| match v { Value::Int(i) => Some(*i), Value::Float(f) => Some(*f as i64), _ => None }).unwrap_or(0)
+                    } else { 0 };
+                    let sb = if let Value::Dict(d) = b {
+                        d.get("speed").and_then(|v| match v { Value::Int(i) => Some(*i), Value::Float(f) => Some(*f as i64), _ => None }).unwrap_or(0)
+                    } else { 0 };
+                    sb.cmp(&sa)
+                });
+                Ok(Some(Value::List(sorted.into_iter().collect())))
+            }
+            "smoothstep" => {
+                let (e0, e1, x) = (num_at(args, 0)?, num_at(args, 1)?, num_at(args, 2)?);
+                let t = ((x - e0) / (e1 - e0).max(1e-9)).clamp(0.0, 1.0);
+                Ok(Some(Value::Float(t * t * (3.0 - 2.0 * t))))
+            }
+            "line_points" => {
+                // line_points(x1, y1, x2, y2) — Bresenham cells on the segment
+                let (x1, y1, x2, y2) = (num_at(args, 0)? as i64, num_at(args, 1)? as i64,
+                                       num_at(args, 2)? as i64, num_at(args, 3)? as i64);
+                let (dx, dy) = ((x2 - x1).abs(), (y2 - y1).abs());
+                let (sx, sy) = (if x1 < x2 { 1 } else { -1 }, if y1 < y2 { 1 } else { -1 });
+                let (mut x, mut y, mut err) = (x1, y1, dx - dy);
+                let mut out = Vec::new();
+                loop {
+                    out.push(Value::List(im::vector![Value::Int(x), Value::Int(y)]));
+                    if x == x2 && y == y2 { break; }
+                    let e2 = 2 * err;
+                    if e2 > -dy { err -= dy; x += sx; }
+                    if e2 < dx { err += dx; y += sy; }
+                }
+                Ok(Some(Value::List(out.into_iter().collect())))
+            }
             "dist_stats" => {
                 // dist_stats(fn, trials) — mean/stddev/min/max over n samples
                 let (f, trials) = match (args.get(0), args.get(1)) {
