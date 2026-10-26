@@ -440,3 +440,10 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   the && chain then runs the STALE binary and commits unbuilt code.
   Commits c556e15..50684aa were pushed uncompilable; fixed in 8a356bf.
   Verify builds with a plain cargo build before committing.
+- [Devin] bench tooling: `veldt bench <file.veldt> [--reps N]`
+  single-workload timing; `--vm` runs the bytecode VM;
+  `--vm --compare` reports tree-walk vs vm speedup. FINDING:
+  numeric_loop tree-walk 329ms vs vm 439ms (0.75x) — the Phase 11
+  VM is slower than tree-walk here, candidate for profiling.
+  `veldt bench --json/--save F/--compare F/--filter E` for the
+  species suite (regression baselines).
