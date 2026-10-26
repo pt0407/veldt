@@ -645,11 +645,17 @@ fn main() {
                     println!("garden lint — {} warnings across {} variant(s)",
                              total, flagged);
                 }
+                // --fail — CI gate: exit 1 when defect-class warnings exist
+                if !watch && args.iter().any(|a| a == "--fail") && defects > 0 {
+                    process::exit(1);
+                }
                 if !watch { break; }
                 std::thread::sleep(std::time::Duration::from_secs(2));
                 }
                 return;
             }
+            // --fail — CI gate: exit 1 when defect-class warnings exist
+            let fail = args.iter().any(|a| a == "--fail");
             // --suppress <substr> (repeatable) — pragmatic escape
             // hatch: drop any warning containing the substring
             let suppresses: Vec<String> = args.iter().enumerate()
@@ -678,6 +684,10 @@ fn main() {
                             } else {
                                 for w in &warnings { eprintln!("  ⚠ {}", w); }
                                 println!("{} — ok ({} statements, {} warnings)", path, n, warnings.len());
+                            }
+                            if fail && warnings.iter()
+                                .any(|w| crate::evolve::is_realbug_warning(w)) {
+                                process::exit(1);
                             }
                         } else if json_out {
                             println!("{}", serde_json::json!({"file": path, "ok": true, "statements": n}));
