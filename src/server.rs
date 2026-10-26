@@ -34,6 +34,7 @@ pub async fn start_server(port: u16) {
         .route("/api/stats", get(stats))
         .route("/api/check", post(check_source))
         .route("/api/tournament", post(tournament))
+        .route("/api/call", post(call_fn))
         .route("/api/run", post(run_program))
         .route("/api/evolve", post(evolve))
         .route("/api/clear", post(clear_veldt))
@@ -65,6 +66,25 @@ async fn fuzz_family(
     let report = resp.reply;
     { let mut v = state.veldt.lock().unwrap(); *v = veldt; }
     Json(serde_json::json!({ "report": report }))
+}
+
+#[derive(Deserialize)]
+struct CallRequest { name: String, variant: Option<u32>, args: Option<Vec<serde_json::Value>> }
+
+async fn call_fn(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<CallRequest>,
+) -> Json<serde_json::Value> {
+    let mut veldt = { state.veldt.lock().unwrap().clone() };
+    let mut interp = crate::interpreter::Interpreter::new();
+    interp.caps = crate::interpreter::Caps::sandboxed();
+    veldt.load_into_interpreter(&mut interp);
+    let args: Vec<crate::interpreter::Value> = (req.args.unwrap_or_default())
+        .iter().filter_map(|a| serde_json::from_value(a.clone()).ok()).collect();
+    match interp.call_function(&req.name, req.variant, args) {
+        Ok(v) => Json(serde_json::json!({"ok": true, "result": serde_json::to_value(&v).unwrap_or(serde_json::Value::Null)})),
+        Err(e) => Json(serde_json::json!({"ok": false, "error": e})),
+    }
 }
 
 #[derive(Deserialize)]
