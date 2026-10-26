@@ -768,6 +768,13 @@ pub(crate) fn deserialize_value(s: &str) -> Result<Value, String> {
 ///         health trust origin calls
 /// ops: > < >= <= == != ~ (contains)
 pub fn variant_matches(e: &FunctionEntry, clause: &str) -> bool {
+    // `!`/`not` prefix negates the clause
+    let (negate, clause) = if let Some(c) = clause.strip_prefix('!') {
+        (true, c.trim_start())
+    } else if let Some(c) = clause.strip_prefix("not ") {
+        (true, c)
+    } else { (false, clause) };
+
     let parts: Vec<&str> = clause.split_whitespace().collect();
     if parts.len() < 3 { return false; }
     let (field, op, val) = (parts[0], parts[1], parts[2..].join(" "));
@@ -785,16 +792,17 @@ pub fn variant_matches(e: &FunctionEntry, clause: &str) -> bool {
         _ => None,
     };
     if let (Some(fv), Some(v)) = (field_num, num_val) {
-        return match op {
+        let r = match op {
             ">" => fv > v, "<" => fv < v,
             ">=" => fv >= v, "<=" => fv <= v,
             "==" => (fv - v).abs() < f64::EPSILON,
             "!=" => (fv - v).abs() >= f64::EPSILON,
             _ => false,
         };
+        return if negate { !r } else { r };
     }
 
-    match field {
+    let r = match field {
         "health" => {
             let h = match &e.health {
                 Health::Healthy => "healthy",
@@ -820,7 +828,8 @@ pub fn variant_matches(e: &FunctionEntry, clause: &str) -> bool {
             match op { "~" => src.contains(&val), _ => false }
         }
         _ => false,
-    }
+    };
+    if negate { !r } else { r }
 }
 
 #[cfg(test)]
