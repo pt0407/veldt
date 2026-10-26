@@ -14,6 +14,9 @@ pub struct Evolver {
     /// Variant-level filter expression — only breed from variants
     /// matching every &&-clause (the garden --filter DSL).
     pub filter: Option<String>,
+    /// Sort the candidate pool by a variant field before selection
+    /// — the garden --sort DSL applied to the breeding order.
+    pub sort: Option<String>,
 }
 
 impl Evolver {
@@ -22,7 +25,7 @@ impl Evolver {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_nanos() as u64)
             .unwrap_or(42);
-        Evolver { rng_seed: seed, llm: false, filter: None }
+        Evolver { rng_seed: seed, llm: false, filter: None, sort: None }
     }
 
     /// Deterministic evolution: same seed + same garden = same outcomes.
@@ -81,6 +84,33 @@ impl Evolver {
                         .collect::<Vec<_>>()
                 })
                 .collect();
+
+            // --sort <field> — order the candidate pool by a variant field
+            let mut candidates = candidates;
+            if let Some(field) = &self.sort {
+                let key = |name: &str, id: u32| -> f64 {
+                    veldt.functions.get(name)
+                        .and_then(|vs| vs.iter().find(|e| e.id == id))
+                        .map(|e| match field.as_str() {
+                            "fitness" => e.fitness,
+                            "age" => e.age as f64,
+                            "usage" => e.usage_count as f64,
+                            "size" => crate::fmt::format_program(&e.body).len() as f64,
+                            "args" => e.params.len() as f64,
+                            "lifespan" => e.lifespan,
+                            "last_used" => e.last_used as f64,
+                            "niches" => e.niche_scores.len() as f64,
+                            "fit_rate" => e.fitness / (e.age as f64 + 1.0),
+                            "usage_rate" => e.usage_count as f64 / (e.age as f64 + 1.0),
+                            _ => 0.0,
+                        })
+                        .unwrap_or(0.0)
+                };
+                candidates.sort_by(|(na, ia), (nb, ib)| {
+                    key(nb, *ib).partial_cmp(&key(na, *ia))
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+            }
 
             if candidates.is_empty() {
                 events.push(EvolutionEvent::NoCandidates);
