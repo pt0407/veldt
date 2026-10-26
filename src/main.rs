@@ -868,6 +868,16 @@ fn print_stats(veldt: &veldt::Veldt) {
         seed, estab, canon);
     println!("probes: {} across {} families | deaths: {} | runs: {}",
         probe_count, veldt.probes.len(), veldt.obituaries.len(), veldt.run_count);
+    if std::env::args().any(|a| a == "--brief") {
+        if veldt.fitness_history.len() >= 2 {
+            let trend = veldt.fitness_history.iter().map(|f| format!("{:.2}", f))
+                .collect::<Vec<_>>();
+            let arrow = if veldt.fitness_history.last() > veldt.fitness_history.first() { "↑" }
+                        else if veldt.fitness_history.last() < veldt.fitness_history.first() { "↓" } else { "→" };
+            println!("fitness trend: {} → {} {}", trend.first().unwrap(), trend.last().unwrap(), arrow);
+        }
+        return;
+    }
     // builtin usage — which builtins living variants call (mutation targeting)
     const BUILTINS: &[&str] = &[
         "canvas", "grid", "ui_", "bt_", "balance", "astar", "bfs", "los", "fov",
@@ -1044,6 +1054,105 @@ fn print_stats(veldt: &veldt::Veldt) {
         let called = used.iter().filter(|u| **u > 0).count();
         println!("usage rate: avg {} calls/variant ({} of {} called)",
             avg, called, used.len());
+    }
+    // avg family size — genetic diversity per lineage
+    let sizes: Vec<usize> = veldt.functions.values().map(|vs| vs.len()).collect();
+    if !sizes.is_empty() {
+        let avg = sizes.iter().sum::<usize>() / sizes.len();
+        let (lo, hi) = (*sizes.iter().min().unwrap_or(&0), *sizes.iter().max().unwrap_or(&0));
+        println!("family size: avg {} variants/lineage ({}..{})",
+            avg, lo, hi);
+    }
+    // struct/variable census — the non-fn garden state
+    if !veldt.structs.is_empty() || !veldt.variables.is_empty() {
+        println!("state: {} structs, {} variables",
+            veldt.structs.len(), veldt.variables.len());
+    }
+    // avg lifespan — how long variants live
+    let lifespans: Vec<f64> = veldt.functions.values()
+        .flat_map(|vs| vs.iter().map(|e| e.lifespan)).collect();
+    if !lifespans.is_empty() {
+        let avg = lifespans.iter().sum::<f64>() / lifespans.len() as f64;
+        let (lo, hi) = (lifespans.iter().copied().fold(f64::INFINITY, f64::min),
+                        lifespans.iter().copied().fold(f64::NEG_INFINITY, f64::max));
+        println!("lifespan: avg {:.0} runs ({}..{})", avg, lo, hi);
+    }
+    // avg niches per variant — niche diversity per variant
+    let niche_counts: Vec<usize> = veldt.functions.values()
+        .flat_map(|vs| vs.iter().map(|e| e.niche_scores.len())).collect();
+    if !niche_counts.is_empty() {
+        let avg = niche_counts.iter().sum::<usize>() / niche_counts.len();
+        let (lo, hi) = (*niche_counts.iter().min().unwrap_or(&0),
+                        *niche_counts.iter().max().unwrap_or(&0));
+        println!("niches: avg {} per variant ({}..{})", avg, lo, hi);
+    }
+    // obituary staleness — runs since last use before death
+    if !veldt.obituaries.is_empty() {
+        let stale: Vec<u64> = veldt.obituaries.iter()
+            .map(|o| veldt.run_count.saturating_sub(o.last_used)).collect();
+        let avg = stale.iter().sum::<u64>() / stale.len() as u64;
+        let max = stale.iter().max().unwrap_or(&0);
+        let stale_10 = stale.iter().filter(|s| **s >= 10).count();
+        println!("staleness: {} of {} deaths sat 10+ runs idle (avg {}, max {})",
+            stale_10, veldt.obituaries.len(), avg, max);
+    }
+    // fitness at death — are the dead the weakest (selection working)
+    if !veldt.obituaries.is_empty() {
+        let dead_fits: Vec<f64> = veldt.functions.values()
+            .flat_map(|vs| vs.iter().map(|e| e.fitness))
+            .collect();
+        let live_peak = dead_fits.iter().copied()
+            .fold(f64::NEG_INFINITY, f64::max);
+        let dead_ages: Vec<f64> = veldt.obituaries.iter()
+            .map(|o| o.age as f64).collect();
+        let avg_dead_age = dead_ages.iter().sum::<f64>() / dead_ages.len() as f64;
+        println!("selection: live peak {:.2} vs dead avg age {:.0} runs",
+            live_peak, avg_dead_age);
+    }
+    // avg fitness per family — which lineages are fittest on average
+    let mut fam_avg: Vec<(&String, f64)> = veldt.functions.iter()
+        .map(|(n, vs)| {
+            let avg = vs.iter().map(|e| e.fitness).sum::<f64>()
+                / vs.len().max(1) as f64;
+            (n, avg)
+        }).collect();
+    fam_avg.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    if !fam_avg.is_empty() {
+        let line: Vec<String> = fam_avg.iter().take(8)
+            .map(|(n, a)| format!("{}:{:.2}", n, a)).collect();
+        println!("avg fitness/family: {}", line.join(" "));
+    }
+    // avg niche score per family — per-lineage niche profile
+    for (name, vs) in &veldt.functions {
+        let mut fam_niches: std::collections::HashMap<String, Vec<f64>> =
+            std::collections::HashMap::new();
+        for e in vs {
+            for (n, s) in &e.niche_scores {
+                fam_niches.entry(n.clone()).or_default().push(*s);
+            }
+        }
+        let mut top: Vec<(String, f64)> = fam_niches.into_iter()
+            .map(|(n, ss)| (n, ss.iter().sum::<f64>() / ss.len().max(1) as f64))
+            .collect();
+        top.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        if !top.is_empty() {
+            let line: Vec<String> = top.iter().take(4)
+                .map(|(n, a)| format!("{}:{:.2}", n, a)).collect();
+            println!("  {}: {}", name, line.join(" "));
+        }
+    }
+    // health at death — are the dead mostly sick (working) or healthy (wasteful)
+    if !veldt.obituaries.is_empty() {
+        let (mut h, mut s, mut d) = (0usize, 0usize, 0usize);
+        for o in &veldt.obituaries {
+            match o.health {
+                veldt::Health::Healthy => h += 1,
+                veldt::Health::Sick(_) => s += 1,
+                veldt::Health::Dying => d += 1,
+            }
+        }
+        println!("death health: {} healthy, {} sick, {} dying",
+            h, s, d);
     }
     // fitness trend — peak per run, is the garden improving?
     if veldt.fitness_history.len() >= 2 {
