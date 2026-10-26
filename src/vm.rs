@@ -567,6 +567,25 @@ impl Vm {
         }
     }
 
+    /// VELDT_JIT_STATS=1 — report which fns compiled to native vs
+    /// stayed bytecode. Helps answer "why didn't my fn JIT".
+    pub fn jit_stats(&self) {
+        eprintln!("--- JIT stats ---");
+        for (name, variants) in self.fns.iter() {
+            for v in variants {
+                let state = if v.jit.borrow().is_some() {
+                    "native"
+                } else if v.jit_tried.get() {
+                    "bytecode (compile failed)"
+                } else {
+                    "bytecode (cold)"
+                };
+                eprintln!("  {}#{}: {} calls -> {}", name, v.id,
+                          v.calls.get(), state);
+            }
+        }
+    }
+
     /// Compile + run a parsed program. Garden functions must already be
     /// planted via load_garden() if call sites reference them.
     pub fn run(&mut self, stmts: &[Stmt], max_steps: u64) -> Result<(), String> {

@@ -1550,6 +1550,9 @@ fn run_program_vm(path: &str) {
         eprintln!("VM runtime error: {}", e);
         process::exit(1);
     }
+    if std::env::var("VELDT_JIT_STATS").is_ok() {
+        v.jit_stats();
+    }
 }
 
 fn start_repl() {
