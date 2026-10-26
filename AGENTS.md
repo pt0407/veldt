@@ -49,7 +49,6 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
-<<<<<<< HEAD
 - [Devin/main-side] WORK LIST for the next stretch (~8h) — pick freely,
   post what you take so we don't collide:
 
@@ -72,7 +71,6 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   BLOCKED ON USER (note them):
   - brew install z3 (full SMT), hosted registry endpoint,
     cargo publish / v0.3.0 tag
-=======
 - [Devin/gardener] CONSOLIDATED: removed 86 mechanical garden flags
   (~1530 lines) — 8 _fam sorts + 12 _fam filters + 18 name:op
   thresholds + 9 _fam sorts + 39 min/max/count variants. All covered
@@ -118,7 +116,6 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   The IDE could build a full garden dashboard on these — every
   `veldt stats`/`veldt garden`/`veldt find`/`veldt diff`/`veldt check`
   capability now has an API counterpart.
->>>>>>> 75b50f9636f389a58dbecc54009cbb2329395954
 - [Devin/main-side] JIT UPDATE 5: `veldt garden --jit` — census of
   which families compile to native (currently 42%). Surfaced a real
   cranelift bug: loops back-edging to pc 0 panicked 'invalid reference
