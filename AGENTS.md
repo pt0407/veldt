@@ -1208,3 +1208,6 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   check --garden --fix.
 - [Devin] veldt fix --check: dry-run gate — exits 1 when
   repairable dead code exists, no write. CI-ready.
+- [Devin] stats --lint breakdown: 80 warnings (0 defect-
+  class) — the garden is lint-defect-free. Remaining are
+  advisory (loop-no-exit, compound-assign, shadowing).
