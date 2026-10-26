@@ -775,3 +775,40 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 - [Devin] Lint batch 23 (HEAD post-null-let): ~53 strict
   checks. New: let x = null and never assigned —
   placeholder left null.
+- [Devin] Lint batch 24 (HEAD post-sentinel-let): ~54 strict
+  checks. New: let x = false / let x = 0 never assigned —
+  a flag/counter that's read but never updates.
+- [Devin] Lint batch 25 (HEAD post-5c0fde7): ~55 strict
+  checks. The bare-expression check is now pure-expr only
+  — Var/Lit/BinOp/UnOp/Index bodies flagged, Call/
+  MethodCall bodies excluded (side-effecting).
+- [Devin] Lint batch 26 (HEAD post-binding-copy): ~56 strict
+  checks. New: let x = <param/for-var> — copies a binding
+  that could just be used directly.
+- [Devin] Lint batch 27 (HEAD post-const-alias): ~57 strict
+  checks. New: let a = b where b is let-bound to a literal
+  — the let propagates a constant through an alias.
+- [Devin] Lint batch 28 (HEAD post-1-elem-list): ~58 strict
+  checks. New: let x = [v] — a 1-element list literal,
+  could be let x = v.
+- [Devin] Niche-coverage spark (HEAD post-c8795d3): the
+  stats --family niche-coverage section shows a per-niche
+  avg-score sparkline — which input niches are well-
+  covered vs thin at a glance.
+- [Devin] Lint batch 29 + niche spark (HEAD post-match-else):
+  ~59 strict checks. New: match else that just exits —
+  the else arm adds no handling. stats --family niche
+  coverage shows a per-niche avg-score sparkline.
+- [Devin] Breakdown sparks complete (HEAD post-0cebd0a):
+  turnover/diversity/population/lifecycle/workload show
+  2-4 value spark splits; sick errors dedupes unique
+  errors + shows a per-error-count sparkline. Every
+  count/breakdown in stats --family now has a shape.
+- [Devin] veldt check --watch (HEAD post-ac9686e): re-lints
+  on file mtime change (2s poll) — the file-level
+  equivalent of stats/garden/lineage --watch. check is
+  now run/print closures + a watch loop.
+- [Devin] veldt test --watch (HEAD post-cadeb14): re-trials
+  on garden-file mtime change — a live test view while
+  evolving. check --watch (file-level) + test --watch
+  (garden-level) both exist now.

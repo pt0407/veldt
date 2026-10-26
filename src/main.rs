@@ -169,6 +169,27 @@ fn main() {
                 for name in &names {
                     test_family(name);
                 }
+            } else if args.iter().any(|a| a == "--watch") {
+                // --watch — re-run trials when the garden file changes
+                let mut v = veldt::Veldt::new();
+                let garden_path = if v.load().is_ok() {
+                    v.garden_path.join("veldt.json")
+                } else {
+                    std::path::PathBuf::from(".veldt/garden/veldt.json")
+                };
+                let mut last_mtime = None;
+                loop {
+                    if let Ok(meta) = std::fs::metadata(&garden_path) {
+                        if let Ok(mtime) = meta.modified() {
+                            if last_mtime != Some(mtime) {
+                                last_mtime = Some(mtime);
+                                print!("\x1b[2J\x1b[H");
+                                test_family(&args[2]);
+                            }
+                        }
+                    }
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                }
             } else {
                 test_family(&args[2]);
             }
@@ -442,43 +463,63 @@ fn main() {
                 eprintln!("Usage: veldt check <file.veldt>");
                 process::exit(1);
             }
-            // parse-only — no exec; exits 1 on any lex/parse error
-            let source = std::fs::read_to_string(&args[2])
-                .unwrap_or_else(|e| { eprintln!("Error reading {}: {}", args[2], e); process::exit(1); });
             let json_out = args.iter().any(|a| a == "--json");
             let strict = args.iter().any(|a| a == "--strict");
-            let report_err = |kind: &str, e: &dyn std::fmt::Display| {
-                if json_out {
-                    println!("{}", serde_json::json!({"file": args[2], "ok": false, "error": format!("{}: {}", kind, e)}));
-                } else {
-                    eprintln!("{}: {}", kind, e);
-                }
-                process::exit(1);
+            let watch = args.iter().any(|a| a == "--watch");
+            let run = |src: &str| -> Result<(usize, Vec<String>), String> {
+                let mut lx = lexer::Lexer::new(src);
+                let toks = lx.tokenize().map_err(|e| format!("Lex error: {}", e))?;
+                let mut p = parser::Parser::new_with_lines(toks, lx.token_lines.clone());
+                let stmts = p.parse_program().map_err(|e| format!("Parse error: {}", e))?;
+                let n = stmts.len();
+                if strict { Ok((n, lint(&stmts))) } else { Ok((n, vec![])) }
             };
-            let mut lx = lexer::Lexer::new(&source);
-            match lx.tokenize() {
-                Err(e) => report_err("Lex error", &e),
-                Ok(toks) => {
-                    let mut p = parser::Parser::new_with_lines(toks, lx.token_lines.clone());
-                    match p.parse_program() {
-                        Err(e) => report_err("Parse error", &e),
-                        Ok(stmts) => {
-                            if strict {
-                                let warnings = lint(&stmts);
-                                if json_out {
-                                    println!("{}", serde_json::json!({"file": args[2], "ok": true, "statements": stmts.len(), "warnings": warnings}));
-                                } else {
-                                    for w in &warnings { eprintln!("  ⚠ {}", w); }
-                                    println!("{} — ok ({} statements, {} warnings)", args[2], stmts.len(), warnings.len());
-                                }
-                            } else if json_out {
-                                println!("{}", serde_json::json!({"file": args[2], "ok": true, "statements": stmts.len()}));
+            let print = |path: &str, src: &str| {
+                match run(src) {
+                    Ok((n, warnings)) => {
+                        if strict {
+                            if json_out {
+                                println!("{}", serde_json::json!({"file": path, "ok": true, "statements": n, "warnings": warnings}));
                             } else {
-                                println!("{} — ok ({} statements)", args[2], stmts.len());
+                                for w in &warnings { eprintln!("  ⚠ {}", w); }
+                                println!("{} — ok ({} statements, {} warnings)", path, n, warnings.len());
                             }
+                        } else if json_out {
+                            println!("{}", serde_json::json!({"file": path, "ok": true, "statements": n}));
+                        } else {
+                            println!("{} — ok ({} statements)", path, n);
+                        }
+                    }
+                    Err(e) => {
+                        if json_out {
+                            println!("{}", serde_json::json!({"file": path, "ok": false, "error": e}));
+                        } else {
+                            eprintln!("{}", e);
                         }
                     }
                 }
+            };
+            let path = args[2].clone();
+            if watch {
+                let mut last_mtime = None;
+                loop {
+                    if let Ok(meta) = std::fs::metadata(&path) {
+                        if let Ok(mtime) = meta.modified() {
+                            if last_mtime != Some(mtime) {
+                                last_mtime = Some(mtime);
+                                let src = std::fs::read_to_string(&path)
+                                    .unwrap_or_else(|e| { eprintln!("Error reading {}: {}", path, e); String::new() });
+                                print!("\x1b[2J\x1b[H");
+                                print(&path, &src);
+                            }
+                        }
+                    }
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                }
+            } else {
+                let src = std::fs::read_to_string(&path)
+                    .unwrap_or_else(|e| { eprintln!("Error reading {}: {}", path, e); process::exit(1); });
+                print(&path, &src);
             }
         }
         "diff" => {
@@ -3342,6 +3383,12 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                 if !name.starts_with('_') && bound.iter().any(|(_, b)| *b == name) {
                     out.push(format!("let {} shadows an outer let", name));
                 }
+                // let x = [v] — a 1-element list literal — could be let x = v
+                if let Expr::List(items) = e {
+                    if items.len() == 1 {
+                        out.push(format!("let {} = [v] — a 1-element list, could be let {} = v", name, name));
+                    }
+                }
                 // duplicate let — same expression bound twice in this block
                 for (j, s) in stmts.iter().enumerate().take(i) {
                     if let Stmt::Let(prev, pe) = s {
@@ -3367,6 +3414,29 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                         .any(|s| stmt_assigns(s, name));
                     if !assigned {
                         out.push(format!("let {} = null and never assigned — placeholder left null", name));
+                    }
+                }
+                // let bound to a false/0 sentinel and never assigned — a flag/counter that never updates
+                if matches!(e, Expr::Bool(false) | Expr::Int(0)) {
+                    let assigned = stmts.iter().skip(i + 1)
+                        .any(|s| stmt_assigns(s, name));
+                    if !assigned && stmts.iter().skip(i + 1).any(|s| stmt_mentions(s, name)) {
+                        out.push(format!("let {} = <sentinel> never assigned — the flag/counter never updates", name));
+                    }
+                }
+                // let bound to a param/for-var — copying a binding
+                if let Expr::Var(v) = e {
+                    if outer.contains(v.as_str()) && v != name {
+                        out.push(format!("let {} = {} — copies a binding, could reuse", name, v));
+                    }
+                    // let a = b where b was let-bound to a literal — alias for a constant
+                    for (_, s) in stmts.iter().enumerate().take(i) {
+                        if let Stmt::Let(n, pe) = s {
+                            if n == v && matches!(pe, Expr::Int(_) | Expr::Str(_) | Expr::Bool(_) | Expr::Null) {
+                                out.push(format!("let {} = {} — {} is a constant alias", name, v, v));
+                                break;
+                            }
+                        }
                     }
                 }
             }
@@ -3407,8 +3477,12 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                         out.push("if condition repeats the same operand — x && x / x || x".into());
                     }
                 }
-                if a.len() == 1 && matches!(a[0], Stmt::ExprStmt(_))
-                    && b.as_ref().map(|e| e.len() == 1 && matches!(e[0], Stmt::ExprStmt(_))).unwrap_or(true) {
+                // pure bare expression — no side effects, definitely dead
+                fn is_pure(e: &Expr) -> bool {
+                    !matches!(e, Expr::Call(..) | Expr::MethodCall(..))
+                }
+                if a.len() == 1 && matches!(&a[0], Stmt::ExprStmt(e) if is_pure(e))
+                    && b.as_ref().map(|e| e.len() == 1 && matches!(&e[0], Stmt::ExprStmt(x) if is_pure(x))).unwrap_or(true) {
                     out.push("if body is a bare expression — computed and discarded".into());
                 }
                 if b.is_none() && a.len() == 1 {
@@ -3603,6 +3677,12 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                             && !outer.contains(v.as_str()) {
                             out.push(format!("match pattern {} is unbound — never matches", v));
                         }
+                    }
+                }
+                // else arm that just exits — the match adds no handling
+                if let Some(e) = els {
+                    if e.len() == 1 && matches!(e[0], Stmt::Return(_) | Stmt::Break | Stmt::Continue) {
+                        out.push("match else just exits — the match adds no handling".into());
                     }
                 }
                 for (_, body) in arms {
@@ -5158,9 +5238,11 @@ fn print_family_detail(veldt: &veldt::Veldt, fam: &String, vs: &[veldt::Function
         }
     }
     if !niche_totals.is_empty() {
-        println!("  niche coverage:");
         let mut niches: Vec<_> = niche_totals.iter().collect();
         niches.sort_by(|a, b| a.0.cmp(&b.0));
+        let avgs: Vec<f64> = niches.iter().take(10)
+            .map(|(_, (t, n))| t / *n as f64).collect();
+        println!("  niche coverage: {}", spark(&avgs));
         for (niche, (total, count)) in niches.iter().take(10) {
             println!("    {:<20} avg {:.2} ({} variants)", niche, total / *count as f64, count);
         }
@@ -5350,36 +5432,49 @@ fn print_family_detail(veldt: &veldt::Veldt, fam: &String, vs: &[veldt::Function
     let died_n = veldt.obituaries.iter().filter(|o| o.name == *fam).count();
     if born_n + died_n > 0 {
         let churn = died_n as f64 / (born_n + died_n) as f64;
-        println!("  turnover: {} living · {} died ({:.0}% churn)", born_n, died_n, churn * 100.0);
+        println!("  turnover: {} living · {} died ({:.0}% churn)  {}",
+            born_n, died_n, churn * 100.0,
+            spark(&[born_n as f64, died_n as f64]));
     }
     // diversity — unique origins + niche breadth (the genetic diversity)
     let unique_origins: std::collections::HashSet<_> = vs.iter().map(|e| e.origin.as_str()).collect();
     let unique_niches: std::collections::HashSet<_> = vs.iter()
         .flat_map(|e| e.niche_scores.keys().map(|s| s.as_str())).collect();
-    println!("  diversity: {} origins · {} niches", unique_origins.len(), unique_niches.len());
+    println!("  diversity: {} origins · {} niches  {}",
+        unique_origins.len(), unique_niches.len(),
+        spark(&[unique_origins.len() as f64, unique_niches.len() as f64]));
     // immigrants — the family's foreign-garden influence
     let immigrants = vs.iter().filter(|e| e.origin.contains("immigrant")).count();
     let seeds = vs.iter().filter(|e| e.origin.starts_with("seed")).count();
     let llms = vs.iter().filter(|e| e.origin.contains("llm")).count();
-    println!("  population: {} immigrant · {} seed · {} LLM · {} bred",
-        immigrants, seeds, llms, vs.len() - immigrants - seeds - llms);
+    let bred = vs.len() - immigrants - seeds - llms;
+    println!("  population: {} immigrant · {} seed · {} LLM · {} bred  {}",
+        immigrants, seeds, llms, bred,
+        spark(&[immigrants as f64, seeds as f64, llms as f64, bred as f64]));
     // sick errors — the family's failure modes
     let errs: Vec<_> = vs.iter().filter_map(|e|
         if let Health::Sick(err) = &e.health { Some(err) } else { None }).collect();
     if !errs.is_empty() {
-        println!("  sick errors:");
-        for err in errs.iter().take(5) {
-            println!("    {}", err);
+        let mut err_counts: std::collections::HashMap<&String, usize> = std::collections::HashMap::new();
+        for err in &errs { *err_counts.entry(err).or_default() += 1; }
+        let mut sorted: Vec<_> = err_counts.iter().collect();
+        sorted.sort_by(|a, b| b.1.cmp(&a.1));
+        let counts: Vec<f64> = sorted.iter().take(5).map(|(_, n)| **n as f64).collect();
+        println!("  sick errors: {}", spark(&counts));
+        for (err, n) in sorted.iter().take(5) {
+            println!("    {} ({}x)", err, n);
         }
     }
     // lifecycle — growing (age < lifespan) vs aging (age >= lifespan)
     let growing = vs.iter().filter(|e| (e.age as f64) < e.lifespan).count();
     let aging = vs.iter().filter(|e| (e.age as f64) >= e.lifespan).count();
-    println!("  lifecycle: {} growing · {} aging", growing, aging);
+    println!("  lifecycle: {} growing · {} aging  {}",
+        growing, aging, spark(&[growing as f64, aging as f64]));
     // workload — overworked (usage > lifespan) vs underused (usage < lifespan)
     let over = vs.iter().filter(|e| e.usage_count as f64 > e.lifespan).count();
     let under = vs.iter().filter(|e| (e.usage_count as f64) < e.lifespan).count();
-    println!("  workload: {} overworked · {} underused", over, under);
+    println!("  workload: {} overworked · {} underused  {}",
+        over, under, spark(&[over as f64, under as f64]));
     // source success — which mutation sources produced healthy variants
     let mut src_healthy: std::collections::HashMap<String, (usize, usize)> = std::collections::HashMap::new();
     for e in vs.iter() {
