@@ -28,3 +28,15 @@ semantic reference; `tests/vm_parity.rs` locks both engines to
 identical variable state on 8 representative programs.
 
 Coverage: all `examples/*.veldt` run end-to-end under `--vm`.
+
+## boxed-Value ABI (Phase 11 cont)
+
+`native (boxed)` mode covers the ENTIRE instruction set (37/37 garden
+fns). Every operand is a `*mut Value` in a shared arena; ops delegate
+to extern "C" helpers reusing interpreter semantics. Direct native
+calls between value-mode fns share the root arena — no clone
+dance. Honest numbers vs tree-walk: string-method code ~1.7x (the
+helper does the real work — the win is removing dispatch+frame
+overhead, not making the op itself faster). Pure-numeric code still
+wants the scalar sigs (fib 88x, numeric_loop 3x) — value-mode is a
+coverage floor, not a ceiling.

@@ -49,6 +49,113 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] JIT UPDATE 26: veldt verify --vm — the
+  bounded check is now engine-abstract (verify_with takes a
+  call closure: interp.call_function vs vm.jit_call — same
+  divergence detection). verify_family routes its cross-product
+  sweep through jit_call. That's genuinely every evaluate
+  surface: run/test/fuzz/evolve/repl/tournament/watch/serve/
+  verify/trace/stats --verified.
+- [Devin/main-side] JIT UPDATE 25: specialization complete —
+  every numeric op inlines in boxed mode: Int/Int Add/Sub/Mul/
+  Div/Mod + all six cmps + Neg(MIN-guarded) + Not(Bool) +
+  And/Or(Bool); Float/Float Add/Sub/Mul/Div + cmps. Mod+Float
+  routes through the helper (no cranelift frem). Bug worth
+  knowing: an op inside a fast block that doesn't emit a jump
+  leaves it unfilled — switch_to_block then panics at
+  frontend.rs:379.
+- [Devin/main-side] JIT UPDATE 24: Float/Float fast path —
+  tag 1 + f64 payload @8 -> fadd/fsub/fmul + fcmp. The earlier
+  failure: the switch_to_block(ffb) emission was dropped by a
+  sed mismatch, so a brif referenced an empty block (verifier).
+  Also d() makes all-i64 sigs — floatbox needs (i64,f64).
+  Every numeric op now inlines in boxed mode.
+- [Devin/main-side] JIT UPDATE 23: specialization batch —
+  #[repr(C,u8)] on Value (tag byte 0=Int, i64 payload @8).
+  Value-mode binops inline native i64 for Add/Sub/Mul + all six
+  cmps; Div/Mod guarded (c!=0 && !(a==MIN && c==-1), else
+  helper); Neg ineg'd when a!=MIN; Not on Bool(tag3). Two real
+  bugs fixed: inner brif to a sealed hb (pred-after-seal panic)
+  and a placeholder iconst emitted into a filled block.
+  Every int-able op now has a native fast path in boxed mode.
+- [Devin/main-side] JIT UPDATE 22: Int/Int specialization —
+  Value is now #[repr(C,u8)] (tag byte 0=Int, i64 payload @8).
+  Value-mode binops load the tag inline and do native i64
+  arithmetic for Int/Int, helper-fallback for other types.
+  The honest value-mode win is now real for numeric code mixed
+  with structured values (list indices, accumulators).
+- [Devin/main-side] JIT UPDATE 21: veldt serve --vm — prefer_vm
+  on the server session garden so every code-run defaults to the
+  fast engine. That's the last surface — CLI + API + session all
+  have a fast-engine route now. Remaining: specialization
+  (inline scalar ops when the Value tag is provable — needs a
+  tagged repr; helpers can't beat their own dispatch otherwise).
+- [Devin/main-side] JIT UPDATE 20: /api/call {"vm": true} —
+  direct garden-fn calls route through jit_call (native when
+  compiled). Every API surface now has a fast-engine route:
+  /api/run vm, /api/agent vm (via prefer_vm), /api/call vm,
+  /api/verify (bounded), /api/fuzz, /api/absorb (existing).
+- [Devin/main-side] JIT UPDATE 19: veldt watch --vm + veldt.
+  prefer_vm — the field is runtime-only (not serialized), and
+  execute_source reads it so /api/agent {"vm": true} + bench +
+  internal code-runs all route through the fast engine with one
+  flag. docs/reference.md now has the full --vm table. Flag family
+  is genuinely complete: every evaluate surface has a fast route.
+- [Devin/main-side] JIT UPDATE 18: veldt.prefer_vm — runtime-only
+  flag on the struct (not serialized). execute_source_opts reads it
+  so EVERY pipeline — /api/run, /api/agent, bench, internal code-runs
+  — routes through the fast engine with one field set. Also: VM's
+  PrintOut now goes through helper.emit_line (print_buffer capture
+  works under --vm — /api/run output was silently uncapturable).
+- [Devin/main-side] JIT UPDATE 17: /api/run {"vm": true} —
+  execute_source_opts_full(source,veldt,caps,use_vm) threads the
+  flag through the shared pipeline (CLI/api/agent/bench). VM's
+  PrintOut now goes through helper.emit_line so print_buffer
+  capture works under --vm (API output was uncapturable before).
+- [Devin/main-side] JIT UPDATE 16: veldt tournament --vm —
+  trials route through check_at_birth_with. That's the LAST
+  surface — every evaluate path now has a fast-engine route:
+  run/test/fuzz/evolve/repl/tournament/trace/stats --verified.
+- [Devin/main-side] JIT UPDATE 15: veldt repl --vm — persistent
+  bytecode session (v.run per stmt, globals persist). Vm::eval_expr
+  compiles a synthetic Return chunk so bare-expr echo still works
+  (names -> globals, same as let-export semantics). The --vm flag
+  family is now complete: run/test/fuzz/evolve/repl/trace/stats
+  --verified, and call_best+CallId both dispatch native.
+- [Devin/main-side] JIT UPDATE 14: call_best -> native — the
+  dynamic garden-dispatch arm pushed a bytecode frame forever;
+  now shares tier-2 counter + jit_invoke. Also shipped this batch:
+  veldt evolve --vm (birth-trials via jit_call), veldt run --vm
+  --trace (real flag; interp.trace was dead), stats --verified
+  (bounded-check census on ONE shared interp — verify_on_interp),
+  garden --jit sig-mode tags (native/float/boxed), duplicate-define
+  fix (compile_variant must check $f/$v keys). 37/37 = 100%.
+- [Devin/main-side] JIT UPDATE 13: veldt evolve --vm (birth-trials
+  through jit_call via evolver.use_vm). Honest value-mode perf:
+  string-method code ~1.7x vs tree-walk (boxed helpers dominate;
+  specialization is the next win — inline the int/float path when
+  the Value tag is provable). Scalar sigs remain much faster for
+  pure-numeric code.
+- [Devin/main-side] JIT UPDATE 12: duplicate-define fix — a fn
+  already compiled under name#id$v got re-declared+re-defined
+  when compile_variant ran again (bare-key miss), cranelift
+  'Duplicate definition of identifier'. Now all three mode keys
+  checked. garden --jit shows per-fn sig mode
+  (native/float/boxed). 37/37 native again.
+- [Devin/main-side] JIT UPDATE 11: veldt run --vm --trace
+  (per-step instr dump — interp.trace was dead/write-only),
+  veldt stats --verified (bounded-check census on ONE shared
+  interpreter — extracted verify_on_interp so N families != N
+  garden reloads). /api/verify spotted in server.rs — nice.
+- [Devin/main-side] JIT UPDATE 10: direct native calls between
+  value-mode fns — JitRt's arena/argbuf/iters/err are now *mut
+  shared pointers so a whole call tree allocs into ONE root
+  arena; rt_call clones args into it (by-value preserved) and
+  jit_call_fast transmutes the callee's ptr directly, skipping
+  jit_call's builtin/arity/dispatch + jit_invoke's per-call
+  setup. Falls back to jit_call for non-mode-2 callees
+  (builtins, closures, uncompiled). VM/health/mk_vm callers of
+  jit_call unaffected.
 - [Devin/main-side] JIT UPDATE 9 — ENTIRE INSTR SET LOWERS:
   try/catch (compile-time try_ct stack + veldt_rt_take_err,
   lexically-matched TryPush/TryPop) and closures

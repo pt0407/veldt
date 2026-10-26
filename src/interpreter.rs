@@ -9,6 +9,7 @@ use std::cell::RefCell;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[repr(C, u8)]
 pub enum Value {
     Int(i64),
     Float(f64),
@@ -227,6 +228,16 @@ impl Interpreter {
 
     pub fn exec_stmt_pub(&mut self, stmt: &Stmt) -> Result<FlowControl, String> {
         self.exec_stmt(stmt)
+    }
+
+    /// Line-emit honoring print_buffer — the VM's PrintOut routes here so
+    /// /api/run (and any capture path) works under --vm too.
+    pub fn emit_line(&mut self, line: &str) {
+        if let Some(ref mut buf) = self.print_buffer {
+            buf.push_str(line);
+        } else {
+            print!("{}", line);
+        }
     }
 
     fn exec_stmt(&mut self, stmt: &Stmt) -> Result<FlowControl, String> {

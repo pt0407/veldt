@@ -14,6 +14,7 @@ pub struct Evolver {
     /// Variant-level filter expression — only breed from variants
     /// matching every &&-clause (the garden --filter DSL).
     pub filter: Option<String>,
+    pub use_vm: bool,   // birth-trials on the bytecode VM + JIT
     /// Sort the candidate pool by a variant field before selection
     /// — the garden --sort DSL applied to the breeding order.
     pub sort: Option<String>,
@@ -25,7 +26,7 @@ impl Evolver {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_nanos() as u64)
             .unwrap_or(42);
-        Evolver { rng_seed: seed, llm: false, filter: None, sort: None }
+        Evolver { rng_seed: seed, llm: false, filter: None, sort: None, use_vm: false }
     }
 
     /// Deterministic evolution: same seed + same garden = same outcomes.
@@ -158,7 +159,8 @@ impl Evolver {
                 ).unwrap_or_default();
                 for id in ids {
                     let mut e = veldt.functions[name].iter().find(|e| e.id == id).cloned().unwrap();
-                    HealthChecker::check_at_birth(&mut e, veldt);
+                    HealthChecker::check_at_birth_with(
+                        &mut e, veldt, self.use_vm);
                     if let Some(variants) = veldt.functions.get_mut(name) {
                         for v in variants.iter_mut() {
                             if v.id == id { *v = e.clone(); break; }
@@ -243,7 +245,8 @@ impl Evolver {
                 // Health check at birth (runs inline tests + probes)
                 let mut new_entry = veldt.functions[name].iter()
                     .find(|e| e.id == new_id).cloned().unwrap();
-                HealthChecker::check_at_birth(&mut new_entry, veldt);
+                HealthChecker::check_at_birth_with(
+                    &mut new_entry, veldt, self.use_vm);
 
                 if let Some(variants) = veldt.functions.get_mut(name) {
                     for e in variants.iter_mut() {
@@ -1355,7 +1358,7 @@ mod tests {
 
         // Health check
         let mut entry = veldt.functions["add"][0].clone();
-        HealthChecker::check_at_birth(&mut entry, &veldt);
+        HealthChecker::check_at_birth_with(&mut entry, &veldt, self.use_vm);
         veldt.functions.get_mut("add").unwrap()[0] = entry;
 
         let initial_count = veldt.functions["add"].len();

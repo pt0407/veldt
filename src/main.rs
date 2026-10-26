@@ -52,7 +52,8 @@ fn main() {
                 std::fs::write(&tmp, &code).unwrap_or_else(|e| { eprintln!("eval temp write: {}", e); process::exit(1); });
                 if args.iter().any(|a| a == "--vm") {
                     run_program_vm(tmp.to_str().unwrap(),
-                        args.iter().any(|a| a == "--evolve"));
+                        args.iter().any(|a| a == "--evolve"),
+                        args.iter().any(|a| a == "--trace"));
                 } else {
                     run_program(tmp.to_str().unwrap(), args.iter().any(|a| a == "--trace"), args.iter().any(|a| a == "--evolve"));
                 }
@@ -62,7 +63,8 @@ fn main() {
                 let file = args[2..].iter().find(|a| a.ends_with(".veldt"))
                     .cloned().unwrap_or_else(|| args[2].clone());
                 run_program_vm(&file,
-                    args.iter().any(|a| a == "--evolve"));
+                    args.iter().any(|a| a == "--evolve"),
+                    args.iter().any(|a| a == "--trace"));
             } else {
                 run_program(&args[2], args.iter().any(|a| a == "--trace"), args.iter().any(|a| a == "--evolve"));
             }
@@ -80,7 +82,7 @@ fn main() {
                 run_program(&f, false, false);
                 let tree = t0.elapsed();
                 let t1 = std::time::Instant::now();
-                run_program_vm(&f, false);
+                run_program_vm(&f, false, std::env::args().any(|a| a == "--trace"));
                 let vm = t1.elapsed();
                 println!("{:>18} {:>10.0}ms {:>10.0}ms {:>7.1}x",
                          p.file_name().unwrap().to_str().unwrap(),
@@ -98,7 +100,7 @@ fn main() {
             let tree = t0.elapsed();
             println!("=== bytecode VM + JIT ===");
             let t1 = std::time::Instant::now();
-            run_program_vm(&file, false);
+            run_program_vm(&file, false, std::env::args().any(|a| a == "--trace"));
             let vm = t1.elapsed();
             let speed = tree.as_secs_f64() / vm.as_secs_f64().max(1e-9);
             println!("--- compare ---");
@@ -701,7 +703,15 @@ fn main() {
                 let why = args.iter().any(|a| a == "--why");
                 for (name, _) in &veldt.functions {
                     match engine.compile_fn(name, &v.fns) {
-                        Some(_) => { println!("  {}: native", name); native += 1; }
+                        Some(j) => {
+                            let tag = match j.mode {
+                                0 => "native",
+                                1 => "native (float)",
+                                _ => "native (boxed)",
+                            };
+                            println!("  {}: {}", name, tag);
+                            native += 1;
+                        }
                         None => {
                             let fit = v.fns.get(name).and_then(|vs|
                                 vs.iter().max_by(|a, b|
@@ -1966,6 +1976,23 @@ fn main() {
             } else {
                 print_stats(&veldt);
             }
+            // --verified — bounded-check census across multi-variant
+            // families on one shared interpreter (no per-family reload)
+            if args.iter().any(|a| a == "--verified") {
+                let mut interp = interpreter::Interpreter::new();
+                veldt.load_into_interpreter(&mut interp);
+                let (mut ok, mut div, mut single) = (0usize, 0usize, 0usize);
+                for name in veldt.functions.keys() {
+                    if veldt.functions[name].len() < 2 { single += 1; continue; }
+                    match verify_on_interp(&mut interp, name, false) {
+                        Some(id) => { div += 1;
+                            eprintln!("  {}#{} diverges", name, id); }
+                        None => { ok += 1; }
+                    }
+                }
+                println!("[verified] {} verified, {} divergent, {} single-variant",
+                    ok, div, single);
+            }
             // --watch — re-render on a 2s poll until interrupted
             if args.iter().any(|a| a == "--watch") {
                 loop {
@@ -1986,7 +2013,7 @@ fn main() {
                 let mut times: Vec<u128> = Vec::new();
                 for _ in 0..reps {
                     let t0 = std::time::Instant::now();
-                    if vm { run_program_vm(file, false) } else { run_program(file, false, false) };
+                    if vm { run_program_vm(file, false, std::env::args().any(|a| a == "--trace")) } else { run_program(file, false, false) };
                     times.push(t0.elapsed().as_millis());
                 }
                 let min = times.iter().min().copied().unwrap_or(0);
@@ -2134,6 +2161,7 @@ fn main() {
             if let Some(f) = fam_scope { eprintln!("[EVOLVE] scoped to family: {}", f); }
             let mut evolver = evolve::Evolver::new();
             evolver.llm = args.iter().any(|a| a == "--llm");
+            evolver.use_vm = args.iter().any(|a| a == "--vm");
             evolver.filter = args.iter().position(|a| a == "--filter")
                 .and_then(|p| args.get(p + 1)).cloned();
             evolver.sort = args.iter().position(|a| a == "--sort")
@@ -4190,15 +4218,21 @@ fn expr_mentions(e: &ast::Expr, name: &str) -> bool {
 
 fn watch_file(path: &str) {
     let mut last = std::fs::metadata(path).and_then(|m| m.modified()).ok();
+    let vm = std::env::args().any(|a| a == "--vm");
+    let trace = std::env::args().any(|a| a == "--trace");
     println!("watching {} (ctrl-c to stop)", path);
-    run_program(path, false, false);
+    let run = |path: &str| {
+        if vm { run_program_vm(path, false, trace) }
+        else { run_program(path, false, trace) }
+    };
+    run(path);
     loop {
         std::thread::sleep(std::time::Duration::from_millis(400));
         let now = std::fs::metadata(path).and_then(|m| m.modified()).ok();
         if now != last {
             last = now;
             println!("\n--- {} changed, rerunning ---", path);
-            run_program(path, false, false);
+            run(path);
         }
     }
 }
@@ -4228,7 +4262,7 @@ impl rustyline::highlight::Highlighter for VeldtHelper {}
 impl rustyline::validate::Validator for VeldtHelper {}
 impl rustyline::Helper for VeldtHelper {}
 
-fn run_program_vm(path: &str, evolve_after: bool) {
+fn run_program_vm(path: &str, evolve_after: bool, trace: bool) {
     // Phase 11: bytecode VM path. Same lex/parse; different executor.
     let source = match std::fs::read_to_string(path) {
         Ok(s) => s,
@@ -4252,6 +4286,7 @@ fn run_program_vm(path: &str, evolve_after: bool) {
         }
     }
     let mut v = vm::Vm::new();
+    v.trace = trace;
     let mut garden = veldt::Veldt::new();
     // Track load success — NEVER save an unloaded garden over the
     // real file (a parse error or read race would wipe every family).
@@ -4323,6 +4358,13 @@ fn start_repl() {
     let _ = veldt.load();
     let mut interp = interpreter::Interpreter::new();
     veldt.load_into_interpreter(&mut interp);
+    // --vm: statements run on a persistent bytecode VM (+ JIT)
+    let use_vm = std::env::args().any(|a| a == "--vm");
+    let mut repl_vm = if use_vm {
+        let mut v = crate::vm::Vm::new();
+        let _ = v.load_garden(&veldt);
+        Some(v)
+    } else { None };
 
     println!("veldt {} — repl. :help for commands, ctrl-d to quit", env!("CARGO_PKG_VERSION"));
     let mut rl = rustyline::Editor::<VeldtHelper, rustyline::history::FileHistory>::new()
@@ -4413,13 +4455,22 @@ fn start_repl() {
         // print value of trailing bare expressions
         let n = stmts.len();
         for (i, stmt) in stmts.iter().enumerate() {
-            match interp.exec_stmt_pub(stmt) {
+            let r = if let Some(v) = &mut repl_vm {
+                v.run(std::slice::from_ref(stmt), 1_000_000)
+                    .map(|_| interpreter::FlowControl::Normal)
+            } else {
+                interp.exec_stmt_pub(stmt)
+            };
+            match r {
                 Ok(_) => {
                     if i + 1 == n {
                         if let ast::Stmt::ExprStmt(e) = stmt {
-                            if let Ok(v) = interp.eval_expr_in_scope(e) {
-                                println!("{}", v);
-                            }
+                            let rv = if let Some(v) = &mut repl_vm {
+                                v.eval_expr(e)
+                            } else {
+                                interp.eval_expr_in_scope(e)
+                            };
+                            if let Ok(v) = rv { println!("{}", v); }
                         }
                     }
                 }
@@ -4566,13 +4617,22 @@ fn fuzz_family(name: &str, json: bool) {
     let mut probes_planted = 0u32;
     let mut divergent_cases: Vec<serde_json::Value> = Vec::new();
     let mut group_counts: Vec<f64> = Vec::new();
-    // sweep each param-position boundary value (up to 8 cases per arg slot)
-    for case in 0..8 {
+    // sweep each param-position boundary value (up to 8 cases per arg
+    // slot); 2-param fns also get the ci x cj cross-product so
+    // mixed-boundary cases like div(i64::MIN, -1) are actually generated
+    let case_list: Vec<(usize, usize)> = {
+        let two = variants.first().map(|v| v.params.len() == 2)
+            .unwrap_or(false);
+        if two { (0..8).flat_map(|ci| (0..8).map(move |cj| (ci, cj))).collect() }
+        else { (0..8).map(|ci| (ci, ci)).collect() }
+    };
+    for (ci, cj) in case_list {
         // build args: boundary value for every param (any/unknown -> int)
         let Some(first) = variants.first() else { break };
         let mut args = Vec::new();
         let mut ok = true;
-        for p in &first.params {
+        for (i, p) in first.params.iter().enumerate() {
+            let case = if i == 0 { ci } else { cj };
             match evolve::boundary_value(&p.typ, case) {
                 Some(v) => args.push(v),
                 None => { ok = false; break; }
@@ -4603,7 +4663,7 @@ fn fuzz_family(name: &str, json: bool) {
             divergences += 1;
             if json {
                 divergent_cases.push(serde_json::json!({
-                    "case": case,
+                    "case": ci * 8 + cj,
                     "args": args.iter().map(|a| serde_json::to_string(a).unwrap_or_default())
                         .collect::<Vec<_>>(),
                     "groups": by_out.iter().map(|(out, ids)| serde_json::json!({
@@ -4611,7 +4671,7 @@ fn fuzz_family(name: &str, json: bool) {
                     })).collect::<Vec<_>>(),
                 }));
             } else {
-                println!("  case {} args {:?}:", case,
+                println!("  case {} args {:?}:", ci * 8 + cj,
                     args.iter().map(|a| format!("{:?}", a)).collect::<Vec<_>>().join(","));
                 for (out, ids) in &by_out {
                     println!("    {} -> #{}", out, ids.iter().map(|i| i.to_string())
@@ -4630,7 +4690,7 @@ fn fuzz_family(name: &str, json: bool) {
                         pool.push(veldt::Probe {
                             args: arg_strs,
                             expected: expected.clone(),
-                            niche: format!("fuzz:case{}", case),
+                            niche: format!("fuzz:case{}", ci * 8 + cj),
                             born: std::time::SystemTime::now()
                                 .duration_since(std::time::UNIX_EPOCH)
                                 .map(|d| d.as_secs()).unwrap_or(0),
@@ -4962,10 +5022,17 @@ fn verify_family(name: &str, args: &[String]) {
     let bound: i64 = args.iter().position(|a| a == "--domain")
         .and_then(|i| args.get(i + 1))
         .and_then(|s| s.parse().ok()).unwrap_or(10);
+    let use_vm = args.iter().any(|a| a == "--vm");
     let mut veldt = veldt::Veldt::new();
     if let Err(e) = veldt.load() { eprintln!("Error: {}", e); process::exit(1); }
     let mut interp = interpreter::Interpreter::new();
     veldt.load_into_interpreter(&mut interp);
+    // --vm — the bounded check runs through jit_call instead of
+    // call_function (same dispatch semantics, the fast engine)
+    let mut vfy_vm = if use_vm {
+        let mut v = crate::vm::Vm::new();
+        if v.load_garden(&veldt).is_err() { None } else { Some(v) }
+    } else { None };
     let variants = match interp.functions.get(name) {
         Some(v) => v.clone(),
         None => { println!("No lineage '{}'", name); return; }
@@ -5008,8 +5075,14 @@ fn verify_family(name: &str, args: &[String]) {
         let n_combos = combos.len();
         'outer: for combo in combos {
             // eval quietly — side-effect prints pollute the report
-            let a = interp.call_function(name, Some(v.id), combo.iter().map(|n| crate::interpreter::Value::Int(*n)).collect());
-            let b = interp.call_function(name, Some(fittest.id), combo.iter().map(|n| crate::interpreter::Value::Int(*n)).collect());
+            let mk = |n: i64| vec![crate::interpreter::Value::Int(n); combo.len().min(arity.max(1))];
+            let mut call = |nm: &str, id: Option<u32>, args: Vec<crate::interpreter::Value>| {
+                if let Some(v) = &mut vfy_vm { v.jit_call(nm, id, args) }
+                else { interp.call_function(nm, id, args) }
+            };
+            let a = call(name, Some(v.id), combo.iter().map(|n| crate::interpreter::Value::Int(*n)).collect());
+            let b = call(name, Some(fittest.id), combo.iter().map(|n| crate::interpreter::Value::Int(*n)).collect());
+            let _ = mk;
             checked += 1;
             let same = match (&a, &b) {
                 (Ok(x), Ok(y)) => x == y,
@@ -5063,9 +5136,41 @@ fn verify_family(name: &str, args: &[String]) {
 pub fn verify_family_find_divergent(name: &str) -> Option<u32> {
     let mut veldt = veldt::Veldt::new();
     if veldt.load().is_err() { return None; }
+    // prefer_vm: the bounded check goes through jit_call — same
+    // divergence detection via verify_with's abstract call
+    if veldt.prefer_vm {
+        let mut v = crate::vm::Vm::new();
+        if v.load_garden(&veldt).is_ok() {
+            let mut interp = interpreter::Interpreter::new();
+            veldt.load_into_interpreter(&mut interp);
+            let variants = interp.functions.get(name)?.clone();
+            return verify_with(
+                |n, id, a| v.jit_call(n, id, a),
+                variants, name, true);
+        }
+    }
     let mut interp = interpreter::Interpreter::new();
     veldt.load_into_interpreter(&mut interp);
+    verify_on_interp(&mut interp, name, true)
+}
+
+/// Bounded check on a pre-loaded interpreter — same logic, shared for
+/// census callers (stats --verified) that check every family.
+pub fn verify_on_interp(interp: &mut interpreter::Interpreter,
+                        name: &str, verbose: bool) -> Option<u32> {
     let variants = interp.functions.get(name)?.clone();
+    verify_with(
+        |n, id, a| interp.call_function(n, id, a),
+        variants, name, verbose)
+}
+
+/// The bounded check over an engine-abstract `call` — interp vs
+/// VM jit_call share the same divergence detection.
+pub fn verify_with(
+    mut call: impl FnMut(&str, Option<u32>, Vec<crate::interpreter::Value>)
+        -> Result<crate::interpreter::Value, String>,
+    variants: Vec<interpreter::FunctionVariant>,
+    name: &str, verbose: bool) -> Option<u32> {
     if variants.len() < 2 { return None; }
     let fittest = variants.iter()
         .max_by(|a, b| a.fitness.partial_cmp(&b.fitness)
@@ -5077,20 +5182,20 @@ pub fn verify_family_find_divergent(name: &str) -> Option<u32> {
         for x in -10..=10i64 {
             let args: Vec<crate::interpreter::Value> =
                 vec![crate::interpreter::Value::Int(x); arity.max(1)];
-            let a = interp.call_function(name, Some(v.id), args.clone());
-            let b = interp.call_function(name, Some(fittest.id), args);
+            let a = call(name, Some(v.id), args.clone());
+            let b = call(name, Some(fittest.id), args);
             let same = match (&a, &b) {
                 (Ok(p), Ok(q)) => p == q,
                 (Err(_), Err(_)) => true,
                 _ => false,
             };
             if !same {
-                println!("  {}#{}: DIVERGES", name, v.id);
+                if verbose { println!("  {}#{}: DIVERGES", name, v.id); }
                 found = Some(v.id);
                 break;
             }
         }
-        if found.is_none() {
+        if found.is_none() && verbose {
             println!("  {}#{}: bounded-verified", name, v.id);
         }
         if found.is_some() { break; }
@@ -5261,7 +5366,8 @@ fn run_program(path: &str, trace: bool, evolve_after: bool) {
                 // Health check at birth — clone entry to avoid borrow conflict
                 let mut entry = veldt.functions[name].iter()
                     .find(|e| e.id == id).cloned().unwrap();
-                health::HealthChecker::check_at_birth(&mut entry, &veldt);
+                let use_vm = std::env::args().any(|a| a == "--vm");
+                health::HealthChecker::check_at_birth_with(&mut entry, &veldt, use_vm);
                 // Put it back
                 if let Some(variants) = veldt.functions.get_mut(name) {
                     for e in variants.iter_mut() {

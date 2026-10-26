@@ -116,6 +116,9 @@ pub struct Veldt {
     pub fitness_history: Vec<f64>,
     pub run_count: u64,
     pub garden_path: PathBuf,
+    /// Runtime preference: run through the bytecode VM + JIT.
+    /// Not serialized — garden persistence uses a separate save struct.
+    pub prefer_vm: bool,
 }
 
 fn now_ts() -> u64 {
@@ -136,6 +139,7 @@ impl Veldt {
             fitness_history: Vec::new(),
             run_count: 0,
             garden_path,
+            prefer_vm: false,
         }
     }
 
@@ -150,6 +154,7 @@ impl Veldt {
             fitness_history: Vec::new(),
             run_count: 0,
             garden_path: path,
+            prefer_vm: false,
         }
     }
 
@@ -353,35 +358,6 @@ impl Veldt {
     }
 
     // === Lifespan calculation ===
-
-    pub fn calculate_lifespan(&self, entry: &FunctionEntry) -> f64 {
-        let base = match &entry.health {
-            Health::Healthy => 100.0,
-            Health::Sick(_) => 10.0,
-            Health::Dying => 1.0,
-        };
-        let usage_bonus = (entry.usage_count as f64).ln_1p() * 10.0;
-        let dormancy_penalty = if entry.last_used == 0 {
-            0.0
-        } else {
-            let runs_since = (self.run_count - entry.last_used) as f64;
-            runs_since * 2.0
-        };
-        // competition penalty: if there's a fitter variant in the same lineage
-        let competition_penalty = if let Some(fittest) = self.get_fittest_variant(&entry.name) {
-            if fittest.id != entry.id {
-                let fittest_fitness = self.calculate_fitness(fittest);
-                let my_fitness = self.calculate_fitness(entry);
-                (fittest_fitness - my_fitness).max(0.0) * 5.0
-            } else {
-                0.0
-            }
-        } else {
-            0.0
-        };
-        let lifespan = base + usage_bonus - dormancy_penalty - competition_penalty;
-        lifespan.max(0.0)
-    }
 
     // === Aging and death ===
 

@@ -98,6 +98,9 @@ impl JitEngine {
         jb.symbol("veldt_rt_nullbox", veldt_rt_nullbox as *const u8);
         jb.symbol("veldt_rt_capture", veldt_rt_capture as *const u8);
         jb.symbol("veldt_rt_callvar", veldt_rt_callvar as *const u8);
+        jb.symbol("veldt_rt_intbox", veldt_rt_intbox as *const u8);
+        jb.symbol("veldt_rt_boolbox", veldt_rt_boolbox as *const u8);
+        jb.symbol("veldt_rt_floatbox", veldt_rt_floatbox as *const u8);
         let mut module = JITModule::new(jb);
         let rt = RtIds::declare(&mut module);
         Some(JitEngine {
@@ -148,6 +151,13 @@ impl JitEngine {
                        fns: &Fns) -> Option<JitFn> {
         if let Some(&(p, m)) = self.ptrs.get(&key) {
             return Some(JitFn { code_ptr: p, mode: m });
+        }
+        // a previous compile may have landed under a mode-suffixed
+        // key — redefining the same FuncId is a cranelift error
+        for suf in ["$f", "$v"] {
+            if let Some(&(p, m)) = self.ptrs.get(&format!("{}{}", key, suf)) {
+                return Some(JitFn { code_ptr: p, mode: m });
+            }
         }
         if self.compiling.contains(&key) {
             return None;   // in-progress cycle on this variant
@@ -868,9 +878,172 @@ impl JitEngine {
                             Instr::Gt => 8, Instr::Le => 9, _ => 10,
                         };
                         let o = b.ins().iconst(types::I64, op);
-                                                let v = ecall!(rt.binop, rtv, o, l, r)
-                            .unwrap_or_else(|| b.ins().iconst(types::I64, 0));
-                        catch_check!(v);
+                        // specialization: Int/Int ops inline — tag byte 0
+                        // (Int) + i64 payload at offset 8 (#[repr(C,u8)]
+                        // union). Skips the helper's match + dispatch.
+                        let can_inline = matches!(chunk.code[pc],
+                            Instr::Add|Instr::Sub|Instr::Mul|Instr::Div|
+                            Instr::Mod|Instr::Eq|Instr::Neq|Instr::Lt|
+                            Instr::Gt|Instr::Le|Instr::Ge);
+                        let v = if can_inline {
+                            let lt = b.ins().load(types::I8,
+                                cranelift_codegen::ir::MemFlagsData::trusted(), l, 0);
+                            let rtg = b.ins().load(types::I8,
+                                cranelift_codegen::ir::MemFlagsData::trusted(), r, 0);
+                            let z = b.ins().iconst(types::I8, 0);
+                            let li = b.ins().icmp(IntCC::Equal, lt, z);
+                            let ri = b.ins().icmp(IntCC::Equal, rtg, z);
+                            let both = b.ins().band(li, ri);
+                            // Float/Float: tag 1, f64 payload @8
+                            let one = b.ins().iconst(types::I8, 1);
+                            let lf = b.ins().icmp(IntCC::Equal, lt, one);
+                            let rf = b.ins().icmp(IntCC::Equal, rtg, one);
+                            let bothf = b.ins().band(lf, rf);
+                            let fb = b.create_block();
+                            let ffb = b.create_block();
+                            let tryf = b.create_block();
+                            let hb = b.create_block();
+                            let mb = b.create_block();
+                            let arg = b.append_block_param(mb, types::I64);
+                            b.ins().brif(both, fb, &[], tryf, &[]);
+                            b.seal_block(fb); b.seal_block(tryf);
+                            // sequential float check — its own block,
+                            // no nesting inside a fast block
+                            b.switch_to_block(tryf);
+                            b.ins().brif(bothf, ffb, &[], hb, &[]);
+                            // ffb seals AFTER the brif that targets it —
+                            // sealing before creates a predecessor-after-seal
+                            b.seal_block(ffb);
+                            // fast: native op on the int payloads
+                            b.switch_to_block(fb);
+                            let a = b.ins().load(types::I64,
+                                cranelift_codegen::ir::MemFlagsData::trusted(), l, 8);
+                            let c = b.ins().load(types::I64,
+                                cranelift_codegen::ir::MemFlagsData::trusted(), r, 8);
+                            let is_cmp = matches!(chunk.code[pc],
+                                Instr::Eq|Instr::Neq|Instr::Lt|Instr::Gt|
+                                Instr::Le|Instr::Ge);
+                            let fv = if is_cmp {
+                                let cc = match chunk.code[pc] {
+                                    Instr::Eq => IntCC::Equal,
+                                    Instr::Neq => IntCC::NotEqual,
+                                    Instr::Lt => IntCC::SignedLessThan,
+                                    Instr::Gt => IntCC::SignedGreaterThan,
+                                    Instr::Le => IntCC::SignedLessThanOrEqual,
+                                    _ => IntCC::SignedGreaterThanOrEqual,
+                                };
+                                let c8 = b.ins().icmp(cc, a, c);
+                                let c64 = b.ins().uextend(types::I64, c8);
+                                ecall!(rt.boolbox, rtv, c64)
+                                    .unwrap_or_else(|| b.ins().iconst(types::I64, 0))
+                            } else if matches!(chunk.code[pc], Instr::Div|Instr::Mod) {
+                                // sdiv/srem trap on i64::MIN/-1 and 0 —
+                                // the helper wraps/errors correctly, so
+                                // only inline when the divisor is safe.
+                                // (z is fv's placeholder — emitted into fb
+                                // BEFORE the brif, since fb fills after it)
+                                let z = b.ins().iconst(types::I64, 0);
+                                let nz = b.ins().icmp(IntCC::NotEqual, c, z);
+                                let min = b.ins().iconst(types::I64, i64::MIN);
+                                let neg1 = b.ins().iconst(types::I64, -1);
+                                let a_min = b.ins().icmp(IntCC::Equal, a, min);
+                                let c_neg1 = b.ins().icmp(IntCC::Equal, c, neg1);
+                                let ovf = b.ins().band(a_min, c_neg1);
+                                let ovf_not = b.ins().bnot(ovf);
+                                let safe = b.ins().band(nz, ovf_not);
+                                let db = b.create_block();
+                                b.ins().brif(safe, db, &[], hb, &[]);
+                                b.seal_block(db);
+                                b.switch_to_block(db);
+                                let res = match chunk.code[pc] {
+                                    Instr::Div => b.ins().sdiv(a, c),
+                                    _ => b.ins().srem(a, c),
+                                };
+                                let bv = ecall!(rt.intbox, rtv, res)
+                                    .unwrap_or_else(|| b.ins().iconst(types::I64, 0));
+                                b.ins().jump(mb, &[cranelift_codegen::ir::BlockArg::Value(bv)]);
+                                z
+                            } else {
+                                let res = match chunk.code[pc] {
+                                    Instr::Add => b.ins().iadd(a, c),
+                                    Instr::Sub => b.ins().isub(a, c),
+                                    _ => b.ins().imul(a, c),
+                                };
+                                ecall!(rt.intbox, rtv, res)
+                                    .unwrap_or_else(|| b.ins().iconst(types::I64, 0))
+                            };
+                            if !matches!(chunk.code[pc], Instr::Div|Instr::Mod) {
+                                b.ins().jump(mb, &[cranelift_codegen::ir::BlockArg::Value(fv)]);
+                            }
+                            // Float/Float fast block — f64 payloads @8
+                            b.switch_to_block(ffb);
+                            let fa = b.ins().load(types::F64,
+                                cranelift_codegen::ir::MemFlagsData::trusted(), l, 8);
+                            let fc2 = b.ins().load(types::F64,
+                                cranelift_codegen::ir::MemFlagsData::trusted(), r, 8);
+                            use cranelift_codegen::ir::condcodes::FloatCC;
+                            let fv = if is_cmp {
+                                let cc = match chunk.code[pc] {
+                                    Instr::Eq => FloatCC::Equal,
+                                    Instr::Neq => FloatCC::NotEqual,
+                                    Instr::Lt => FloatCC::LessThan,
+                                    Instr::Gt => FloatCC::GreaterThan,
+                                    Instr::Le => FloatCC::LessThanOrEqual,
+                                    _ => FloatCC::GreaterThanOrEqual,
+                                };
+                                let c8 = b.ins().fcmp(cc, fa, fc2);
+                                let c64 = b.ins().uextend(types::I64, c8);
+                                ecall!(rt.boolbox, rtv, c64)
+                                    .unwrap_or_else(|| b.ins().iconst(types::I64, 0))
+                            } else if matches!(chunk.code[pc], Instr::Div) {
+                                // float /0 errors in the interpreter —
+                                // only inline when the divisor is nonzero
+                                let z = b.ins().f64const(
+                                    cranelift_codegen::ir::immediates::Ieee64::with_bits(0));
+                                let nz = b.ins().fcmp(FloatCC::NotEqual, fc2, z);
+                                let db = b.create_block();
+                                b.ins().brif(nz, db, &[], hb, &[]);
+                                b.seal_block(db);
+                                b.switch_to_block(db);
+                                let res = b.ins().fdiv(fa, fc2);
+                                let bv = ecall!(rt.floatbox, rtv, res)
+                                    .unwrap_or_else(|| b.ins().iconst(types::I64, 0));
+                                b.ins().jump(mb, &[cranelift_codegen::ir::BlockArg::Value(bv)]);
+                                res // placeholder — fv binding
+                            } else if matches!(chunk.code[pc], Instr::Mod) {
+                                // no cranelift frem — helper from inside ffb
+                                let hv2 = ecall!(rt.binop, rtv, o, l, r)
+                                    .unwrap_or_else(|| b.ins().iconst(types::I64, 0));
+                                catch_check!(hv2);
+                                b.ins().jump(mb, &[cranelift_codegen::ir::BlockArg::Value(hv2)]);
+                                hv2
+                            } else {
+                                let res = match chunk.code[pc] {
+                                    Instr::Add => b.ins().fadd(fa, fc2),
+                                    Instr::Sub => b.ins().fsub(fa, fc2),
+                                    _ => b.ins().fmul(fa, fc2),
+                                };
+                                ecall!(rt.floatbox, rtv, res)
+                                    .unwrap_or_else(|| b.ins().iconst(types::I64, 0))
+                            };
+                            if !matches!(chunk.code[pc], Instr::Div|Instr::Mod) {
+                                b.ins().jump(mb, &[cranelift_codegen::ir::BlockArg::Value(fv)]);
+                            }
+                            // slow: helper covers every other type pair
+                            b.switch_to_block(hb);
+                            let hv = ecall!(rt.binop, rtv, o, l, r)
+                                .unwrap_or_else(|| b.ins().iconst(types::I64, 0));
+                            catch_check!(hv);
+                            b.ins().jump(mb, &[cranelift_codegen::ir::BlockArg::Value(hv)]);
+                            b.switch_to_block(mb);
+                            b.seal_block(mb);
+                            arg
+                        } else {
+                            let v = ecall!(rt.binop, rtv, o, l, r)
+                                .unwrap_or_else(|| b.ins().iconst(types::I64, 0));
+                            catch_check!(v);
+                            v
+                        };
                         stack.push(v);
                     }
                     Instr::Neg | Instr::Not => {
@@ -878,19 +1051,99 @@ impl JitEngine {
                             fail_pc = pc; ok = false; break; };
                         let op = b.ins().iconst(types::I64,
                             matches!(chunk.code[pc], Instr::Not) as i64);
+                        // Neg on Int: ineg, but MIN must hit the helper
+                        // (interpreter -i64::MIN semantics). Not on Bool:
+                        // !payload (tag 3, u8 @8).
+                        let is_neg = matches!(chunk.code[pc], Instr::Neg);
+                        let tagc = if is_neg {
+                            b.ins().iconst(types::I8, 0)
+                        } else {
+                            b.ins().iconst(types::I8, 3)
+                        };
+                        let tg = b.ins().load(types::I8,
+                            cranelift_codegen::ir::MemFlagsData::trusted(), v, 0);
+                        let hit = b.ins().icmp(IntCC::Equal, tg, tagc);
+                        let fb = b.create_block();
+                        let hb = b.create_block();
+                        let mb = b.create_block();
+                        let arg = b.append_block_param(mb, types::I64);
+                        b.ins().brif(hit, fb, &[], hb, &[]);
+                        b.seal_block(fb);
+                        b.switch_to_block(fb);
+                        let fv = if is_neg {
+                            let a = b.ins().load(types::I64,
+                                cranelift_codegen::ir::MemFlagsData::trusted(), v, 8);
+                            let min = b.ins().iconst(types::I64, i64::MIN);
+                            let is_min = b.ins().icmp(IntCC::Equal, a, min);
+                            let db = b.create_block();
+                            b.ins().brif(is_min, db, &[], hb, &[]);
+                            b.seal_block(db);
+                            b.switch_to_block(db);
+                            let neg = b.ins().ineg(a);
+                            let bv = ecall!(rt.intbox, rtv, neg)
+                                .unwrap_or_else(|| b.ins().iconst(types::I64, 0));
+                            b.ins().jump(mb, &[cranelift_codegen::ir::BlockArg::Value(bv)]);
+                            a // placeholder — used only for the fv binding
+                        } else {
+                            let bv = b.ins().load(types::I8,
+                                cranelift_codegen::ir::MemFlagsData::trusted(), v, 8);
+                            let z = b.ins().iconst(types::I8, 0);
+                            let nz = b.ins().icmp(IntCC::Equal, bv, z);
+                            let nv = b.ins().uextend(types::I64, nz);
+                            let bv = ecall!(rt.boolbox, rtv, nv)
+                                .unwrap_or_else(|| b.ins().iconst(types::I64, 0));
+                            b.ins().jump(mb, &[cranelift_codegen::ir::BlockArg::Value(bv)]);
+                            nv
+                        };
+                        b.switch_to_block(hb);
                         if let Some(r) = ecall!(rt.unop, rtv, op, v) {
-                            stack.push(r);
-                        }
+                            catch_check!(r);
+                            b.ins().jump(mb, &[cranelift_codegen::ir::BlockArg::Value(r)]);
+                        } else { b.ins().jump(mb, &[cranelift_codegen::ir::BlockArg::Value(fv)]); }
+                        b.switch_to_block(mb);
+                        b.seal_block(mb);
+                        stack.push(arg);
                     }
                     Instr::AndOp | Instr::OrOp => {
                         let (Some(r), Some(l)) = (stack.pop(), stack.pop())
                             else { fail_pc = pc; ok = false; break; };
                         let a = b.ins().iconst(types::I64,
                             matches!(chunk.code[pc], Instr::AndOp) as i64);
-                                                let v = ecall!(rt.logop, rtv, a, l, r)
+                        // Bool/Bool: tag 3, u8 payload @8 — band/bor inline
+                        let lt = b.ins().load(types::I8,
+                            cranelift_codegen::ir::MemFlagsData::trusted(), l, 0);
+                        let rtg = b.ins().load(types::I8,
+                            cranelift_codegen::ir::MemFlagsData::trusted(), r, 0);
+                        let three = b.ins().iconst(types::I8, 3);
+                        let lb = b.ins().icmp(IntCC::Equal, lt, three);
+                        let rb = b.ins().icmp(IntCC::Equal, rtg, three);
+                        let both = b.ins().band(lb, rb);
+                        let fb = b.create_block();
+                        let hb = b.create_block();
+                        let mb = b.create_block();
+                        let arg = b.append_block_param(mb, types::I64);
+                        b.ins().brif(both, fb, &[], hb, &[]);
+                        b.seal_block(fb);
+                        b.switch_to_block(fb);
+                        let av = b.ins().load(types::I8,
+                            cranelift_codegen::ir::MemFlagsData::trusted(), l, 8);
+                        let cv = b.ins().load(types::I8,
+                            cranelift_codegen::ir::MemFlagsData::trusted(), r, 8);
+                        let res = if matches!(chunk.code[pc], Instr::AndOp) {
+                            b.ins().band(av, cv)
+                        } else { b.ins().bor(av, cv) };
+                        let res64 = b.ins().uextend(types::I64, res);
+                        let fv = ecall!(rt.boolbox, rtv, res64)
                             .unwrap_or_else(|| b.ins().iconst(types::I64, 0));
-                        catch_check!(v);
-                        stack.push(v);
+                        b.ins().jump(mb, &[cranelift_codegen::ir::BlockArg::Value(fv)]);
+                        b.switch_to_block(hb);
+                        let hv = ecall!(rt.logop, rtv, a, l, r)
+                            .unwrap_or_else(|| b.ins().iconst(types::I64, 0));
+                        catch_check!(hv);
+                        b.ins().jump(mb, &[cranelift_codegen::ir::BlockArg::Value(hv)]);
+                        b.switch_to_block(mb);
+                        b.seal_block(mb);
+                        stack.push(arg);
                     }
                     Instr::InOp => {
                         let (Some(r), Some(l)) = (stack.pop(), stack.pop())
@@ -1229,24 +1482,26 @@ pub struct JitRt {
     pub names: *const String,
     pub slot_names: *const String,
     pub n_slot_names: usize,
-    pub arena: Vec<*mut Value>,
-    pub argbuf: Vec<*mut Value>,
-    pub iters: Vec<(Vec<Value>, usize)>,
-    pub err: Option<String>,
+    // shared across nested value-mode calls — the root caller owns
+    // the backing storage so a whole call tree allocs into one arena
+    pub arena: *mut Vec<*mut Value>,
+    pub argbuf: *mut Vec<*mut Value>,
+    pub iters: *mut Vec<(Vec<Value>, usize)>,
+    pub err: *mut Option<String>,
 }
 
 unsafe fn mk(rt: *mut JitRt, v: Value) -> *mut Value {
-    if rt.is_null() || (*rt).err.is_some() { return std::ptr::null_mut(); }
+    if rt.is_null() || (*(*rt).err).is_some() { return std::ptr::null_mut(); }
     let p = Box::into_raw(Box::new(v));
-    (*rt).arena.push(p);
+    (*(*rt).arena).push(p);
     p
 }
 unsafe fn rfail(rt: *mut JitRt, e: String) -> *mut Value {
-    if !rt.is_null() && (*rt).err.is_none() { (*rt).err = Some(e); }
+    if !rt.is_null() && (*(*rt).err).is_none() { *(*rt).err = Some(e); }
     std::ptr::null_mut()
 }
 unsafe fn nok(rt: *mut JitRt, e: String) -> i64 {
-    if !rt.is_null() && (*rt).err.is_none() { (*rt).err = Some(e); }
+    if !rt.is_null() && (*(*rt).err).is_none() { *(*rt).err = Some(e); }
     -1
 }
 unsafe fn nname(rt: *mut JitRt, ni: i64) -> String {
@@ -1254,7 +1509,7 @@ unsafe fn nname(rt: *mut JitRt, ni: i64) -> String {
 }
 unsafe fn take_args(rt: *mut JitRt, argc: i64) -> Vec<Value> {
     let n = argc as usize;
-    let buf = &mut (*rt).argbuf;
+    let buf = &mut *(*rt).argbuf;
     let tail: Vec<Value> = buf.iter().rev().take(n)
         .filter(|p| !p.is_null()).map(|p| (**p).clone()).collect();
     let keep = buf.len().saturating_sub(n);
@@ -1331,13 +1586,31 @@ pub unsafe extern "C" fn veldt_rt_isnull(v: *mut Value) -> i64 {
 }
 #[no_mangle]
 pub unsafe extern "C" fn veldt_rt_pusharg(rt: *mut JitRt, v: *mut Value) -> i64 {
-    (*rt).argbuf.push(v); 0
+    (*(*rt).argbuf).push(v); 0
+}
+unsafe fn argbox_ptrs(rt: *mut JitRt, argc: i64) -> Vec<*mut Value> {
+    let buf = &mut *(*rt).argbuf;
+    let n = argc as usize;
+    let tail: Vec<*mut Value> = buf.iter().rev().take(n).copied().collect();
+    let keep = buf.len().saturating_sub(n);
+    buf.truncate(keep);
+    tail.into_iter().rev().collect()
 }
 #[no_mangle]
 pub unsafe extern "C" fn veldt_rt_call(rt: *mut JitRt, ni: i64,
     argc: i64) -> *mut Value {
     let name = nname(rt, ni);
-    let args = take_args(rt, argc);
+    let ptrs = argbox_ptrs(rt, argc);
+    // clone args into the shared arena — by-value semantics — then a
+    // direct native call when the variant is already mode-2 compiled
+    let argbox: Vec<*mut Value> = ptrs.iter().map(|p|
+        if p.is_null() { std::ptr::null_mut() } else { mk(rt, (**p).clone()) }
+    ).collect();
+    if let Some(out) = (*(*rt).vm).jit_call_fast(&name, None, &argbox, rt) {
+        return out;
+    }
+    let args: Vec<Value> = ptrs.iter()
+        .filter(|p| !p.is_null()).map(|p| (**p).clone()).collect();
     match (*(*rt).vm).jit_call(&name, None, args) {
         Ok(v) => mk(rt, v),
         Err(e) => rfail(rt, e),
@@ -1347,7 +1620,16 @@ pub unsafe extern "C" fn veldt_rt_call(rt: *mut JitRt, ni: i64,
 pub unsafe extern "C" fn veldt_rt_callid(rt: *mut JitRt, ni: i64, vid: i64,
     argc: i64) -> *mut Value {
     let name = nname(rt, ni);
-    let args = take_args(rt, argc);
+    let ptrs = argbox_ptrs(rt, argc);
+    let argbox: Vec<*mut Value> = ptrs.iter().map(|p|
+        if p.is_null() { std::ptr::null_mut() } else { mk(rt, (**p).clone()) }
+    ).collect();
+    if let Some(out) =
+        (*(*rt).vm).jit_call_fast(&name, Some(vid as u32), &argbox, rt) {
+        return out;
+    }
+    let args: Vec<Value> = ptrs.iter()
+        .filter(|p| !p.is_null()).map(|p| (**p).clone()).collect();
     match (*(*rt).vm).jit_call(&name, Some(vid as u32), args) {
         Ok(v) => mk(rt, v),
         Err(e) => rfail(rt, e),
@@ -1477,13 +1759,15 @@ pub unsafe extern "C" fn veldt_rt_iternew(rt: *mut JitRt, v: *mut Value) -> i64 
             .map(|k| Value::Str(k.clone().into())).collect(),
         _ => return nok(rt, "for needs a list, string, or dict".into()),
     };
-    (*rt).iters.push((items, 0));
-    ((*rt).iters.len() - 1) as i64
+    let it = &mut *(*rt).iters;
+    it.push((items, 0));
+    (it.len() - 1) as i64
 }
 #[no_mangle]
 pub unsafe extern "C" fn veldt_rt_iternext(rt: *mut JitRt, h: i64) -> *mut Value {
     let r = &mut *rt;
-    let (items, i) = &mut r.iters[h as usize];
+    let it = &mut *r.iters;
+    let (items, i) = &mut it[h as usize];
     if *i >= items.len() { return std::ptr::null_mut(); }
     let v = items[*i].clone(); *i += 1;
     mk(rt, v)
@@ -1491,7 +1775,8 @@ pub unsafe extern "C" fn veldt_rt_iternext(rt: *mut JitRt, h: i64) -> *mut Value
 #[no_mangle]
 pub unsafe extern "C" fn veldt_rt_iterpop(rt: *mut JitRt, h: i64) -> i64 {
     let r = &mut *rt;
-    if let Some(it) = r.iters.get_mut(h as usize) {
+    let it = &mut *r.iters;
+    if let Some(it) = it.get_mut(h as usize) {
         it.0.clear(); it.1 = 0;
     }
     0
@@ -1565,12 +1850,24 @@ pub unsafe extern "C" fn veldt_rt_callvar(rt: *mut JitRt,
     }
 }
 #[no_mangle]
+pub unsafe extern "C" fn veldt_rt_intbox(rt: *mut JitRt, i: i64) -> *mut Value {
+    mk(rt, Value::Int(i))
+}
+#[no_mangle]
+pub unsafe extern "C" fn veldt_rt_floatbox(rt: *mut JitRt, f: f64) -> *mut Value {
+    mk(rt, Value::Float(f))
+}
+#[no_mangle]
+pub unsafe extern "C" fn veldt_rt_boolbox(rt: *mut JitRt, i: i64) -> *mut Value {
+    mk(rt, Value::Bool(i != 0))
+}
+#[no_mangle]
 pub unsafe extern "C" fn veldt_rt_nullbox(rt: *mut JitRt) -> *mut Value {
     mk(rt, Value::Null)
 }
 #[no_mangle]
 pub unsafe extern "C" fn veldt_rt_take_err(rt: *mut JitRt) -> *mut Value {
-    let e = (*rt).err.take().unwrap_or_else(|| "error".into());
+    let e = (*(*rt).err).take().unwrap_or_else(|| "error".into());
     mk(rt, Value::Str(e.into()))
 }
 #[no_mangle]
@@ -1597,6 +1894,7 @@ struct RtIds {
     iterpop: FuncId, append: FuncId, insert: FuncId, insertdyn: FuncId,
     fieldset: FuncId, take_err: FuncId, nullbox: FuncId,
     capture: FuncId, callvar: FuncId,
+    intbox: FuncId, boolbox: FuncId, floatbox: FuncId,
 }
 
 impl RtIds {
@@ -1647,6 +1945,18 @@ impl RtIds {
             nullbox: d(m, "veldt_rt_nullbox", 1, true),
             capture: d(m, "veldt_rt_capture", 3, true),
             callvar: d(m, "veldt_rt_callvar", 3, true),
+            intbox: d(m, "veldt_rt_intbox", 2, true),
+            boolbox: d(m, "veldt_rt_boolbox", 2, true),
+            floatbox: {
+                // (i64, f64) -> i64 — the d() helper makes all-i64 sigs
+                let sig = Signature {
+                    params: vec![AbiParam::new(types::I64),
+                                 AbiParam::new(types::F64)],
+                    returns: vec![AbiParam::new(types::I64)],
+                    call_conv: CallConv::SystemV,
+                };
+                m.declare_function("veldt_rt_floatbox", Linkage::Import, &sig).unwrap()
+            },
         }
     }
 }

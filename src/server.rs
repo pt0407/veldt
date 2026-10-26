@@ -21,6 +21,11 @@ pub async fn start_server(port: u16) {
     if veldt.load().is_err() {
         eprintln!("Starting with empty veldt");
     }
+    // --vm — every code-run through the fast engine for this session
+    if std::env::args().any(|a| a == "--vm") {
+        veldt.prefer_vm = true;
+        eprintln!("[server] prefer_vm — all evaluate paths on the bytecode VM + JIT");
+    }
 
     let state = Arc::new(AppState {
         veldt: Mutex::new(veldt),
@@ -761,7 +766,13 @@ async fn builtin_usage() -> Json<serde_json::Value> {
 }
 
 #[derive(Deserialize)]
-struct CallRequest { name: String, variant: Option<u32>, args: Option<Vec<serde_json::Value>> }
+struct CallRequest {
+    name: String,
+    variant: Option<u32>,
+    args: Option<Vec<serde_json::Value>>,
+    #[serde(default)]
+    vm: bool,
+}
 
 async fn call_fn(
     State(state): State<Arc<AppState>>,
@@ -773,6 +784,15 @@ async fn call_fn(
     veldt.load_into_interpreter(&mut interp);
     let args: Vec<crate::interpreter::Value> = (req.args.unwrap_or_default())
         .iter().filter_map(|a| serde_json::from_value(a.clone()).ok()).collect();
+    if req.vm {
+        // fast-engine call — jit_call dispatches natively when compiled
+        let mut v = crate::vm::Vm::new();
+        let _ = v.load_garden(&veldt);
+        match v.jit_call(&req.name, req.variant, args) {
+            Ok(val) => return Json(serde_json::json!({"ok": true, "result": serde_json::to_value(&val).unwrap_or(serde_json::Value::Null)})),
+            Err(e) => return Json(serde_json::json!({"ok": false, "error": e})),
+        }
+    }
     match interp.call_function(&req.name, req.variant, args) {
         Ok(v) => Json(serde_json::json!({"ok": true, "result": serde_json::to_value(&v).unwrap_or(serde_json::Value::Null)})),
         Err(e) => Json(serde_json::json!({"ok": false, "error": e})),
@@ -951,6 +971,8 @@ struct RunRequest {
     source: String,
     #[serde(default)]
     sandbox: bool,
+    #[serde(default)]
+    vm: bool,
 }
 
 #[derive(Serialize)]
@@ -969,9 +991,9 @@ async fn run_program(
         v.clone()
     };
 
-    let result = agent::execute_source_opts(&req.source, &mut veldt,
+    let result = agent::execute_source_opts_full(&req.source, &mut veldt,
         if req.sandbox { crate::interpreter::Caps::sandboxed() }
-        else { crate::interpreter::Caps::allow_all() });
+        else { crate::interpreter::Caps::allow_all() }, req.vm);
 
     veldt.save().unwrap_or_else(|e| eprintln!("Save error: {}", e));
 
@@ -992,6 +1014,8 @@ struct AgentRequest {
     task: String,
     #[serde(default)]
     source: String,
+    #[serde(default)]
+    vm: bool,
 }
 
 #[derive(Serialize)]
@@ -1015,6 +1039,7 @@ async fn agent_task(
         v.clone()
     };
 
+    veldt.prefer_vm = req.vm;
     let resp = agent::respond(&req.task, &req.source, &mut veldt);
 
     veldt.save().unwrap_or_else(|e| eprintln!("Save error: {}", e));

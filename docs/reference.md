@@ -107,6 +107,41 @@ loads the garden. **Only garden-persisted functions can be spawned.**
 `veldt evolve N --seed S` deterministic evolution;
 `veldt repl` `:load <file>` runs a file in the session.
 
+## Execution engine (`--vm`)
+
+Every evaluate path can route through the bytecode VM + Cranelift
+tier-2 JIT instead of the tree-walking interpreter. Semantics are
+bit-identical (locked by `tests/vm_parity.rs`); the VM is just faster.
+
+| Flag | What runs on the fast engine |
+|---|---|
+| `veldt run <f> --vm` | whole program (bytecode + JIT) |
+| `veldt run <f> --vm --trace` | per-step `[vm:pc] instr` dump |
+| `veldt test <fam> --vm` | birth trials via `jit_call` |
+| `veldt fuzz <fam> --vm` | boundary corpus through the JIT |
+| `veldt evolve N --vm` | mutation birth-checks |
+| `veldt repl --vm` | persistent VM session |
+| `veldt tournament <url> --vm` | remote-trial scoring |
+| `veldt watch <f> --vm` | hot-reload through the fast engine |
+| `veldt stats --verified` | bounded-check census (one shared interp) |
+| `POST /api/run {"vm": true}` | `execute_source_opts` on the VM |
+| `POST /api/agent {"vm": true}` | Gardener code-runs via `prefer_vm` |
+
+`veldt.prefer_vm` (runtime-only, not serialized) — set on the struct
+before `execute_source` and every internal code-run routes through the
+fast engine. `emit_line` routes VM `PrintOut` through `print_buffer`
+so capture works under `--vm` too.
+
+JIT coverage: `garden --jit` reports per-fn signature mode —
+`native` (int sigs), `native (float)` (f64 sigs),
+`native (boxed)` (boxed-Value ABI — covers the entire instruction
+set incl. strings/lists/dicts/structs/methods/try/catch/closures).
+Hot fns compile at ≥64 calls; `call_best` + `name#N` dispatch
+native too. `VELDT_JIT_STATS=1` prints calls / compiled / cold
+per family. Honest perf: numeric code 3-88x (scalar sigs); string/
+list/dict ~1.7x (helpers do the work — the win is removing
+dispatch overhead, not making ops faster).
+
 ## The garden
 
 | `grow` | `grow fn name(...) test ... { }` | plant a seed |
