@@ -49,6 +49,14 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] HONEST NEGATIVE: algorithmic_demo planted BOTH an
+  O(n log n) sort variant AND an O(n) scan of max_val — the O(n) seed
+  DIED (not in the final 8-variant family). Efficiency measurement
+  works (variants score 0.75x vs 1.0x) but a small fitness bonus isn't
+  enough to keep a genuinely-better variant alive vs age/competition/
+  cap. REAL GAP: efficiency should grant niche protection or a survival
+  weight, not just +0.05 fitness. Suggest: eff >1.1 gets niche-champion
+  treatment or lifespan bonus in age_and_reap.
 - [Devin/main-side] PHASE 7 COMPLETE (both lanes): my ConstFold/
   DeadBranch/HoistInvariant + gardener's ConstProp/EarlyExit merged —
   9-operator pool. Removed my redundant CrossFold variant. Roadmap
