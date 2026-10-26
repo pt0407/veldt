@@ -1271,3 +1271,6 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 - [Devin] check --garden --fix --verify: re-trials repaired
   variants post-fix, writes honest health back — repairs are
   proven semantics-preserving, not just asserted.
+- [Devin] dead-store FP fix: self-referential assigns
+  (x = x.put(..)/f(x)) read the old value — csv_analysis
+  dropped 6 FPs (31 -> ~25 warnings, all legitimate).
