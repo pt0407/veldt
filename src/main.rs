@@ -4346,6 +4346,9 @@ fn test_family(name: &str) {
         return;
     }
     if !json { println!("=== Trials for {} ===", name); }
+    let peak = veldt.functions.get(name).map(|vs|
+        vs.iter().map(|e| e.fitness).fold(f64::NEG_INFINITY, f64::max))
+        .unwrap_or(1.0);
     let mut results: Vec<serde_json::Value> = Vec::new();
     for id in ids {
         let mut e = veldt.functions[name].iter().find(|e| e.id == id).cloned().unwrap();
@@ -4364,8 +4367,10 @@ fn test_family(name: &str) {
                 "niches": e.niche_scores,
             }));
         } else {
-            println!("  {}#{} — {} | fitness: {:.2} | niches: {:?}",
-                name, id, health, e.fitness, e.niche_scores);
+            let bar = "█".repeat(
+                ((e.fitness / peak.max(f64::EPSILON)) * 6.0).round() as usize);
+            println!("  {}#{} — {} | fitness: {:.2} {} | niches: {:?}",
+                name, id, health, e.fitness, bar, e.niche_scores);
         }
     }
     veldt.save().unwrap_or_else(|e| eprintln!("Save error: {}", e));
