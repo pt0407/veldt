@@ -926,6 +926,21 @@ fn print_stats(veldt: &veldt::Veldt) {
             .map(|(s, h, t)| format!("{}:{}/{}", s, h, t)).collect();
         println!("mutation success (healthy/total): {}", line.join(" "));
     }
+    // probe niche coverage — which input niches the probes target
+    let mut niche_count: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    for probes in veldt.probes.values() {
+        for p in probes {
+            *niche_count.entry(p.niche.clone()).or_default() += 1;
+        }
+    }
+    let mut niches: Vec<(String, usize)> = niche_count.into_iter().collect();
+    niches.sort_by(|a, b| b.1.cmp(&a.1));
+    if !niches.is_empty() {
+        let line: Vec<String> = niches.iter().take(8)
+            .map(|(n, c)| format!("{}:{}", n, c)).collect();
+        println!("probe niches: {}", line.join(" "));
+    }
     // fitness trend — peak per run, is the garden improving?
     if veldt.fitness_history.len() >= 2 {
         let trend: Vec<String> = veldt.fitness_history.iter()
