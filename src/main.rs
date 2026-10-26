@@ -1576,6 +1576,21 @@ fn print_stats(veldt: &veldt::Veldt) {
             .map(|(n, a)| format!("{}:{:.1}", n, a)).collect();
         println!("healing/niche: {}", line.join(" "));
     }
+    // avg staleness per family — per-lineage idle-before-death
+    let mut fam_stale: std::collections::HashMap<String, (u64, usize)> =
+        std::collections::HashMap::new();
+    for o in &veldt.obituaries {
+        let ent = fam_stale.entry(o.name.clone()).or_default();
+        ent.0 += veldt.run_count.saturating_sub(o.last_used); ent.1 += 1;
+    }
+    let mut fam_stale_list: Vec<(String, f64)> = fam_stale.into_iter()
+        .map(|(n, (s, c))| (n, s as f64 / c.max(1) as f64)).collect();
+    fam_stale_list.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    if !fam_stale_list.is_empty() {
+        let line: Vec<String> = fam_stale_list.iter().take(8)
+            .map(|(n, a)| format!("{}:{:.0}", n, a)).collect();
+        println!("staleness/family: {}", line.join(" "));
+    }
     // fitness trend — peak per run, is the garden improving?
     if veldt.fitness_history.len() >= 2 {
         let trend: Vec<String> = veldt.fitness_history.iter()
