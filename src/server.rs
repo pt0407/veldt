@@ -80,6 +80,7 @@ pub async fn start_server(port: u16) {
         .route("/api/find", get(find_family))
         .route("/api/diff", get(diff_variants))
         .route("/api/obituary", get(obituary))
+        .route("/api/trace", get(trace_family))
         .route("/api/run", post(run_program))
         .route("/api/evolve", post(evolve))
         .route("/api/clear", post(clear_veldt))
@@ -1325,6 +1326,26 @@ async fn obituary(
         })),
         None => Json(serde_json::json!({"error": format!("{}#{} not in obituaries", req.name, req.id)})),
     }
+}
+
+#[derive(Deserialize)]
+struct TraceRequest { name: String }
+
+async fn trace_family(
+    axum::extract::Query(req): axum::extract::Query<TraceRequest>,
+) -> Json<serde_json::Value> {
+    let mut veldt = veldt::Veldt::new();
+    if veldt.load().is_err() {
+        return Json(serde_json::json!({"error": "garden load failed"}));
+    }
+    let tr: Vec<serde_json::Value> = veldt.traces.get(&req.name)
+        .map(|ts| ts.iter().map(|t| serde_json::json!({
+            "input": format!("{:?}", t.input),
+            "output": format!("{:?}", t.output),
+            "timestamp": t.timestamp,
+        })).collect())
+        .unwrap_or_default();
+    Json(serde_json::json!({"name": req.name, "traces": tr}))
 }
 
 // --- IDE HTML ---
