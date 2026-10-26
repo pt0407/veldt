@@ -5136,6 +5136,19 @@ fn verify_family(name: &str, args: &[String]) {
 pub fn verify_family_find_divergent(name: &str) -> Option<u32> {
     let mut veldt = veldt::Veldt::new();
     if veldt.load().is_err() { return None; }
+    // prefer_vm: the bounded check goes through jit_call — same
+    // divergence detection via verify_with's abstract call
+    if veldt.prefer_vm {
+        let mut v = crate::vm::Vm::new();
+        if v.load_garden(&veldt).is_ok() {
+            let mut interp = interpreter::Interpreter::new();
+            veldt.load_into_interpreter(&mut interp);
+            let variants = interp.functions.get(name)?.clone();
+            return verify_with(
+                |n, id, a| v.jit_call(n, id, a),
+                variants, name, true);
+        }
+    }
     let mut interp = interpreter::Interpreter::new();
     veldt.load_into_interpreter(&mut interp);
     verify_on_interp(&mut interp, name, true)
