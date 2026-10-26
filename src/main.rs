@@ -3547,6 +3547,11 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                                 out.push(format!("let {} = {} — {} is bound to a container, could reuse", name, v, v));
                                 break;
                             }
+                            // let a = b where b was let-bound to a binop — the let copies a computed expr
+                            if n == v && matches!(pe, Expr::BinOp(..)) {
+                                out.push(format!("let {} = {} — {} is bound to a computed expr, could reuse", name, v, v));
+                                break;
+                            }
                         }
                     }
                 }
