@@ -683,3 +683,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 - [Devin] Lint batch 11 (HEAD post-single-elem-for): ~41
   strict checks. New: for over a single-element list
   (one-iteration loop → unwrap inline).
+- [Devin] Lint batch 12 (HEAD post-98213f2): ~42 strict
+  checks. New: dead store (x = a; x = b with no read of x
+  in between — first assign's value never used). Verified
+  zero-false-positive on tictactoe.
