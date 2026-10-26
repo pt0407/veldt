@@ -36,6 +36,7 @@ pub async fn start_server(port: u16) {
         .route("/api/tournament", post(tournament))
         .route("/api/swarm", post(swarm))
         .route("/api/play", post(play_demo))
+        .route("/api/game", post(game_step))
         .route("/api/call", post(call_fn))
         .route("/api/adopt", post(adopt_variant))
         .route("/api/run", post(run_program))
@@ -123,6 +124,29 @@ async fn play_demo(
     }
     // run the demo and capture stdout (the canvas_print output)
     let out = crate::run_program_capture(&path);
+    Json(serde_json::json!({ "ok": true, "output": out }))
+}
+
+#[derive(Deserialize)]
+struct GameRequest {
+    // POST {source, ticks} — run `source` for `ticks` game_loop ticks,
+    // return the program's output. The IDE drives a live game panel.
+    source: String,
+    ticks: Option<i64>,
+}
+
+async fn game_step(
+    Json(req): Json<GameRequest>,
+) -> Json<serde_json::Value> {
+    // write the source to a temp file and run it — the game program's
+    // stdout is its canvas state.
+    let tmp = std::env::temp_dir().join(format!("veldt_game_{}.veldt", std::process::id()));
+    let src = format!("{}\n# tick limit {}\n", req.source, req.ticks.unwrap_or(0));
+    if let Err(e) = std::fs::write(&tmp, src) {
+        return Json(serde_json::json!({ "ok": false, "error": format!("temp write: {}", e) }));
+    }
+    let out = crate::run_program_capture(tmp.to_str().unwrap_or(""));
+    let _ = std::fs::remove_file(&tmp);
     Json(serde_json::json!({ "ok": true, "output": out }))
 }
 
