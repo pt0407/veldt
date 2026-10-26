@@ -3966,6 +3966,29 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                     if items.is_empty() { out.push("for over an empty list — dead loop".into()); }
                     if items.len() == 1 { out.push("for over a single-element list — one iteration".into()); }
                 }
+                // for over a var bound to an empty/single list — dead or trivial
+                // (only if nothing grew it between binding and the loop)
+                if let Expr::Var(v) = iter {
+                    for (bi, s) in stmts.iter().enumerate().take(i).rev() {
+                        match s {
+                            Stmt::Let(n, e) | Stmt::Assign(n, e) if n == v => {
+                                let grew = stmts.iter().skip(bi + 1).take(i - bi - 1)
+                                    .any(|s| stmt_grows(s, v));
+                                if !grew {
+                                    if let Expr::List(items) = e {
+                                        if items.is_empty() {
+                                            out.push(format!("for over {} — bound to an empty list, iterates zero times", v));
+                                        } else if items.len() == 1 {
+                                            out.push(format!("for over {} — bound to a single-element list", v));
+                                        }
+                                    }
+                                }
+                                break;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
                 if let Expr::Call(f, _, args) = iter {
                     if f == "range" && args.len() == 2 {
                         if let (Expr::Int(a), Expr::Int(b)) = (&args[0], &args[1]) {
