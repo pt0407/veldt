@@ -1053,6 +1053,11 @@ fn print_stats(veldt: &veldt::Veldt) {
         println!("family size: avg {} variants/lineage ({}..{})",
             avg, lo, hi);
     }
+    // struct/variable census — the non-fn garden state
+    if !veldt.structs.is_empty() || !veldt.variables.is_empty() {
+        println!("state: {} structs, {} variables",
+            veldt.structs.len(), veldt.variables.len());
+    }
     // fitness trend — peak per run, is the garden improving?
     if veldt.fitness_history.len() >= 2 {
         let trend: Vec<String> = veldt.fitness_history.iter()
