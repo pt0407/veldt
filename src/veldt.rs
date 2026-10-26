@@ -875,6 +875,10 @@ pub fn sort_variants(vs: &mut Vec<FunctionEntry>, field: &str) {
                 bscore.partial_cmp(&ascore)
             }
             "id" => a.id.cmp(&b.id),
+            "born" => b.born.cmp(&a.born),
+            "trial_score" => b.trial_score.partial_cmp(&a.trial_score),
+            "efficiency" => b.efficiency.partial_cmp(&a.efficiency),
+            "parents" => b.parents.len().cmp(&a.parents.len()),
             "origin" => a.origin.cmp(&b.origin),
             "health" => {
                 let h = |e: &FunctionEntry| match &e.health {
