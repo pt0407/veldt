@@ -3023,6 +3023,76 @@ impl Interpreter {
                 d.insert("cells".to_string(), Value::List(cells));
                 Ok(Some(Value::Dict(d)))
             }
+            // === game state: Value-typed 2D grid ===
+            "grid_new" => {
+                let (w, h) = match (args.get(0), args.get(1)) {
+                    (Some(Value::Int(w)), Some(Value::Int(h))) => (*w as usize, *h as usize),
+                    _ => return Err("grid_new(w, h) expects 2 ints".into()),
+                };
+                let row: im::Vector<Value> = (0..w).map(|_| Value::Null).collect();
+                let cells: im::Vector<Value> = (0..h).map(|_| Value::List(row.clone())).collect();
+                let mut d = im::HashMap::new();
+                d.insert("w".to_string(), Value::Int(w as i64));
+                d.insert("h".to_string(), Value::Int(h as i64));
+                d.insert("cells".to_string(), Value::List(cells));
+                Ok(Some(Value::Dict(d)))
+            }
+            "grid_get" => {
+                let (d, x, y) = match (args.get(0), args.get(1), args.get(2)) {
+                    (Some(Value::Dict(d)), Some(Value::Int(x)), Some(Value::Int(y)))
+                        => (d, *x as usize, *y as usize),
+                    _ => return Err("grid_get(g, x, y) expects dict + 2 ints".into()),
+                };
+                let Some(Value::List(rows)) = d.get("cells") else { return Err("grid: no cells".into()) };
+                match rows.get(y).and_then(|r| if let Value::List(r) = r { r.get(x) } else { None }) {
+                    Some(v) => Ok(Some(v.clone())),
+                    None => Ok(Some(Value::Null)),
+                }
+            }
+            "grid_set" => {
+                let (d, x, y, v) = match (args.get(0), args.get(1), args.get(2), args.get(3)) {
+                    (Some(Value::Dict(d)), Some(Value::Int(x)), Some(Value::Int(y)), Some(v))
+                        => (d.clone(), *x as usize, *y as usize, v.clone()),
+                    _ => return Err("grid_set(g, x, y, v) expects dict + 2 ints + value".into()),
+                };
+                let Some(Value::List(rows)) = d.get("cells") else { return Err("grid: no cells".into()) };
+                if y >= rows.len() { return Ok(Some(Value::Dict(d))); }
+                let mut rows2 = rows.clone();
+                if let Value::List(r) = &rows[y] {
+                    let mut nr = r.clone();
+                    if x < nr.len() { nr[x] = v; }
+                    rows2[y] = Value::List(nr);
+                }
+                let mut d2 = d.clone();
+                d2.insert("cells".to_string(), Value::List(rows2));
+                Ok(Some(Value::Dict(d2)))
+            }
+            "grid_neighbors" => {
+                // grid_neighbors(g, x, y, diag?) — in-bounds cells as [x, y, value]
+                let (d, x0, y0, diag) = match (args.get(0), args.get(1), args.get(2), args.get(3)) {
+                    (Some(Value::Dict(d)), Some(Value::Int(x)), Some(Value::Int(y)), dg)
+                        => (d, *x, *y, matches!(dg, Some(Value::Bool(true)))),
+                    _ => return Err("grid_neighbors(g, x, y, diag?) expects dict + 2 ints + bool".into()),
+                };
+                let (w, h) = (d.get("w").and_then(|v| if let Value::Int(w) = v { Some(*w) } else { None }),
+                              d.get("h").and_then(|v| if let Value::Int(h) = v { Some(*h) } else { None }));
+                let (Some(w), Some(h)) = (w, h) else { return Err("grid: missing w/h".into()) };
+                let Some(Value::List(rows)) = d.get("cells") else { return Err("grid: no cells".into()) };
+                let dirs: &[(i64, i64)] = if diag {
+                    &[(0,-1),(0,1),(-1,0),(1,0),(-1,-1),(1,-1),(-1,1),(1,1)]
+                } else { &[(0,-1),(0,1),(-1,0),(1,0)] };
+                let out: Vec<Value> = dirs.iter()
+                    .map(|(dx, dy)| (x0 + dx, y0 + dy))
+                    .filter(|(x, y)| *x >= 0 && *y >= 0 && *x < w && *y < h)
+                    .map(|(x, y)| {
+                        let v = rows.get(y as usize)
+                            .and_then(|r| if let Value::List(r) = r { r.get(x as usize) } else { None })
+                            .cloned().unwrap_or(Value::Null);
+                        Value::List(im::vector![Value::Int(x), Value::Int(y), v])
+                    })
+                    .collect();
+                Ok(Some(Value::List(out.into_iter().collect())))
+            }
             "dist_stats" => {
                 // dist_stats(fn, trials) — mean/stddev/min/max over n samples
                 let (f, trials) = match (args.get(0), args.get(1)) {
