@@ -486,8 +486,20 @@ fn print_stats(veldt: &veldt::Veldt) {
     }
     best.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     let probe_count: usize = veldt.probes.values().map(|v| v.len()).sum();
+    let (mut seed, mut estab, mut canon) = (0usize, 0usize, 0usize);
+    for vs in veldt.functions.values() {
+        for e in vs {
+            match e.trust {
+                veldt::Trust::Seedling => seed += 1,
+                veldt::Trust::Established => estab += 1,
+                veldt::Trust::Canonical => canon += 1,
+            }
+        }
+    }
     println!("garden: {} lineages, {} variants ({} healthy, {} sick, {} dying)",
         veldt.functions.len(), total, healthy, sick, dying);
+    println!("trust ladder: {} seedling → {} established → {} canonical",
+        seed, estab, canon);
     println!("probes: {} across {} families | deaths: {} | runs: {}",
         probe_count, veldt.probes.len(), veldt.obituaries.len(), veldt.run_count);
     if !best.is_empty() {
