@@ -3416,9 +3416,10 @@ pub fn lint(stmts: &[ast::Stmt]) -> Vec<String> {
     // call-arity pass — calls to locally-defined fns with the
     // wrong arg count are real bugs, not just style
     let mut fns = std::collections::HashMap::new();
-    collect_fns(stmts, &mut fns);
+    let mut rets = std::collections::HashMap::new();
+    collect_fns(stmts, &mut fns, &mut rets);
     if fns.values().any(|a| a.is_some()) {
-        arity_block(stmts, &fns, None, &mut out);
+        arity_block(stmts, &fns, &rets, None, &mut out);
     }
     let mut outer = std::collections::HashSet::new();
     lint_block(stmts, &mut out, &mut outer);
@@ -3428,7 +3429,8 @@ pub fn lint(stmts: &[ast::Stmt]) -> Vec<String> {
 /// collect name -> param count for locally defined fns; a name
 /// defined twice with different arities is ambiguous — skipped.
 fn collect_fns(stmts: &[ast::Stmt],
-               fns: &mut std::collections::HashMap<String, Option<usize>>) {
+               fns: &mut std::collections::HashMap<String, Option<usize>>,
+               rets: &mut std::collections::HashMap<String, bool>) {
     use ast::*;
     fn record(fns: &mut std::collections::HashMap<String, Option<usize>>,
               name: &str, arity: usize) {
@@ -3442,31 +3444,51 @@ fn collect_fns(stmts: &[ast::Stmt],
         match s {
             Stmt::FnDef(name, params, body) => {
                 record(fns, name, params.len());
-                collect_fns(body, fns);
+                rets.insert(name.clone(), block_returns_value(body));
+                collect_fns(body, fns, rets);
             }
             Stmt::Grow(GrowItem::Fn(name, params, body, _)) => {
                 record(fns, name, params.len());
-                collect_fns(body, fns);
+                rets.insert(name.clone(), block_returns_value(body));
+                collect_fns(body, fns, rets);
             }
             Stmt::If(_, a, b) => {
-                collect_fns(a, fns);
-                if let Some(b) = b { collect_fns(b, fns); }
+                collect_fns(a, fns, rets);
+                if let Some(b) = b { collect_fns(b, fns, rets); }
             }
-            Stmt::While(_, b) | Stmt::For(_, _, b) => collect_fns(b, fns),
-            Stmt::Try(a, _, c) => { collect_fns(a, fns); collect_fns(c, fns); }
+            Stmt::While(_, b) | Stmt::For(_, _, b) => collect_fns(b, fns, rets),
+            Stmt::Try(a, _, c) => { collect_fns(a, fns, rets); collect_fns(c, fns, rets); }
             Stmt::Match(_, arms, els) => {
-                for (_, b) in arms { collect_fns(b, fns); }
-                if let Some(b) = els { collect_fns(b, fns); }
+                for (_, b) in arms { collect_fns(b, fns, rets); }
+                if let Some(b) = els { collect_fns(b, fns, rets); }
             }
             _ => {}
         }
     }
 }
 
+/// does any statement in this block `return <expr>` — nested
+/// fn/lambda returns belong to those bodies, not this one.
+fn block_returns_value(stmts: &[ast::Stmt]) -> bool {
+    use ast::*;
+    stmts.iter().any(|s| match s {
+        Stmt::Return(Some(_)) => true,
+        Stmt::If(_, a, b) => block_returns_value(a)
+            || b.as_ref().map(|v| block_returns_value(v)).unwrap_or(false),
+        Stmt::While(_, b) | Stmt::For(_, _, b) => block_returns_value(b),
+        Stmt::Try(a, _, c) => block_returns_value(a) || block_returns_value(c),
+        Stmt::Match(_, arms, els) =>
+            arms.iter().any(|(_, b)| block_returns_value(b))
+            || els.as_ref().map(|v| block_returns_value(v)).unwrap_or(false),
+        _ => false,
+    })
+}
+
 /// walk a block flagging calls to locally-defined fns whose arg
 /// count doesn't match the definition. ctx = enclosing fn name.
 fn arity_block(stmts: &[ast::Stmt],
                fns: &std::collections::HashMap<String, Option<usize>>,
+               rets: &std::collections::HashMap<String, bool>,
                ctx: Option<&str>, out: &mut Vec<String>) {
     use ast::*;
     for s in stmts {
@@ -3481,46 +3503,67 @@ fn arity_block(stmts: &[ast::Stmt],
                         None => msg,
                     });
                 }
-                arity_expr(e, fns, ctx, out);
+                // let x = f() where f never `return <expr>` — binds null
+                if let Expr::Call(callee, _, _) = e {
+                    if rets.get(callee) == Some(&false) {
+                        let msg = format!("let {} = {}() — {} never returns a value (binds null)", n, callee, callee);
+                        out.push(match ctx {
+                            Some(f) => format!("{}: {}", f, msg),
+                            None => msg,
+                        });
+                    }
+                }
+                arity_expr(e, fns, rets, ctx, out);
             }
-            Stmt::Assign(_, e) | Stmt::Print(e)
-            | Stmt::ExprStmt(e) | Stmt::LetDestructure(_, e) => {
-                arity_expr(e, fns, ctx, out);
+            Stmt::Assign(n, e) => {
+                if let Expr::Call(callee, _, _) = e {
+                    if rets.get(callee) == Some(&false) {
+                        let msg = format!("{} = {}() — {} never returns a value (binds null)", n, callee, callee);
+                        out.push(match ctx {
+                            Some(f) => format!("{}: {}", f, msg),
+                            None => msg,
+                        });
+                    }
+                }
+                arity_expr(e, fns, rets, ctx, out);
+            }
+            Stmt::Print(e) | Stmt::ExprStmt(e) | Stmt::LetDestructure(_, e) => {
+                arity_expr(e, fns, rets, ctx, out);
             }
             Stmt::FieldAssign(o, _, v) => {
-                arity_expr(o, fns, ctx, out);
-                arity_expr(v, fns, ctx, out);
+                arity_expr(o, fns, rets, ctx, out);
+                arity_expr(v, fns, rets, ctx, out);
             }
             Stmt::IndexAssign(o, i, v) => {
-                arity_expr(o, fns, ctx, out);
-                arity_expr(i, fns, ctx, out);
-                arity_expr(v, fns, ctx, out);
+                arity_expr(o, fns, rets, ctx, out);
+                arity_expr(i, fns, rets, ctx, out);
+                arity_expr(v, fns, rets, ctx, out);
             }
             Stmt::If(c, a, b) => {
-                arity_expr(c, fns, ctx, out);
-                arity_block(a, fns, ctx, out);
-                if let Some(b) = b { arity_block(b, fns, ctx, out); }
+                arity_expr(c, fns, rets, ctx, out);
+                arity_block(a, fns, rets, ctx, out);
+                if let Some(b) = b { arity_block(b, fns, rets, ctx, out); }
             }
             Stmt::While(c, b) => {
-                arity_expr(c, fns, ctx, out);
-                arity_block(b, fns, ctx, out);
+                arity_expr(c, fns, rets, ctx, out);
+                arity_block(b, fns, rets, ctx, out);
             }
             Stmt::For(_, it, b) => {
-                arity_expr(it, fns, ctx, out);
-                arity_block(b, fns, ctx, out);
+                arity_expr(it, fns, rets, ctx, out);
+                arity_block(b, fns, rets, ctx, out);
             }
-            Stmt::Return(Some(e)) => arity_expr(e, fns, ctx, out),
+            Stmt::Return(Some(e)) => arity_expr(e, fns, rets, ctx, out),
             Stmt::Try(a, _, c) => {
-                arity_block(a, fns, ctx, out);
-                arity_block(c, fns, ctx, out);
+                arity_block(a, fns, rets, ctx, out);
+                arity_block(c, fns, rets, ctx, out);
             }
             Stmt::Match(scrut, arms, els) => {
-                arity_expr(scrut, fns, ctx, out);
+                arity_expr(scrut, fns, rets, ctx, out);
                 for (p, b) in arms {
-                    arity_expr(p, fns, ctx, out);
-                    arity_block(b, fns, ctx, out);
+                    arity_expr(p, fns, rets, ctx, out);
+                    arity_block(b, fns, rets, ctx, out);
                 }
-                if let Some(b) = els { arity_block(b, fns, ctx, out); }
+                if let Some(b) = els { arity_block(b, fns, rets, ctx, out); }
             }
             Stmt::FnDef(n, params, b) => {
                 for p in params {
@@ -3528,7 +3571,7 @@ fn arity_block(stmts: &[ast::Stmt],
                         out.push(format!("{}: param {} shadows fn {}", n, p.name, p.name));
                     }
                 }
-                arity_block(b, fns, Some(n), out);
+                arity_block(b, fns, rets, Some(n), out);
             }
             Stmt::Grow(GrowItem::Fn(n, params, b, tests)) => {
                 for p in params {
@@ -3536,13 +3579,13 @@ fn arity_block(stmts: &[ast::Stmt],
                         out.push(format!("{}: param {} shadows fn {}", n, p.name, p.name));
                     }
                 }
-                arity_block(b, fns, Some(n), out);
+                arity_block(b, fns, rets, Some(n), out);
                 for t in tests {
-                    arity_expr(&t.call, fns, Some(n), out);
-                    if let Some(e) = &t.expected { arity_expr(e, fns, Some(n), out); }
+                    arity_expr(&t.call, fns, rets, Some(n), out);
+                    if let Some(e) = &t.expected { arity_expr(e, fns, rets, Some(n), out); }
                 }
             }
-            Stmt::Grow(GrowItem::Let(_, e)) => arity_expr(e, fns, ctx, out),
+            Stmt::Grow(GrowItem::Let(_, e)) => arity_expr(e, fns, rets, ctx, out),
             _ => {}
         }
     }
@@ -3552,6 +3595,7 @@ fn arity_block(stmts: &[ast::Stmt],
 /// defined fn and whose arg count doesn't match its arity.
 fn arity_expr(e: &ast::Expr,
               fns: &std::collections::HashMap<String, Option<usize>>,
+              rets: &std::collections::HashMap<String, bool>,
               ctx: Option<&str>, out: &mut Vec<String>) {
     use ast::*;
     match e {
@@ -3565,39 +3609,39 @@ fn arity_expr(e: &ast::Expr,
                     });
                 }
             }
-            for a in args { arity_expr(a, fns, ctx, out); }
+            for a in args { arity_expr(a, fns, rets, ctx, out); }
         }
         Expr::MethodCall(o, _, args) => {
-            arity_expr(o, fns, ctx, out);
-            for a in args { arity_expr(a, fns, ctx, out); }
+            arity_expr(o, fns, rets, ctx, out);
+            for a in args { arity_expr(a, fns, rets, ctx, out); }
         }
         Expr::BinOp(a, _, b) | Expr::Index(a, b) => {
-            arity_expr(a, fns, ctx, out);
-            arity_expr(b, fns, ctx, out);
+            arity_expr(a, fns, rets, ctx, out);
+            arity_expr(b, fns, rets, ctx, out);
         }
-        Expr::UnaryOp(_, a) | Expr::FieldAccess(a, _) => arity_expr(a, fns, ctx, out),
+        Expr::UnaryOp(_, a) | Expr::FieldAccess(a, _) => arity_expr(a, fns, rets, ctx, out),
         Expr::List(items) | Expr::Interp(items) => {
-            for i in items { arity_expr(i, fns, ctx, out); }
+            for i in items { arity_expr(i, fns, rets, ctx, out); }
         }
         Expr::StructLit(_, fields) => {
-            for (_, v) in fields { arity_expr(v, fns, ctx, out); }
+            for (_, v) in fields { arity_expr(v, fns, rets, ctx, out); }
         }
         Expr::Slice(o, lo, hi) => {
-            arity_expr(o, fns, ctx, out);
-            if let Some(e) = lo { arity_expr(e, fns, ctx, out); }
-            if let Some(e) = hi { arity_expr(e, fns, ctx, out); }
+            arity_expr(o, fns, rets, ctx, out);
+            if let Some(e) = lo { arity_expr(e, fns, rets, ctx, out); }
+            if let Some(e) = hi { arity_expr(e, fns, rets, ctx, out); }
         }
         Expr::SafeGet(o, _, args) => {
-            arity_expr(o, fns, ctx, out);
+            arity_expr(o, fns, rets, ctx, out);
             if let Some(args) = args {
-                for a in args { arity_expr(a, fns, ctx, out); }
+                for a in args { arity_expr(a, fns, rets, ctx, out); }
             }
         }
-        Expr::Lambda(_, body) => arity_block(body, fns, ctx, out),
+        Expr::Lambda(_, body) => arity_block(body, fns, rets, ctx, out),
         Expr::ListComp(x, _, it, cond) => {
-            arity_expr(x, fns, ctx, out);
-            arity_expr(it, fns, ctx, out);
-            if let Some(c) = cond { arity_expr(c, fns, ctx, out); }
+            arity_expr(x, fns, rets, ctx, out);
+            arity_expr(it, fns, rets, ctx, out);
+            if let Some(c) = cond { arity_expr(c, fns, rets, ctx, out); }
         }
         _ => {}
     }
