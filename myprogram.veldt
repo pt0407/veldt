@@ -1,0 +1,26 @@
+# Welcome to Veldt Studio
+# Edit this code, then click Run to execute it.
+# Use "grow" to plant functions into the garden.
+
+fn greet(name: str) {
+    print("hello " + name)
+}
+
+greet("world")
+
+# Grow a function with a test — it gets trialed at birth
+grow fn double(x: int) test double(3) == 6 {
+    return x * 2
+}
+
+# Click "Evolve" to mutate existing functions and watch them compete
+
+grow fn sum(nums: list<int>) test sum([1, 2, 3]) == 6 {
+    let total = 0
+    for n in nums {
+        total = total + n
+    }
+    return total
+}
+
+print("sum([10, 20, 30]) = " + sum([10, 20, 30]))
