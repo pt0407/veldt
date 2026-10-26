@@ -3447,6 +3447,16 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                         }
                     }
                 }
+                // let x = {} — an empty struct that never gets fields
+                if let Expr::StructLit(_, fields) = e {
+                    if fields.is_empty() {
+                        let assigned = stmts.iter().skip(i + 1)
+                            .any(|s| stmt_assigns(s, name) || matches!(s, Stmt::FieldAssign(o, _, _) if matches!(o, Expr::Var(v) if v == name)));
+                        if !assigned {
+                            out.push(format!("let {} = {{}} — an empty struct that never gets fields", name));
+                        }
+                    }
+                }
                 // duplicate let — same expression bound twice in this block
                 for (j, s) in stmts.iter().enumerate().take(i) {
                     if let Stmt::Let(prev, pe) = s {
