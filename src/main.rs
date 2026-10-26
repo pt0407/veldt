@@ -8,6 +8,7 @@ mod health;
 mod interpreter;
 mod lexer;
 mod llm;
+mod lsp;
 mod parser;
 mod server;
 mod veldt;
@@ -74,6 +75,7 @@ fn main() {
                 fmt_file(&args[2], args.iter().any(|a| a == "--write" || a == "-w"));
             }
         }
+        "lsp" => { lsp::run_lsp(); }
         "watch" => {
             if args.len() < 3 {
                 eprintln!("Usage: veldt watch <file.veldt>");
@@ -486,6 +488,8 @@ fn print_usage() {
     println!("  veldt studio [port]          Start Veldt Studio IDE (default port 7777)
   veldt repl                   Interactive shell (persistent env)
   veldt fmt <file>             Print canonical formatted source (--write to overwrite)
+  veldt watch <file>           Re-run a program every time it changes
+  veldt lsp                    Language server over stdio (hover/goto/diagnostics/completion)
   veldt test <name>            Re-trial all variants of a function family
   veldt adopt <name#N>         Canonicalize a variant (dispatch picks it)
   veldt export [file]          Export the garden to a JSON file
