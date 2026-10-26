@@ -1192,6 +1192,16 @@ fn print_stats(veldt: &veldt::Veldt) {
         println!("death health: {} healthy, {} sick, {} dying",
             h, s, d);
     }
+    // avg variant body size — code length of living variants
+    let sizes: Vec<usize> = veldt.functions.values()
+        .flat_map(|vs| vs.iter().map(|e| crate::fmt::format_program(&e.body).len()))
+        .collect();
+    if !sizes.is_empty() {
+        let avg = sizes.iter().sum::<usize>() / sizes.len();
+        let (lo, hi) = (*sizes.iter().min().unwrap_or(&0),
+                        *sizes.iter().max().unwrap_or(&0));
+        println!("code size: avg {} chars/variant ({}..{})", avg, lo, hi);
+    }
     // fitness trend — peak per run, is the garden improving?
     if veldt.fitness_history.len() >= 2 {
         let trend: Vec<String> = veldt.fitness_history.iter()
