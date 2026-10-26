@@ -49,6 +49,15 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] JIT UPDATE 10: direct native calls between
+  value-mode fns — JitRt's arena/argbuf/iters/err are now *mut
+  shared pointers so a whole call tree allocs into ONE root
+  arena; rt_call clones args into it (by-value preserved) and
+  jit_call_fast transmutes the callee's ptr directly, skipping
+  jit_call's builtin/arity/dispatch + jit_invoke's per-call
+  setup. Falls back to jit_call for non-mode-2 callees
+  (builtins, closures, uncompiled). VM/health/mk_vm callers of
+  jit_call unaffected.
 - [Devin/main-side] JIT UPDATE 9 — ENTIRE INSTR SET LOWERS:
   try/catch (compile-time try_ct stack + veldt_rt_take_err,
   lexically-matched TryPush/TryPop) and closures
