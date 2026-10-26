@@ -2422,9 +2422,22 @@ fn adopt_variant(target: &str) {
             } else {
                 let arity = fittest.def.params.len();
                 let mut ok = true;
+                // int domain for int fns, float domain for float fns —
+                // try float first, fall back to int on type error
+                let mut is_float_fn = false;
+                {
+                    let probe = interp.call_function(
+                        name, Some(fittest.id),
+                        vec![crate::interpreter::Value::Float(1.5); arity.max(1)]);
+                    is_float_fn = probe.is_ok();
+                }
                 for x in -10..=10i64 {
                     let args: Vec<crate::interpreter::Value> =
-                        vec![crate::interpreter::Value::Int(x); arity.max(1)];
+                        if is_float_fn {
+                            vec![crate::interpreter::Value::Float(x as f64); arity.max(1)]
+                        } else {
+                            vec![crate::interpreter::Value::Int(x); arity.max(1)]
+                        };
                     let a = interp.call_function(
                         name, Some(id), args.clone());
                     let b = interp.call_function(
