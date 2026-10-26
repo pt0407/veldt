@@ -3038,6 +3038,7 @@ pub fn bench_report(veldt: &Veldt) -> (String, Vec<BenchRow>) {
     // Intent latency — canned tasks against the now-populated sandbox
     lines.push(String::new());
     lines.push("Intent latency:".to_string());
+    let mut latencies = Vec::new();
     for task in [
         "what's alive?", "show fib", "test fib", "adopt fib#1", "obituaries",
         "suggest", "write a function that counts primes", "improve fib",
@@ -3045,8 +3046,11 @@ pub fn bench_report(veldt: &Veldt) -> (String, Vec<BenchRow>) {
     ] {
         let start = std::time::Instant::now();
         let _ = respond(task, "", &mut bv);
-        lines.push(format!("  {:<45} {:>6}ms", format!("\"{}\"", task), start.elapsed().as_millis()));
+        let ms = start.elapsed().as_millis();
+        latencies.push(ms as f64);
+        lines.push(format!("  {:<45} {:>6}ms", format!("\"{}\"", task), ms));
     }
+    lines.push(format!("  intent latency dist: {}", crate::spark(&latencies)));
 
     // garden state at bench end + user garden summary
     let alive: usize = bv.functions.values().map(|v| v.len()).sum();
