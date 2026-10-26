@@ -78,6 +78,7 @@ pub async fn start_server(port: u16) {
         .route("/api/why", get(why_variant))
         .route("/api/species", get(species))
         .route("/api/find", get(find_family))
+        .route("/api/diff", get(diff_variants))
         .route("/api/run", post(run_program))
         .route("/api/evolve", post(evolve))
         .route("/api/clear", post(clear_veldt))
@@ -1279,6 +1280,31 @@ async fn find_family(
             "probes": veldt.probes.get(n).map(|p| p.len()).unwrap_or(0),
         })).collect();
     Json(serde_json::json!({"matches": hits}))
+}
+
+#[derive(Deserialize)]
+struct DiffRequest { a: String, b: String }
+
+async fn diff_variants(
+    axum::extract::Query(req): axum::extract::Query<DiffRequest>,
+) -> Json<serde_json::Value> {
+    let parse = |s: &str| s.split_once('#')
+        .and_then(|(n, i)| i.parse::<u32>().ok().map(|id| (n.to_string(), id)));
+    let (a_name, a_id) = match parse(&req.a) { Some(x) => x, None =>
+        return Json(serde_json::json!({"error": "invalid 'a' — expected <fam>#<id>"})) };
+    let (b_name, b_id) = match parse(&req.b) { Some(x) => x, None =>
+        return Json(serde_json::json!({"error": "invalid 'b' — expected <fam>#<id>"})) };
+    let mut veldt = veldt::Veldt::new();
+    if veldt.load().is_err() {
+        return Json(serde_json::json!({"error": "garden load failed"}));
+    }
+    let a_body = veldt.functions.get(&a_name)
+        .and_then(|vs| vs.iter().find(|e| e.id == a_id))
+        .map(|e| crate::fmt::format_program(&e.body));
+    let b_body = veldt.functions.get(&b_name)
+        .and_then(|vs| vs.iter().find(|e| e.id == b_id))
+        .map(|e| crate::fmt::format_program(&e.body));
+    Json(serde_json::json!({"a": a_body, "b": b_body}))
 }
 
 // --- IDE HTML ---
