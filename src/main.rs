@@ -3304,6 +3304,13 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
                         out.push("if condition repeats the same operand — x && x / x || x".into());
                     }
                 }
+                if b.is_none() && a.len() == 1 {
+                    if let Stmt::If(_, _, inner_else) = &a[0] {
+                        if inner_else.is_none() {
+                            out.push("nested if without else — merge to if a && b".into());
+                        }
+                    }
+                }
                 if let Some(e) = b {
                     if *a == *e { out.push("if branches are identical — dead conditional".into()); }
                     if a.is_empty() && !e.is_empty() {
