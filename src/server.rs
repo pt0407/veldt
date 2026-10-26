@@ -75,6 +75,7 @@ pub async fn start_server(port: u16) {
         .route("/api/builtin_usage", get(builtin_usage))
         .route("/api/champions", get(champions))
         .route("/api/summary", get(summary))
+        .route("/api/why", get(why_variant))
         .route("/api/run", post(run_program))
         .route("/api/evolve", post(evolve))
         .route("/api/clear", post(clear_veldt))
@@ -1232,6 +1233,18 @@ async fn summary() -> Json<serde_json::Value> {
         "top_families": fam.iter().take(5).map(|(n, f)| serde_json::json!({"name": n, "peak": f})).collect::<Vec<_>>(),
         "fitness_trend": veldt.fitness_history,
     }))
+}
+
+async fn why_variant(
+    axum::extract::Query(req): axum::extract::Query<VariantRequest>,
+) -> Json<serde_json::Value> {
+    let task = format!("why {}#{}", req.name, req.id);
+    let mut veldt = veldt::Veldt::new();
+    if veldt.load().is_err() {
+        return Json(serde_json::json!({"error": "garden load failed"}));
+    }
+    let answer = crate::agent::respond(&task, "", &mut veldt);
+    Json(serde_json::json!({"diagnosis": answer}))
 }
 
 // --- IDE HTML ---
