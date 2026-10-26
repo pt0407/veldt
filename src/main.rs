@@ -2205,6 +2205,27 @@ fn main() {
                 let mut flagged = 0usize;
                 let mut bugs = 0usize;
                 let mut per_fam: Vec<(&String, usize)> = Vec::new();
+                // warning-kind tally in the same pass — the advice tail
+                // after " — " is stable per rule; else mask call-names
+                // and digits so same-shape warnings group
+                let kind_of = |w: &str| -> String {
+                    // drop the "name: " fn-scope prefix so the same
+                    // check groups across families
+                    let w = match w.split_once(": ") {
+                        Some((h, m)) if !h.contains(' ') => m,
+                        _ => w,
+                    };
+                    if let Some((_, tail)) = w.split_once(" — ") {
+                        return tail.to_string();
+                    }
+                    w.split_whitespace().map(|t| {
+                        if t.chars().all(|c| c.is_ascii_digit()) { "N".to_string() }
+                        else if t.ends_with("()") { "V()".to_string() }
+                        else { t.to_string() }
+                    }).collect::<Vec<_>>().join(" ")
+                };
+                let mut kinds: std::collections::HashMap<String, usize> =
+                    std::collections::HashMap::new();
                 for (name, entries) in &veldt.functions {
                     let mut fam_warns = 0usize;
                     for e in entries {
@@ -2217,9 +2238,10 @@ fn main() {
                             .collect();
                         if !warns.is_empty() { flagged += 1; }
                         fam_warns += warns.len();
-                        bugs += warns.iter()
-                            .filter(|w| crate::evolve::is_realbug_warning(w))
-                            .count();
+                        for w in &warns {
+                            if crate::evolve::is_realbug_warning(w) { bugs += 1; }
+                            *kinds.entry(kind_of(w)).or_default() += 1;
+                        }
                     }
                     total += fam_warns;
                     if fam_warns > 0 { per_fam.push((name, fam_warns)); }
@@ -2229,6 +2251,13 @@ fn main() {
                          total, bugs, flagged);
                 for (f, n) in per_fam.iter().take(5) {
                     eprintln!("  {} — {} warnings", f, n);
+                }
+                let mut kinds: Vec<(String, usize)> = kinds.into_iter().collect();
+                kinds.sort_by(|a, b| b.1.cmp(&a.1));
+                if !kinds.is_empty() {
+                    let line: Vec<String> = kinds.iter().take(5)
+                        .map(|(k, n)| format!("{}×{}", n, k)).collect();
+                    eprintln!("  top: {}", line.join(" · "));
                 }
             }
             // --watch — re-render on a 2s poll until interrupted
