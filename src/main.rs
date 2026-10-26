@@ -2408,6 +2408,20 @@ fn print_stats(veldt: &veldt::Veldt) {
                     let stddev = variance.sqrt();
                     println!("  pressure: σ{:.3} fitness spread ({} rivals)", stddev, vs.len() - 1);
                 }
+                // niche matrix — variants × niches heatmap (the coverage map)
+                let all_niches: std::collections::HashSet<_> = vs.iter()
+                    .flat_map(|e| e.niche_scores.keys()).collect();
+                if !all_niches.is_empty() {
+                    let mut niches: Vec<_> = all_niches.iter().collect();
+                    niches.sort();
+                    let header: Vec<_> = niches.iter().take(6).map(|n| n.split(':').last().unwrap_or(n)).collect();
+                    println!("  niche matrix ({}):", header.join(" "));
+                    for e in vs.iter().take(6) {
+                        let scores: Vec<_> = niches.iter().take(6).map(|n|
+                            format!("{:.2}", e.niche_scores.get(*n).copied().unwrap_or(0.0))).collect();
+                        println!("    {}#{:<3} {}", e.name, e.id, scores.join(" "));
+                    }
+                }
             }
         }
         if veldt.fitness_history.len() >= 2 {
