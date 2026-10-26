@@ -2863,6 +2863,80 @@ impl Interpreter {
                 d2.insert("cells".to_string(), Value::List(rows2));
                 Ok(Some(Value::Dict(d2)))
             }
+            "delaunay" => {
+                // delaunay([[x, y], ...]) — Bowyer-Watson triangulation.
+                // Returns [[p0, p1, p2], ...] triangles.
+                let Value::List(pts) = args.get(0).cloned().unwrap_or(Value::Null) else {
+                    return Err("delaunay([[x,y],...]) expects a point list".into())
+                };
+                let f_of = |v: &Value| match v { Value::Int(i) => *i as f64, Value::Float(f) => *f, _ => 0.0 };
+                let mut points: Vec<(f64, f64)> = pts.iter().filter_map(|v| {
+                    if let Value::List(p) = v {
+                        if p.len() == 2 { return Some((f_of(&p[0]), f_of(&p[1]))); }
+                    }
+                    None
+                }).collect();
+                if points.len() < 3 { return Ok(Some(Value::List(im::vector![]))); }
+                // super-triangle covering all points
+                let (mut min_x, mut min_y, mut max_x, mut max_y) = (f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+                for &(x, y) in &points {
+                    min_x = min_x.min(x); min_y = min_y.min(y);
+                    max_x = max_x.max(x); max_y = max_y.max(y);
+                }
+                let span = (max_x - min_x).max(max_y - min_y).max(1.0);
+                let (cx, cy) = ((min_x + max_x) / 2.0, (min_y + max_y) / 2.0);
+                let super_tri = [
+                    (cx - 20.0 * span, cy - span),
+                    (cx, cy + 20.0 * span),
+                    (cx + 20.0 * span, cy - span),
+                ];
+                points.extend_from_slice(&super_tri);
+                let n = points.len();
+                let mut tris: Vec<(usize, usize, usize)> = vec![(n - 3, n - 2, n - 1)];
+                let circum = |a: (f64, f64), b: (f64, f64), c: (f64, f64)| -> Option<(f64, f64, f64)> {
+                    let d = 2.0 * (a.0 * (b.1 - c.1) + b.0 * (c.1 - a.1) + c.0 * (a.1 - b.1));
+                    if d.abs() < 1e-10 { return None; }
+                    let (a2, b2, c2) = (a.0 * a.0 + a.1 * a.1, b.0 * b.0 + b.1 * b.1, c.0 * c.0 + c.1 * c.1);
+                    let ux = (a2 * (b.1 - c.1) + b2 * (c.1 - a.1) + c2 * (a.1 - b.1)) / d;
+                    let uy = (a2 * (c.0 - b.0) + b2 * (a.0 - c.0) + c2 * (b.0 - a.0)) / d;
+                    let r2 = (ux - a.0).powi(2) + (uy - a.1).powi(2);
+                    Some((ux, uy, r2))
+                };
+                for i in 0..(n - 3) {
+                    let pt = points[i];
+                    let mut bad: Vec<bool> = tris.iter().map(|&(a, b, c)| {
+                        circum(points[a], points[b], points[c])
+                            .map(|(ux, uy, r2)| (pt.0 - ux).powi(2) + (pt.1 - uy).powi(2) < r2)
+                            .unwrap_or(false)
+                    }).collect();
+                    let mut edges: std::collections::HashMap<(usize, usize), usize> = std::collections::HashMap::new();
+                    for (ti, &(a, b, c)) in tris.iter().enumerate() {
+                        if !bad[ti] { continue; }
+                        for &(e0, e1) in &[(a, b), (b, c), (c, a)] {
+                            let key = if e0 < e1 { (e0, e1) } else { (e1, e0) };
+                            *edges.entry(key).or_default() += 1;
+                        }
+                    }
+                    let boundary: Vec<(usize, usize)> = edges.into_iter()
+                        .filter(|(_, cnt)| *cnt == 1)
+                        .map(|(e, _)| e).collect();
+                    let mut ti = 0;
+                    tris.retain(|_| { let keep = !bad[ti]; ti += 1; keep });
+                    for (a, b) in boundary {
+                        tris.push((a, b, i));
+                    }
+                }
+                // remove triangles touching the super-triangle
+                tris.retain(|&(a, b, c)| a < n - 3 && b < n - 3 && c < n - 3);
+                let out: Vec<Value> = tris.into_iter().map(|(a, b, c)|
+                    Value::List(im::vector![
+                        Value::List(im::vector![Value::Float(points[a].0), Value::Float(points[a].1)]),
+                        Value::List(im::vector![Value::Float(points[b].0), Value::Float(points[b].1)]),
+                        Value::List(im::vector![Value::Float(points[c].0), Value::Float(points[c].1)]),
+                    ])
+                ).collect();
+                Ok(Some(Value::List(out.into_iter().collect())))
+            }
             "dist_stats" => {
                 // dist_stats(fn, trials) — mean/stddev/min/max over n samples
                 let (f, trials) = match (args.get(0), args.get(1)) {
