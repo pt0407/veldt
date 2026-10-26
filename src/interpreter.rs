@@ -1324,6 +1324,50 @@ impl Interpreter {
             self.caps = saved;
             return r.map(Some);
         }
+        // shadow_call(name, args) — Stage 1 trust ladder: every healthy
+        // variant executes on the same input (side effects suppressed);
+        // the champion's output is returned, divergent variants logged.
+        if name == "shadow_call" {
+            let fname = match args.first() {
+                Some(Value::Str(s)) => s.to_string(),
+                _ => return Err("shadow_call() expects (name, args_list)".into()),
+            };
+            let fargs: Vec<Value> = match args.get(1) {
+                Some(Value::List(l)) => l.iter().cloned().collect(),
+                _ => Vec::new(),
+            };
+            let vars: Vec<u32> = self.functions.get(&fname)
+                .map(|vs| vs.iter().map(|v| v.id).collect())
+                .unwrap_or_default();
+            if vars.is_empty() {
+                return Err(format!("shadow_call: no variants of '{}'", fname));
+            }
+            let champion = self.functions.get(&fname).unwrap().iter()
+                .max_by(|a, b| a.fitness.partial_cmp(&b.fitness)
+                    .unwrap_or(std::cmp::Ordering::Equal))
+                .map(|v| v.id).unwrap();
+            let saved = std::mem::replace(&mut self.caps, Caps::sandboxed());
+            let mut outs: Vec<(u32, Result<String, String>)> = Vec::new();
+            for id in &vars {
+                let r = self.call_function(&fname, Some(*id), fargs.clone())
+                    .map(|v| serde_json::to_string(&v).unwrap_or_default());
+                outs.push((*id, r));
+            }
+            self.caps = saved;
+            let champ = outs.iter().find(|(id, _)| *id == champion).unwrap().1.clone();
+            let champ_out = champ?;
+            let div: Vec<String> = outs.iter()
+                .filter(|(id, r)| *id != champion
+                    && r.as_ref().map(|o| o != &champ_out).unwrap_or(true))
+                .map(|(id, _)| format!("{}#{}", fname, id))
+                .collect();
+            if !div.is_empty() {
+                eprintln!("[SHADOW] {} diverged from champion {}#{}",
+                    div.join(", "), fname, champion);
+            }
+            let val: Value = serde_json::from_str(&champ_out).unwrap_or(Value::Null);
+            return Ok(Some(val));
+        }
 
         match name {
             "range" => {
