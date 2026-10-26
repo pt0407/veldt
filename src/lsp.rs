@@ -62,6 +62,7 @@ pub fn run_lsp() {
                         "documentHighlightProvider": true,
                         "renameProvider": true,
                         "referencesProvider": true,
+                        "signatureHelpProvider": {"triggerCharacters": ["(", ","]},
                         "completionProvider": {"triggerCharacters": [".", ":"]}
                     },
                     "serverInfo": {"name": "veldt-lsp", "version": env!("CARGO_PKG_VERSION")}
@@ -76,6 +77,7 @@ pub fn run_lsp() {
                 "textDocument/documentHighlight" => document_highlight(params, &docs),
                 "textDocument/rename" => rename(params, &docs),
                 "textDocument/references" => references(params, &docs),
+                "textDocument/signatureHelp" => signature_help(params, &docs),
                 _ => None,
             };
 
@@ -332,6 +334,48 @@ fn references(params: &Value, docs: &HashMap<String, Doc>) -> Option<Value> {
         }
     }
     Some(Value::Array(out))
+}
+
+/// Signature help on ( — resolves the enclosing call's name, looks up
+/// the fn's decl in the open doc (fn/grow fn) or builtin signature table.
+fn signature_help(params: &Value, docs: &HashMap<String, Doc>) -> Option<Value> {
+    let doc = doc_of(params, docs)?;
+    let line = params["position"]["line"].as_u64()? as usize;
+    let ch = params["position"]["character"].as_u64()? as usize;
+    // scan back to the enclosing '(' — the fn name is the word before it
+    let text = doc.text.lines().nth(line)?;
+    let before = &text[..ch.min(text.len())];
+    let mut depth = 0i32;
+    let mut fn_start = None;
+    for (i, c) in before.char_indices().rev() {
+        match c {
+            ')' | ']' => depth += 1,
+            '(' if depth > 0 => depth -= 1,
+            '(' => { fn_start = Some(i); break; }
+            _ => {}
+        }
+    }
+    let open = fn_start?;
+    let name = before[..open].chars().rev()
+        .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == '.')
+        .collect::<String>().chars().rev().collect::<String>();
+    if name.is_empty() { return Some(json!({})); }
+    // signature: find `fn name(` or `grow fn name(` in the doc, take param list
+    let sig = doc.text.lines().find_map(|l| {
+        let t = l.trim_start();
+        if (t.starts_with("fn ") || t.starts_with("grow fn ")) {
+            let rest = t.trim_start_matches("grow fn ").trim_start_matches("fn ");
+            if rest.starts_with(&format!("{}(", name)) {
+                return Some(rest.split(')').next().unwrap_or(rest).to_string() + ")");
+            }
+        }
+        None
+    }).unwrap_or_else(|| format!("{}(...)", name));
+    Some(json!({
+        "signatures": [{"label": sig}],
+        "activeSignature": 0,
+        "activeParameter": before[open+1..].matches(',').count() as u32,
+    }))
 }
 
 fn hover(params: &Value, docs: &HashMap<String, Doc>) -> Option<Value> {
