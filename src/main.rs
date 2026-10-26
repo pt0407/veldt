@@ -868,6 +868,16 @@ fn print_stats(veldt: &veldt::Veldt) {
         seed, estab, canon);
     println!("probes: {} across {} families | deaths: {} | runs: {}",
         probe_count, veldt.probes.len(), veldt.obituaries.len(), veldt.run_count);
+    if std::env::args().any(|a| a == "--brief") {
+        if veldt.fitness_history.len() >= 2 {
+            let trend = veldt.fitness_history.iter().map(|f| format!("{:.2}", f))
+                .collect::<Vec<_>>();
+            let arrow = if veldt.fitness_history.last() > veldt.fitness_history.first() { "↑" }
+                        else if veldt.fitness_history.last() < veldt.fitness_history.first() { "↓" } else { "→" };
+            println!("fitness trend: {} → {} {}", trend.first().unwrap(), trend.last().unwrap(), arrow);
+        }
+        return;
+    }
     // builtin usage — which builtins living variants call (mutation targeting)
     const BUILTINS: &[&str] = &[
         "canvas", "grid", "ui_", "bt_", "balance", "astar", "bfs", "los", "fov",
