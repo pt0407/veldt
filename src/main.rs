@@ -566,6 +566,22 @@ fn main() {
                 }
                 println!("=== The Veldt (fitness >= {}) ===", min);
                 filtered.print_garden(sick_only, healthy_only);
+            } else if let Some(src) = args.iter().position(|a| a == "--source")
+                .and_then(|p| args.get(p + 1)).cloned() {
+                // --source <src> — variants from this mutation source
+                let mut filtered = veldt::Veldt::new();
+                filtered.probes = veldt.probes.clone();
+                filtered.obituaries = veldt.obituaries.clone();
+                filtered.run_count = veldt.run_count;
+                filtered.garden_path = veldt.garden_path.clone();
+                for (name, vs) in &veldt.functions {
+                    let keep: Vec<_> = vs.iter()
+                        .filter(|e| e.origin.starts_with(&src))
+                        .cloned().collect();
+                    if !keep.is_empty() { filtered.functions.insert(name.clone(), keep); }
+                }
+                println!("=== The Veldt (source: {}) ===", src);
+                filtered.print_garden(sick_only, healthy_only);
             } else if let Some(niche) = args.iter().position(|a| a == "--niche")
                 .and_then(|p| args.get(p + 1)).cloned() {
                 // --niche <niche> — variants that score on this niche
