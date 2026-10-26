@@ -566,6 +566,26 @@ fn main() {
                 }
                 println!("=== The Veldt (fitness >= {}) ===", min);
                 filtered.print_garden(sick_only, healthy_only);
+            } else if let Some(probe) = args.iter().position(|a| a == "--failing")
+                .and_then(|p| args.get(p + 1)).cloned() {
+                // --failing <input> — variants whose Sick fails include this input
+                let mut filtered = veldt::Veldt::new();
+                filtered.probes = veldt.probes.clone();
+                filtered.obituaries = veldt.obituaries.clone();
+                filtered.run_count = veldt.run_count;
+                filtered.garden_path = veldt.garden_path.clone();
+                for (name, vs) in &veldt.functions {
+                    let keep: Vec<_> = vs.iter()
+                        .filter(|e| {
+                            if let veldt::Health::Sick(fails) = &e.health {
+                                fails.iter().any(|(input, _, _)|
+                                    format!("{:?}", input).contains(&probe))
+                            } else { false }
+                        }).cloned().collect();
+                    if !keep.is_empty() { filtered.functions.insert(name.clone(), keep); }
+                }
+                println!("=== The Veldt (failing: {}) ===", probe);
+                filtered.print_garden(sick_only, healthy_only);
             } else if args.iter().any(|a| a == "--risky") {
                 // risky variants — sick + Seedling trust (untested + failing)
                 let mut filtered = veldt::Veldt::new();
