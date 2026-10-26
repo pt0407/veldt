@@ -72,6 +72,7 @@ pub async fn start_server(port: u16) {
         .route("/api/turnover", get(turnover))
         .route("/api/diversity", get(diversity))
         .route("/api/pressure", get(pressure))
+        .route("/api/builtin_usage", get(builtin_usage))
         .route("/api/run", post(run_program))
         .route("/api/evolve", post(evolve))
         .route("/api/clear", post(clear_veldt))
@@ -673,6 +674,34 @@ async fn pressure() -> Json<serde_json::Value> {
             })
         }).collect();
     Json(serde_json::json!({"pressure": per_family}))
+}
+
+async fn builtin_usage() -> Json<serde_json::Value> {
+    let mut veldt = veldt::Veldt::new();
+    if veldt.load().is_err() {
+        return Json(serde_json::json!({"error": "garden load failed"}));
+    }
+    const BUILTINS: &[&str] = &[
+        "canvas", "grid_", "ui_", "bt_", "balance", "astar", "bfs", "los",
+        "fov", "rand", "roll", "dice", "choice", "weighted", "noise", "fbm",
+        "perlin", "poisson", "voronoi", "delaunay", "wfc", "maze", "flood",
+        "neighbor", "lerp", "clamp", "dist", "aabb", "smoothstep", "bezier",
+        "point_in_poly", "convex", "ease", "bounce", "line_points", "turn",
+        "fsm", "book", "svc_", "robot", "edge", "game_loop", "dist_stats",
+    ];
+    let mut use_count: std::collections::HashMap<&str, usize> =
+        std::collections::HashMap::new();
+    for vs in veldt.functions.values() {
+        for e in vs {
+            let src = crate::fmt::format_program(&e.body);
+            for b in BUILTINS { if src.contains(b) { *use_count.entry(b).or_default() += 1; } }
+        }
+    }
+    let mut usage_list: Vec<(&str, usize)> = use_count.into_iter().collect();
+    usage_list.sort_by(|a, b| b.1.cmp(&a.1));
+    Json(serde_json::json!({"builtin_usage": usage_list.iter()
+        .map(|(b, c)| serde_json::json!({"builtin": b, "count": c}))
+        .collect::<Vec<_>>()}))
 }
 
 #[derive(Deserialize)]
