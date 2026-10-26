@@ -3798,6 +3798,11 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                                                 out.push(format!("match on {} — transitive binop through {}", v, w));
                                                 break;
                                             }
+                                            // match a where a is bound to Var(b) bound to a container — transitive container
+                                            if n2 == w && matches!(e2, Expr::List(_) | Expr::StructLit(..)) {
+                                                out.push(format!("match on {} — transitive container through {}", v, w));
+                                                break;
+                                            }
                                         }
                                     }
                                 }
