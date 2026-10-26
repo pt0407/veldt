@@ -82,6 +82,7 @@ pub async fn start_server(port: u16) {
         .route("/api/obituary", get(obituary))
         .route("/api/trace", get(trace_family))
         .route("/api/probe", get(probe_family))
+        .route("/api/family", get(family_detail))
         .route("/api/run", post(run_program))
         .route("/api/evolve", post(evolve))
         .route("/api/clear", post(clear_veldt))
@@ -1364,6 +1365,31 @@ async fn probe_family(
         })).collect())
         .unwrap_or_default();
     Json(serde_json::json!({"name": req.name, "probes": pr}))
+}
+
+async fn family_detail(
+    axum::extract::Query(req): axum::extract::Query<TraceRequest>,
+) -> Json<serde_json::Value> {
+    let mut veldt = veldt::Veldt::new();
+    if veldt.load().is_err() {
+        return Json(serde_json::json!({"error": "garden load failed"}));
+    }
+    let vs = match veldt.functions.get(&req.name) {
+        Some(v) => v,
+        None => return Json(serde_json::json!({"error": format!("{} not found", req.name)})),
+    };
+    let variants: Vec<serde_json::Value> = vs.iter().map(|e| serde_json::json!({
+        "id": e.id, "fitness": e.fitness, "health": format!("{:?}", e.health),
+        "age": e.age, "usage": e.usage_count, "trust": format!("{:?}", e.trust),
+        "origin": e.origin,
+    })).collect();
+    let peak: f64 = vs.iter().map(|e| e.fitness).fold(f64::NEG_INFINITY, f64::max);
+    let avg: f64 = vs.iter().map(|e| e.fitness).sum::<f64>() / vs.len().max(1) as f64;
+    Json(serde_json::json!({
+        "name": req.name, "variants": variants,
+        "probes": veldt.probes.get(&req.name).map(|p| p.len()).unwrap_or(0),
+        "peak_fitness": peak, "avg_fitness": avg,
+    }))
 }
 
 // --- IDE HTML ---
