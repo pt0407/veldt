@@ -2377,6 +2377,16 @@ fn print_stats(veldt: &veldt::Veldt) {
                     let h = match &weak.health { Health::Healthy => "ok", Health::Sick(_) => "sick", Health::Dying => "dying" };
                     println!("  weakest: {}#{} fit {:.2} | age {} | {}", weak.name, weak.id, weak.fitness, weak.age, h);
                 }
+                // fit_rate — the fastest-learners (fitness/age)
+                let rates: Vec<f64> = vs.iter().map(|e| e.fitness / (e.age as f64 + 1.0)).collect();
+                if !rates.is_empty() {
+                    let avg = rates.iter().sum::<f64>() / rates.len() as f64;
+                    let max = rates.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+                    let fastest = vs.iter().max_by(|a, b|
+                        (a.fitness / (a.age as f64 + 1.0)).partial_cmp(&(b.fitness / (b.age as f64 + 1.0)))
+                        .unwrap_or(std::cmp::Ordering::Equal)).unwrap();
+                    println!("  fit_rate: avg {:.3} (peak {:.3} — {}#{})", avg, max, fastest.name, fastest.id);
+                }
             }
         }
         if veldt.fitness_history.len() >= 2 {
