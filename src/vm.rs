@@ -54,7 +54,7 @@ struct CompiledFn {
     id: u32,
     fitness: f64,
     params: Vec<String>,
-    code: Chunk,
+    code: Rc<Chunk>,   // shared — call pushes an Rc bump, not a clone
 }
 
 struct Frame {
@@ -350,7 +350,7 @@ impl Vm {
                     self.fns.entry(name.clone()).or_default().push(CompiledFn {
                         id, fitness: 1.0,
                         params: params.iter().map(|p| p.name.clone()).collect(),
-                        code,
+                        code: Rc::new(code),
                     });
                 }
                 _ => {}
@@ -381,7 +381,7 @@ impl Vm {
                         id: entry.id,
                         fitness: entry.fitness,
                         params: entry.params.iter().map(|p| p.name.clone()).collect(),
-                        code,
+                        code: Rc::new(code),
                     });
                 }
             }
@@ -600,11 +600,7 @@ impl Vm {
                     let env: Vec<Option<Value>> =
                         args.into_iter().map(Some).collect();
                     frames.push(Frame {
-                        code: Rc::new(Chunk {
-                            code: chosen.code.code.clone(),
-                            consts: chosen.code.consts.clone(),
-                            names: chosen.code.names.clone(),
-                        }),
+                        code: chosen.code.clone(),   // Rc bump — no alloc
                         pc: 0, env, base: stack.len(), iters: Vec::new(),
                     });
                     code = frames.last().unwrap().code.clone();
