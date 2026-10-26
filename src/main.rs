@@ -3377,6 +3377,12 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                         out.push(format!("let {} = <sentinel> never assigned — the flag/counter never updates", name));
                     }
                 }
+                // let bound to a param/for-var — copying a binding
+                if let Expr::Var(v) = e {
+                    if outer.contains(v.as_str()) && v != name {
+                        out.push(format!("let {} = {} — copies a binding, could reuse", name, v));
+                    }
+                }
             }
             Stmt::Assign(name, e) => {
                 if !bound.iter().any(|(_, b)| *b == name) && !outer.contains(name.as_str()) {
