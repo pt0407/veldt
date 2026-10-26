@@ -1996,6 +1996,93 @@ impl Interpreter {
                     else { let t2 = t - 2.625 / d1; n1 * t2 * t2 + 0.984375 };
                 Ok(Some(Value::Float(v)))
             }
+            // === std:ui — immediate-mode ASCII widgets on the canvas ===
+            "ui_box" => {
+                // ui_box(c, x, y, w, h, title?) — bordered panel
+                let (d, x0, y0, w, h, title) = match (args.get(0), args.get(1), args.get(2), args.get(3), args.get(4), args.get(5)) {
+                    (Some(Value::Dict(d)), Some(Value::Int(x)), Some(Value::Int(y)),
+                     Some(Value::Int(w)), Some(Value::Int(h)), t)
+                        => (d.clone(), *x as usize, *y as usize, *w as usize, *h as usize,
+                            if let Some(Value::Str(s)) = t { s.clone() } else { "".into() }),
+                    _ => return Err("ui_box(c, x, y, w, h, title?) expects dict + 4 ints + str?".into()),
+                };
+                let Some(Value::List(rows)) = d.get("cells") else { return Err("canvas: no cells".into()) };
+                let mut rows2 = rows.clone();
+                let set = |rows2: &mut im::Vector<Value>, x: usize, y: usize, ch: &str| {
+                    if y < rows2.len() {
+                        if let Value::List(r) = &rows2[y] {
+                            if x < r.len() {
+                                let mut nr = r.clone();
+                                nr[x] = Value::Str(ch.into());
+                                rows2[y] = Value::List(nr);
+                            }
+                        }
+                    }
+                };
+                for xx in x0..(x0 + w) {
+                    set(&mut rows2, xx, y0, if xx == x0 { "+" } else if xx == x0 + w - 1 { "+" } else { "-" });
+                    set(&mut rows2, xx, y0 + h - 1, if xx == x0 { "+" } else if xx == x0 + w - 1 { "+" } else { "-" });
+                }
+                for yy in y0..(y0 + h) {
+                    set(&mut rows2, x0, yy, "|");
+                    set(&mut rows2, x0 + w - 1, yy, "|");
+                }
+                for (i, ch) in title.chars().take(w.saturating_sub(4)).enumerate() {
+                    set(&mut rows2, x0 + 2 + i, y0, &ch.to_string());
+                }
+                let mut d2 = d.clone();
+                d2.insert("cells".to_string(), Value::List(rows2));
+                Ok(Some(Value::Dict(d2)))
+            }
+            "ui_label" => {
+                // ui_label(c, x, y, text) — write text starting at (x, y)
+                let (d, x0, y0, text) = match (args.get(0), args.get(1), args.get(2), args.get(3)) {
+                    (Some(Value::Dict(d)), Some(Value::Int(x)), Some(Value::Int(y)), Some(Value::Str(t)))
+                        => (d.clone(), *x as usize, *y as usize, t.clone()),
+                    _ => return Err("ui_label(c, x, y, text) expects dict + 2 ints + str".into()),
+                };
+                let Some(Value::List(rows)) = d.get("cells") else { return Err("canvas: no cells".into()) };
+                let mut rows2 = rows.clone();
+                for (dy, line) in text.lines().enumerate() {
+                    let yy = y0 + dy;
+                    if yy >= rows2.len() { break; }
+                    if let Value::List(r) = &rows2[yy] {
+                        let mut nr = r.clone();
+                        for (dx, ch) in line.chars().enumerate() {
+                            let xx = x0 + dx;
+                            if xx < nr.len() { nr[xx] = Value::Str(ch.to_string().into()); }
+                        }
+                        rows2[yy] = Value::List(nr);
+                    }
+                }
+                let mut d2 = d.clone();
+                d2.insert("cells".to_string(), Value::List(rows2));
+                Ok(Some(Value::Dict(d2)))
+            }
+            "ui_button" => {
+                // ui_button(c, x, y, label, hot?) — bracketed button [ label ]
+                let (d, x, y, label, hot) = match (args.get(0), args.get(1), args.get(2), args.get(3), args.get(4)) {
+                    (Some(Value::Dict(d)), Some(Value::Int(x)), Some(Value::Int(y)), Some(Value::Str(l)), h)
+                        => (d.clone(), *x as usize, *y as usize, l.clone(),
+                            matches!(h, Some(Value::Bool(true)))),
+                    _ => return Err("ui_button(c, x, y, label, hot?) expects dict + 2 ints + str + bool".into()),
+                };
+                let Some(Value::List(rows)) = d.get("cells") else { return Err("canvas: no cells".into()) };
+                let mut rows2 = rows.clone();
+                let rendered = if hot { format!(">{}<", label) } else { format!("[{}]", label) };
+                if y < rows2.len() {
+                    if let Value::List(r) = &rows2[y] {
+                        let mut nr = r.clone();
+                        for (i, ch) in rendered.chars().enumerate() {
+                            if x + i < nr.len() { nr[x + i] = Value::Str(ch.to_string().into()); }
+                        }
+                        rows2[y] = Value::List(nr);
+                    }
+                }
+                let mut d2 = d.clone();
+                d2.insert("cells".to_string(), Value::List(rows2));
+                Ok(Some(Value::Dict(d2)))
+            }
             "dist_stats" => {
                 // dist_stats(fn, trials) — mean/stddev/min/max over n samples
                 let (f, trials) = match (args.get(0), args.get(1)) {
