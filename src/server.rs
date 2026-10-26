@@ -30,6 +30,7 @@ pub async fn start_server(port: u16) {
         .route("/", get(serve_ide))
         .route("/api/garden", get(get_garden))
         .route("/api/fuzz", post(fuzz_family))
+        .route("/api/absorb", post(absorb))
         .route("/api/run", post(run_program))
         .route("/api/evolve", post(evolve))
         .route("/api/clear", post(clear_veldt))
@@ -61,6 +62,14 @@ async fn fuzz_family(
     let report = resp.reply;
     { let mut v = state.veldt.lock().unwrap(); *v = veldt; }
     Json(serde_json::json!({ "report": report }))
+}
+
+async fn absorb(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
+    // bake live call traces into the probe pool — the IDE's
+    // "learn from usage" button
+    crate::absorb_traces(None);
+    let n = { let v = state.veldt.lock().unwrap(); v.probes.values().map(|p| p.len()).sum::<usize>() };
+    Json(serde_json::json!({ "absorbed": n }))
 }
 
 async fn get_garden(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
