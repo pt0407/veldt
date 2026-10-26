@@ -5445,10 +5445,12 @@ fn print_family_detail(veldt: &veldt::Veldt, fam: &String, vs: &[veldt::Function
         entry.0 += e.fitness; entry.1 += 1;
     }
     if !src_fit.is_empty() {
-        println!("  source fitness:");
         let mut sorted: Vec<_> = src_fit.iter().collect();
         sorted.sort_by(|a, b| (b.1.0 / b.1.1.max(1) as f64)
             .partial_cmp(&(a.1.0 / a.1.1.max(1) as f64)).unwrap_or(std::cmp::Ordering::Equal));
+        let avgs: Vec<f64> = sorted.iter().take(6)
+            .map(|(_, (t, n))| t / *n as f64).collect();
+        println!("  source fitness: {}", spark(&avgs));
         for (src, (t, n)) in sorted.iter().take(6) {
             println!("    {:<20} avg {:.2} ({} variants)", src, t / *n as f64, n);
         }
