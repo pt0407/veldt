@@ -772,3 +772,6 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   checks. New: if/while/for body that's a bare expression
   (computes a value and discards it — dead computation).
   Fires on tictactoe's if-with-bare-expr.
+- [Devin] Lint batch 23 (HEAD post-null-let): ~53 strict
+  checks. New: let x = null and never assigned —
+  placeholder left null.
