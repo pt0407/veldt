@@ -38,6 +38,7 @@ pub async fn start_server(port: u16) {
         .route("/api/absorb", post(absorb))
         .route("/api/stats", get(stats))
         .route("/api/check", post(check_source))
+        .route("/api/fix", post(fix_source))
         .route("/api/lint", get(garden_lint))
         .route("/api/tournament", post(tournament))
         .route("/api/swarm", post(swarm))
@@ -949,6 +950,30 @@ async fn check_source(
                 Vec::new()
             };
             Json(serde_json::json!({"ok": true, "warnings": warnings}))
+        }
+        Err(e) => Json(serde_json::json!({"ok": false, "error": e})),
+    }
+}
+
+async fn fix_source(
+    Json(req): Json<CheckRequest>,
+) -> Json<serde_json::Value> {
+    // mechanical dead-code repair on the posted source — the
+    // IDE's one-click fix (same passes as veldt fix / --garden --fix)
+    let mut lx = crate::lexer::Lexer::new(&req.source);
+    let res = lx.tokenize().map_err(|e| format!("lex: {}", e))
+        .and_then(|t| {
+            let mut p = crate::parser::Parser::new_with_lines(t, lx.token_lines.clone());
+            p.parse_program().map_err(|e| format!("parse: {}", e))
+        });
+    match res {
+        Ok(mut stmts) => {
+            let changed = crate::health::HealthChecker::repair_program(&mut stmts);
+            Json(serde_json::json!({
+                "ok": true, "changed": changed,
+                "source": if changed { crate::fmt::format_program(&stmts) }
+                          else { req.source },
+            }))
         }
         Err(e) => Json(serde_json::json!({"ok": false, "error": e})),
     }

@@ -492,6 +492,7 @@
     <button class="btn" id="playBtn" title="run a bundled game demo">Play</button>
     <button class="btn" id="statsBtn" title="garden census + histograms">Stats</button>
     <button class="btn" id="lintBtn" title="strict-lint census across the garden">Lint</button>
+    <button class="btn" id="fixBtn" title="mechanically repair dead code in the buffer">Fix</button>
     <button class="btn" id="gameBtn" title="run the editor as a game program">Game</button>
     <button class="btn danger" id="clearBtn">Clear Garden</button>
     <button class="btn primary" id="runBtn">▶ Run</button>
@@ -1402,6 +1403,23 @@ document.getElementById('lintBtn').addEventListener('click', async () => {
   document.getElementById('output').innerHTML = '<pre style="color:#8ef;margin:0">' +
     `lint: ${d.warnings} warnings · ${d.defects} defect-class\n` +
     (fams || '  lint-clean — no warnings') + '</pre>';
+});
+document.getElementById('fixBtn').addEventListener('click', async () => {
+  const source = editor.getValue();
+  const res = await fetch(API + '/api/fix', { method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ source }) });
+  const d = await res.json();
+  const out = document.getElementById('output');
+  if (d.ok && d.changed) {
+    editor.setValue(d.source);
+    out.innerHTML = '<pre style="color:#6f4;margin:0">fixed — dead code removed</pre>';
+    lintEditor();
+  } else if (d.ok) {
+    out.innerHTML = '<pre style="color:#8ef;margin:0">nothing to repair</pre>';
+  } else {
+    out.innerHTML = '<pre style="color:#f66;margin:0">' + (d.error || 'parse error') + '</pre>';
+  }
 });
 document.getElementById('playBtn').addEventListener('click', async () => {
   const demo = prompt('Demo', 'dungeon');
