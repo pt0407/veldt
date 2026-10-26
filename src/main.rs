@@ -403,9 +403,24 @@ fn main() {
                     evolver.set_seed(n);
                 }
             }
-            let events = evolver.evolve(&mut veldt, cycles);
-            for event in &events {
-                eprintln!("{}", event.format());
+            // --until F: stop early when any variant reaches fitness F
+            let until = args.iter().position(|a| a == "--until")
+                .and_then(|p| args.get(p + 1)).and_then(|s| s.parse::<f64>().ok());
+            let mut run_cycles = 0usize;
+            while run_cycles < cycles {
+                let events = evolver.evolve(&mut veldt, 1);
+                for event in &events { eprintln!("{}", event.format()); }
+                run_cycles += 1;
+                if let Some(target) = until {
+                    let peak = veldt.functions.values()
+                        .flat_map(|vs| vs.iter().map(|e| e.fitness))
+                        .fold(f64::NEG_INFINITY, f64::max);
+                    if peak >= target {
+                        eprintln!("[EVOLVE] target fitness {} reached (peak {:.2}) — stopping after {} cycles",
+                            target, peak, run_cycles);
+                        break;
+                    }
+                }
             }
             veldt.save().unwrap_or_else(|e| eprintln!("Save error: {}", e));
         }
