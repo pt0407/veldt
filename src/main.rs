@@ -5135,8 +5135,12 @@ fn print_family_detail(veldt: &veldt::Veldt, fam: &String, vs: &[veldt::Function
             vs.iter().any(|e| e.niche_scores.get(&p.niche)
                 .map(|s| *s >= 0.5).unwrap_or(false))).count();
         if !probes.is_empty() {
-            println!("  probe pass rate: {}/{} ({}%)", passed, probes.len(),
-                (passed * 100) / probes.len().max(1));
+            let rates: Vec<f64> = probes.iter().map(|p|
+                vs.iter().filter(|e| e.niche_scores.get(&p.niche)
+                    .map(|s| *s >= 0.5).unwrap_or(false)).count() as f64
+                    / vs.len().max(1) as f64).collect();
+            println!("  probe pass rate: {}/{} ({}%)  {}", passed, probes.len(),
+                (passed * 100) / probes.len().max(1), spark(&rates));
         }
     }
     // champion — the family's peak-fitness variant (the flagship)
