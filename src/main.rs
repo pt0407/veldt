@@ -1019,6 +1019,23 @@ fn print_stats(veldt: &veldt::Veldt) {
         seed, estab, canon);
     println!("probes: {} across {} families | deaths: {} | runs: {}",
         probe_count, veldt.probes.len(), veldt.obituaries.len(), veldt.run_count);
+    if std::env::args().any(|a| a == "--top") {
+        let mut fam: Vec<(&String, f64)> = veldt.functions.iter()
+            .map(|(n, vs)| (n, vs.iter().map(|e| e.fitness)
+                .fold(f64::NEG_INFINITY, f64::max))).collect();
+        fam.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        for (n, f) in fam.iter().take(5) {
+            println!("  {} peak {:.2}", n, f);
+        }
+        if veldt.fitness_history.len() >= 2 {
+            let trend = veldt.fitness_history.iter().map(|f| format!("{:.2}", f))
+                .collect::<Vec<_>>();
+            let arrow = if veldt.fitness_history.last() > veldt.fitness_history.first() { "↑" }
+                        else if veldt.fitness_history.last() < veldt.fitness_history.first() { "↓" } else { "→" };
+            println!("fitness trend: {} → {} {}", trend.first().unwrap(), trend.last().unwrap(), arrow);
+        }
+        return;
+    }
     if std::env::args().any(|a| a == "--brief") {
         if veldt.fitness_history.len() >= 2 {
             let trend = veldt.fitness_history.iter().map(|f| format!("{:.2}", f))
