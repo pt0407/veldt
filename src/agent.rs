@@ -10,7 +10,7 @@ use crate::health::HealthChecker;
 use crate::interpreter::Interpreter;
 use crate::lexer::Lexer;
 use crate::parser::Parser;
-use crate::veldt::{Health, Veldt};
+use crate::veldt::{FunctionEntry, Health, Veldt};
 use serde::Serialize;
 
 #[derive(Serialize, Debug)]
@@ -245,6 +245,9 @@ pub fn respond(task: &str, editor_source: &str, veldt: &mut Veldt) -> AgentRespo
         if find_lineage(&words, veldt).is_some() {
             return family_intent(&words, veldt);
         }
+    }
+    if has(&["attention", "triage", "weakest", "worst", "risky", "riskiest", "what needs", "needs work", "struggling"]) {
+        return triage_intent(veldt);
     }
     if has(&["garden", "status", "alive", "what's growing", "what is growing", "what have you", "ecosystem"]) {
         return status_intent(veldt);
@@ -624,6 +627,44 @@ fn family_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
     }
     text.push_str(&format!("  origins: {}", origins.iter()
         .map(|(o, c)| format!("{}×{}", o, c)).collect::<Vec<_>>().join(", ")));
+    plain(&text)
+}
+
+/// Triage — the variants that need attention across the whole garden.
+fn triage_intent(veldt: &Veldt) -> AgentResponse {
+    let mut sick: Vec<(&String, &FunctionEntry)> = Vec::new();
+    let mut dying: Vec<(&String, &FunctionEntry)> = Vec::new();
+    let mut weakest: Vec<(&String, &FunctionEntry)> = Vec::new();
+    for (name, vs) in &veldt.functions {
+        for e in vs {
+            if matches!(e.health, Health::Sick(_)) { sick.push((name, e)); }
+            if matches!(e.health, Health::Dying) { dying.push((name, e)); }
+        }
+        if let Some(w) = vs.iter().min_by(|a, b| a.fitness.partial_cmp(&b.fitness)
+            .unwrap_or(std::cmp::Ordering::Equal)) {
+            weakest.push((name, w));
+        }
+    }
+    if sick.is_empty() && dying.is_empty() {
+        return plain("Nothing needs attention — the garden is healthy.");
+    }
+    let mut text = String::from("Triage:\n");
+    for (n, e) in &dying {
+        text.push_str(&format!("  DYING {}#{}\n", n, e.id));
+    }
+    for (n, e) in sick.iter().take(10) {
+        let err = match &e.health { Health::Sick(m) => m.as_str(), _ => "" };
+        text.push_str(&format!("  sick {}#{} — {}\n", n, e.id, err));
+    }
+    if sick.len() > 10 {
+        text.push_str(&format!("  ... {} more sick\n", sick.len() - 10));
+    }
+    weakest.sort_by(|a, b| a.1.fitness.partial_cmp(&b.1.fitness)
+        .unwrap_or(std::cmp::Ordering::Equal));
+    text.push_str("  weakest per family:");
+    for (n, e) in weakest.iter().take(5) {
+        text.push_str(&format!(" {}#{}({:.2})", n, e.id, e.fitness));
+    }
     plain(&text)
 }
 
