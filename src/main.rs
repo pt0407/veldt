@@ -1968,6 +1968,23 @@ fn main() {
             } else {
                 print_stats(&veldt);
             }
+            // --verified — bounded-check census across multi-variant
+            // families on one shared interpreter (no per-family reload)
+            if args.iter().any(|a| a == "--verified") {
+                let mut interp = interpreter::Interpreter::new();
+                veldt.load_into_interpreter(&mut interp);
+                let (mut ok, mut div, mut single) = (0usize, 0usize, 0usize);
+                for name in veldt.functions.keys() {
+                    if veldt.functions[name].len() < 2 { single += 1; continue; }
+                    match verify_on_interp(&mut interp, name, false) {
+                        Some(id) => { div += 1;
+                            eprintln!("  {}#{} diverges", name, id); }
+                        None => { ok += 1; }
+                    }
+                }
+                println!("[verified] {} verified, {} divergent, {} single-variant",
+                    ok, div, single);
+            }
             // --watch — re-render on a 2s poll until interrupted
             if args.iter().any(|a| a == "--watch") {
                 loop {
@@ -5068,6 +5085,13 @@ pub fn verify_family_find_divergent(name: &str) -> Option<u32> {
     if veldt.load().is_err() { return None; }
     let mut interp = interpreter::Interpreter::new();
     veldt.load_into_interpreter(&mut interp);
+    verify_on_interp(&mut interp, name, true)
+}
+
+/// Bounded check on a pre-loaded interpreter — same logic, shared for
+/// census callers (stats --verified) that check every family.
+pub fn verify_on_interp(interp: &mut interpreter::Interpreter,
+                        name: &str, verbose: bool) -> Option<u32> {
     let variants = interp.functions.get(name)?.clone();
     if variants.len() < 2 { return None; }
     let fittest = variants.iter()
@@ -5088,12 +5112,12 @@ pub fn verify_family_find_divergent(name: &str) -> Option<u32> {
                 _ => false,
             };
             if !same {
-                println!("  {}#{}: DIVERGES", name, v.id);
+                if verbose { println!("  {}#{}: DIVERGES", name, v.id); }
                 found = Some(v.id);
                 break;
             }
         }
-        if found.is_none() {
+        if found.is_none() && verbose {
             println!("  {}#{}: bounded-verified", name, v.id);
         }
         if found.is_some() { break; }
