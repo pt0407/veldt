@@ -626,6 +626,8 @@ fn main() {
                 .and_then(|p| args.get(p + 1))
                 .and_then(|s| s.split_once(':')
                     .and_then(|(n, f)| Some((n.to_string(), f.parse::<f64>().ok()?))));
+            let until_healthy = args.iter().position(|a| a == "--until-healthy")
+                .and_then(|p| args.get(p + 1));
             let mut run_cycles = 0usize;
             while run_cycles < cycles {
                 let events = evolver.evolve_scoped(&mut veldt, 1,
@@ -649,6 +651,16 @@ fn main() {
                     if peak >= *target {
                         eprintln!("[EVOLVE] {} hit target {} (peak {:.2}) — stopping after {} cycles",
                             fam, target, peak, run_cycles);
+                        break;
+                    }
+                }
+                if let Some(fam) = until_healthy {
+                    let has_healthy = veldt.functions.get(fam)
+                        .map(|vs| vs.iter().any(|e| e.health == veldt::Health::Healthy))
+                        .unwrap_or(false);
+                    if has_healthy {
+                        eprintln!("[EVOLVE] {} has a healthy variant — stopping after {} cycles",
+                            fam, run_cycles);
                         break;
                     }
                 }
