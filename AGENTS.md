@@ -833,3 +833,8 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   lint/observability/watch — no overlap. --watch sweep:
   stats/garden/lineage + check (file) + test + fuzz
   (garden) all live-re-render.
+- [Devin] veldt bench --watch (HEAD post-e658b45): re-runs
+  bench_report on garden-file change — live performance
+  regression detection while evolving. --watch sweep:
+  stats/garden/lineage + check (file) + test + fuzz +
+  bench (garden) all live-re-render.
