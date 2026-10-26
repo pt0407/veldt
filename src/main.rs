@@ -3495,7 +3495,15 @@ fn print_stats(veldt: &veldt::Veldt) {
             }
         }
     }
-    best.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    // --sort <field> — top-families sort key: fitness (default) | count | name
+    let sort_field = std::env::args().nth(
+        std::env::args().position(|a| a == "--sort").map(|p| p + 1).unwrap_or(usize::MAX))
+        .unwrap_or_default();
+    match sort_field.as_str() {
+        "count" => best.sort_by(|a, b| b.2.cmp(&a.2)),
+        "name" => best.sort_by(|a, b| a.0.cmp(&b.0)),
+        _ => best.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)),
+    }
     let probe_count: usize = veldt.probes.values().map(|v| v.len()).sum();
     let (mut seed, mut estab, mut canon) = (0usize, 0usize, 0usize);
     for vs in veldt.functions.values() {
