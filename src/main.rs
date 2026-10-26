@@ -5022,10 +5022,17 @@ fn verify_family(name: &str, args: &[String]) {
     let bound: i64 = args.iter().position(|a| a == "--domain")
         .and_then(|i| args.get(i + 1))
         .and_then(|s| s.parse().ok()).unwrap_or(10);
+    let use_vm = args.iter().any(|a| a == "--vm");
     let mut veldt = veldt::Veldt::new();
     if let Err(e) = veldt.load() { eprintln!("Error: {}", e); process::exit(1); }
     let mut interp = interpreter::Interpreter::new();
     veldt.load_into_interpreter(&mut interp);
+    // --vm — the bounded check runs through jit_call instead of
+    // call_function (same dispatch semantics, the fast engine)
+    let mut vfy_vm = if use_vm {
+        let mut v = crate::vm::Vm::new();
+        if v.load_garden(&veldt).is_err() { None } else { Some(v) }
+    } else { None };
     let variants = match interp.functions.get(name) {
         Some(v) => v.clone(),
         None => { println!("No lineage '{}'", name); return; }
@@ -5068,8 +5075,14 @@ fn verify_family(name: &str, args: &[String]) {
         let n_combos = combos.len();
         'outer: for combo in combos {
             // eval quietly — side-effect prints pollute the report
-            let a = interp.call_function(name, Some(v.id), combo.iter().map(|n| crate::interpreter::Value::Int(*n)).collect());
-            let b = interp.call_function(name, Some(fittest.id), combo.iter().map(|n| crate::interpreter::Value::Int(*n)).collect());
+            let mk = |n: i64| vec![crate::interpreter::Value::Int(n); combo.len().min(arity.max(1))];
+            let mut call = |nm: &str, id: Option<u32>, args: Vec<crate::interpreter::Value>| {
+                if let Some(v) = &mut vfy_vm { v.jit_call(nm, id, args) }
+                else { interp.call_function(nm, id, args) }
+            };
+            let a = call(name, Some(v.id), combo.iter().map(|n| crate::interpreter::Value::Int(*n)).collect());
+            let b = call(name, Some(fittest.id), combo.iter().map(|n| crate::interpreter::Value::Int(*n)).collect());
+            let _ = mk;
             checked += 1;
             let same = match (&a, &b) {
                 (Ok(x), Ok(y)) => x == y,
@@ -5133,6 +5146,18 @@ pub fn verify_family_find_divergent(name: &str) -> Option<u32> {
 pub fn verify_on_interp(interp: &mut interpreter::Interpreter,
                         name: &str, verbose: bool) -> Option<u32> {
     let variants = interp.functions.get(name)?.clone();
+    verify_with(
+        |n, id, a| interp.call_function(n, id, a),
+        variants, name, verbose)
+}
+
+/// The bounded check over an engine-abstract `call` — interp vs
+/// VM jit_call share the same divergence detection.
+pub fn verify_with(
+    mut call: impl FnMut(&str, Option<u32>, Vec<crate::interpreter::Value>)
+        -> Result<crate::interpreter::Value, String>,
+    variants: Vec<interpreter::FunctionVariant>,
+    name: &str, verbose: bool) -> Option<u32> {
     if variants.len() < 2 { return None; }
     let fittest = variants.iter()
         .max_by(|a, b| a.fitness.partial_cmp(&b.fitness)
@@ -5144,8 +5169,8 @@ pub fn verify_on_interp(interp: &mut interpreter::Interpreter,
         for x in -10..=10i64 {
             let args: Vec<crate::interpreter::Value> =
                 vec![crate::interpreter::Value::Int(x); arity.max(1)];
-            let a = interp.call_function(name, Some(v.id), args.clone());
-            let b = interp.call_function(name, Some(fittest.id), args);
+            let a = call(name, Some(v.id), args.clone());
+            let b = call(name, Some(fittest.id), args);
             let same = match (&a, &b) {
                 (Ok(p), Ok(q)) => p == q,
                 (Err(_), Err(_)) => true,
