@@ -2288,7 +2288,8 @@ fn print_stats(veldt: &veldt::Veldt) {
                 .collect::<Vec<_>>();
             let arrow = if veldt.fitness_history.last() > veldt.fitness_history.first() { "↑" }
                         else if veldt.fitness_history.last() < veldt.fitness_history.first() { "↓" } else { "→" };
-            println!("fitness trend: {} → {} {}", trend.first().unwrap(), trend.last().unwrap(), arrow);
+            println!("fitness trend: {} → {} {}  {}", trend.first().unwrap(),
+                trend.last().unwrap(), arrow, spark(&veldt.fitness_history));
         }
         return;
     }
@@ -2298,7 +2299,8 @@ fn print_stats(veldt: &veldt::Veldt) {
                 .collect::<Vec<_>>();
             let arrow = if veldt.fitness_history.last() > veldt.fitness_history.first() { "↑" }
                         else if veldt.fitness_history.last() < veldt.fitness_history.first() { "↓" } else { "→" };
-            println!("fitness trend: {} → {} {}", trend.first().unwrap(), trend.last().unwrap(), arrow);
+            println!("fitness trend: {} → {} {}  {}", trend.first().unwrap(),
+                trend.last().unwrap(), arrow, spark(&veldt.fitness_history));
         }
         return;
     }
@@ -2926,7 +2928,8 @@ fn print_stats(veldt: &veldt::Veldt) {
         let (first, last) = (trend.first().unwrap(), trend.last().unwrap());
         let arrow = if veldt.fitness_history.last() > veldt.fitness_history.first() { "↑" }
                     else if veldt.fitness_history.last() < veldt.fitness_history.first() { "↓" } else { "→" };
-        println!("fitness trend: {} → {} {}", first, last, arrow);
+        println!("fitness trend: {} → {} {}  {}", first, last, arrow,
+            spark(&veldt.fitness_history));
     }
     // coverage line — which families carry probe mass vs bare lineages
     let bare: Vec<&String> = veldt.functions.keys()
@@ -3505,6 +3508,19 @@ fn self_cmp(e: &ast::Expr) -> bool {
             || cond.as_ref().map(|c| self_cmp(c)).unwrap_or(false),
         _ => false,
     }
+}
+
+/// ASCII sparkline — last 24 history points scaled to block chars.
+fn spark(history: &[f64]) -> String {
+    let tail: Vec<f64> = history.iter().rev().take(24).rev().copied().collect();
+    if tail.is_empty() { return String::new(); }
+    let lo = tail.iter().cloned().fold(f64::INFINITY, f64::min);
+    let hi = tail.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let bars = "▁▂▃▄▅▆▇█";
+    tail.iter().map(|v| {
+        let t = if hi > lo { (v - lo) / (hi - lo) } else { 0.5 };
+        bars.chars().nth((t * 7.0).round() as usize).unwrap_or('▁')
+    }).collect()
 }
 
 fn expr_mentions(e: &ast::Expr, name: &str) -> bool {
