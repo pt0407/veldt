@@ -337,7 +337,35 @@ fn main() {
                 eprintln!("Error loading veldt: {}", e);
                 process::exit(1);
             }
-            print_stats(&veldt);
+            if args.iter().any(|a| a == "--json") {
+                let mut total = 0usize;
+                let (mut healthy, mut sick, mut dying) = (0usize, 0usize, 0usize);
+                let (mut seed, mut estab, mut canon) = (0usize, 0usize, 0usize);
+                for vs in veldt.functions.values() {
+                    for e in vs {
+                        total += 1;
+                        match e.health {
+                            Health::Healthy => healthy += 1,
+                            Health::Sick(_) => sick += 1,
+                            Health::Dying => dying += 1,
+                        }
+                        match e.trust {
+                            veldt::Trust::Seedling => seed += 1,
+                            veldt::Trust::Established => estab += 1,
+                            veldt::Trust::Canonical => canon += 1,
+                        }
+                    }
+                }
+                println!("{}", serde_json::json!({
+                    "lineages": veldt.functions.len(), "variants": total,
+                    "healthy": healthy, "sick": sick, "dying": dying,
+                    "seedling": seed, "established": estab, "canonical": canon,
+                    "probes": veldt.probes.values().map(|v| v.len()).sum::<usize>(),
+                    "deaths": veldt.obituaries.len(), "runs": veldt.run_count,
+                }));
+            } else {
+                print_stats(&veldt);
+            }
         }
         "bench" => {
             let mut veldt = veldt::Veldt::new();
