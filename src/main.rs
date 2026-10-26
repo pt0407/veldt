@@ -2059,6 +2059,13 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
             out.push(format!("fn {} defined but never called", name));
         }
     }
+    // no top-level statements — a file with only fn defs is a module
+    let has_toplevel = stmts.iter().any(|s| !matches!(s,
+        Stmt::FnDef(..) | Stmt::Grow(GrowItem::Fn(..)) | Stmt::Grow(GrowItem::Struct(..))
+        | Stmt::Struct(..) | Stmt::Import(..) | Stmt::TypeAlias(..)));
+    if !stmts.is_empty() && !has_toplevel {
+        out.push("no top-level statements — file is a module, not a program".into());
+    }
 }
 
 /// Does this block contain a loop-exit statement (break/return/continue)?
