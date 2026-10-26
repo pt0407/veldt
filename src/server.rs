@@ -67,6 +67,7 @@ pub async fn start_server(port: u16) {
         .route("/api/niche_scores", get(niche_scores))
         .route("/api/origins", get(origins))
         .route("/api/deaths", get(deaths))
+        .route("/api/selection", get(selection))
         .route("/api/run", post(run_program))
         .route("/api/evolve", post(evolve))
         .route("/api/clear", post(clear_veldt))
