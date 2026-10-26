@@ -1744,7 +1744,7 @@ fn fix_intent(words: &[&str], veldt: &mut Veldt) -> AgentResponse {
         return match (want_id, cleaned) {
             (Some(id), 0) => plain(&format!("{}#{} isn't sick and has no repairable dead code.", name, id)),
             (Some(id), n) => plain(&format!("{}#{} isn't sick — cleaned dead code from it.", name, id)),
-            (None, 0) => plain(&format!("No sick variants in the {} lineage and no repairable dead code — it's clean.", name)),
+            (None, 0) => plain(&format!("{} isn't sick and has no repairable dead code — the lineage is healthy.", name)),
             (None, n) => plain(&format!("No sick variants in {} — but cleaned dead code from {} variant{}.",
                                         name, n, if n == 1 { "" } else { "s" })),
         };
