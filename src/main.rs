@@ -2536,6 +2536,22 @@ fn print_stats(veldt: &veldt::Veldt) {
                         println!("    {:<20} {}", src, n);
                     }
                 }
+                // source fitness — avg fitness per mutation source
+                let mut src_fit: std::collections::HashMap<String, (f64, usize)> = std::collections::HashMap::new();
+                for e in vs.iter() {
+                    let src = e.origin.split(' ').next().unwrap_or("?").to_string();
+                    let entry = src_fit.entry(src).or_insert((0.0, 0));
+                    entry.0 += e.fitness; entry.1 += 1;
+                }
+                if !src_fit.is_empty() {
+                    println!("  source fitness:");
+                    let mut sorted: Vec<_> = src_fit.iter().collect();
+                    sorted.sort_by(|a, b| (b.1.0 / b.1.1.max(1) as f64)
+                        .partial_cmp(&(a.1.0 / a.1.1.max(1) as f64)).unwrap_or(std::cmp::Ordering::Equal));
+                    for (src, (t, n)) in sorted.iter().take(6) {
+                        println!("    {:<20} avg {:.2} ({} variants)", src, t / *n as f64, n);
+                    }
+                }
             }
         }
         if veldt.fitness_history.len() >= 2 {
