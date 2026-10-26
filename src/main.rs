@@ -99,10 +99,20 @@ fn main() {
         }
         "test" => {
             if args.len() < 3 {
-                eprintln!("Usage: veldt test <name>");
+                eprintln!("Usage: veldt test <name>|--all");
                 process::exit(1);
             }
-            test_family(&args[2]);
+            if args[2] == "--all" {
+                // re-trial every family — the CI sweep
+                let mut veldt = veldt::Veldt::new();
+                if let Err(e) = veldt.load() { eprintln!("Error: {}", e); process::exit(1); }
+                let names: Vec<String> = veldt.functions.keys().cloned().collect();
+                for name in &names {
+                    test_family(name);
+                }
+            } else {
+                test_family(&args[2]);
+            }
         }
         "adopt" => {
             if args.len() < 3 {
