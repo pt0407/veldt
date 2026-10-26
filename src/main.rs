@@ -566,6 +566,20 @@ fn main() {
                 }
                 println!("=== The Veldt (fitness >= {}) ===", min);
                 filtered.print_garden(sick_only, healthy_only);
+            } else if args.iter().any(|a| a == "--stale") {
+                // stale variants first — sort each family by last_used asc
+                let mut sorted = veldt::Veldt::new();
+                sorted.probes = veldt.probes.clone();
+                sorted.obituaries = veldt.obituaries.clone();
+                sorted.run_count = veldt.run_count;
+                sorted.garden_path = veldt.garden_path.clone();
+                for (name, vs) in &veldt.functions {
+                    let mut sorted_vs = vs.clone();
+                    sorted_vs.sort_by(|a, b| a.last_used.cmp(&b.last_used));
+                    sorted.functions.insert(name.clone(), sorted_vs);
+                }
+                println!("=== The Veldt (stale first) ===");
+                sorted.print_garden(sick_only, healthy_only);
             } else if args.iter().any(|a| a == "--young") {
                 // newest variants first — sort each family by age asc
                 let mut sorted = veldt::Veldt::new();
