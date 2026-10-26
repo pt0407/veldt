@@ -628,8 +628,10 @@ fn main() {
                     .and_then(|(n, f)| Some((n.to_string(), f.parse::<f64>().ok()?))));
             let until_healthy = args.iter().position(|a| a == "--until-healthy")
                 .and_then(|p| args.get(p + 1));
+            let watch = args.iter().any(|a| a == "--watch");
+            if watch { eprintln!("[EVOLVE] watch mode — Ctrl-C to stop"); }
             let mut run_cycles = 0usize;
-            while run_cycles < cycles {
+            while run_cycles < cycles || watch {
                 let events = evolver.evolve_scoped(&mut veldt, 1,
                     fam_scope.map(|s| s.as_str()));
                 for event in &events { eprintln!("{}", event.format()); }
