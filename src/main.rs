@@ -2092,8 +2092,10 @@ fn print_stats(veldt: &veldt::Veldt) {
                 let sort_field = argv.iter().position(|a| a == "--sort")
                     .and_then(|p| argv.get(p + 1)).cloned().unwrap_or_default();
                 veldt::sort_variants(&mut sorted, if sort_field.is_empty() { "fitness" } else { &sort_field });
+                let top_n = argv.iter().position(|a| a == "--top")
+                    .and_then(|p| argv.get(p + 1)).and_then(|s| s.parse::<usize>().ok()).unwrap_or(5);
                 println!("  top variants:");
-                for e in sorted.iter().take(5) {
+                for e in sorted.iter().take(top_n) {
                     println!("    {}#{} fitness {:.2} (age {})", e.name, e.id, e.fitness, e.age);
                 }
             }
