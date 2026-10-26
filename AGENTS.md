@@ -743,3 +743,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   strict checks. New: unbound Var pattern in match arms
   (non-_ var that isn't bound — evaluates to nothing,
   never matches → dead arm).
+- [Devin] Lint batch 16 (HEAD post-10fab3b): ~46 strict
+  checks. New: compound assignment (x = x + y → x += y,
+  same for -= *= /=). Fires on tictactoe's counter loops
+  — real simplification catches.
