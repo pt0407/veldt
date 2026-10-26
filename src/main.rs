@@ -3242,15 +3242,27 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
                 if let Some(lit) = const_bool(cond) {
                     out.push(format!("if on constant {} — dead branch", lit));
                 }
+                if self_cmp(cond) { out.push("condition compares a value to itself".into()); }
                 lint_block(a, out);
                 if let Some(e) = b { lint_block(e, out); }
             }
-            Stmt::While(cond, body) | Stmt::For(_, cond, body) => {
+            Stmt::While(cond, body) => {
                 if let Some(lit) = const_bool(cond) {
                     out.push(format!("loop on constant {} — dead or infinite", lit));
                 }
                 if !body.iter().any(|s| has_exit(s)) {
                     out.push("loop body has no break/return/continue — check the exit condition".into());
+                }
+                if self_cmp(cond) { out.push("loop condition compares a value to itself".into()); }
+                lint_block(body, out);
+            }
+            Stmt::For(name, _, body) => {
+                if !body.iter().any(|s| has_exit(s)) {
+                    out.push("loop body has no break/return/continue — check the exit condition".into());
+                }
+                if !name.starts_with('_')
+                    && !body.iter().any(|s| stmt_mentions(s, name)) {
+                    out.push(format!("for variable {} never used — prefix with _", name));
                 }
                 lint_block(body, out);
             }
@@ -3454,6 +3466,43 @@ fn stmt_mentions(s: &ast::Stmt, name: &str) -> bool {
         Stmt::Return(Some(e)) => expr_mentions(e, name),
         Stmt::Grow(GrowItem::Fn(_, _, body, _)) | Stmt::FnDef(_, _, body) => body.iter().any(|x| stmt_mentions(x, name)),
         Stmt::LetDestructure(_, e) => expr_mentions(e, name),
+        _ => false,
+    }
+}
+
+/// True if the expr compares a sub-expr to itself (x == x / x != x) —
+/// structural equality on operands, almost always a bug (NaN aside).
+fn self_cmp(e: &ast::Expr) -> bool {
+    use ast::*;
+    match e {
+        Expr::BinOp(a, op, b) => {
+            (matches!(op, BinOp::Eq | BinOp::Neq) && a == b)
+                || self_cmp(a) || self_cmp(b)
+        }
+        Expr::UnaryOp(_, a) => self_cmp(a),
+        Expr::Call(_, _, args) => args.iter().any(|a| self_cmp(a)),
+        Expr::Index(a, i) => self_cmp(a) || self_cmp(i),
+        Expr::Slice(o, lo, hi) => self_cmp(o)
+            || lo.as_ref().map(|x| self_cmp(x)).unwrap_or(false)
+            || hi.as_ref().map(|x| self_cmp(x)).unwrap_or(false),
+        Expr::MethodCall(a, _, args) | Expr::SafeGet(a, _, Some(args)) =>
+            self_cmp(a) || args.iter().any(|x| self_cmp(x)),
+        Expr::SafeGet(a, _, None) | Expr::FieldAccess(a, _) => self_cmp(a),
+        Expr::StructLit(_, fields) => fields.iter().any(|(_, v)| self_cmp(v)),
+        Expr::List(items) => items.iter().any(|i| self_cmp(i)),
+        Expr::Interp(parts) => parts.iter().any(|p| self_cmp(p)),
+        Expr::Lambda(_, body) => body.iter().any(|s| match s {
+            Stmt::If(c, _, _) | Stmt::While(c, _) | Stmt::For(_, c, _) => self_cmp(c),
+            Stmt::ExprStmt(e) | Stmt::Print(e) => self_cmp(e),
+            Stmt::Assign(_, e) | Stmt::Let(_, e) | Stmt::LetDestructure(_, e)
+                | Stmt::IndexAssign(_, _, e) => self_cmp(e),
+            Stmt::FieldAssign(a, _, e) => self_cmp(a) || self_cmp(e),
+            Stmt::Return(Some(e)) => self_cmp(e),
+            Stmt::Match(c, _, _) => self_cmp(c),
+            _ => false,
+        }),
+        Expr::ListComp(v, _, iter, cond) => self_cmp(v) || self_cmp(iter)
+            || cond.as_ref().map(|c| self_cmp(c)).unwrap_or(false),
         _ => false,
     }
 }
