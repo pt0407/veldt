@@ -566,6 +566,22 @@ fn main() {
                 }
                 println!("=== The Veldt (fitness >= {}) ===", min);
                 filtered.print_garden(sick_only, healthy_only);
+            } else if let Some(fam) = args.iter().position(|a| a == "--canonical_fam")
+                .and_then(|p| args.get(p + 1)).cloned() {
+                // --canonical_fam <name> — canonical-trust variants in this family
+                let mut filtered = veldt::Veldt::new();
+                filtered.probes = veldt.probes.clone();
+                filtered.obituaries = veldt.obituaries.clone();
+                filtered.run_count = veldt.run_count;
+                filtered.garden_path = veldt.garden_path.clone();
+                if let Some(vs) = veldt.functions.get(&fam) {
+                    let keep: Vec<_> = vs.iter()
+                        .filter(|e| e.trust == veldt::Trust::Canonical)
+                        .cloned().collect();
+                    if !keep.is_empty() { filtered.functions.insert(fam.clone(), keep); }
+                }
+                println!("=== The Veldt ({} canonical) ===", fam);
+                filtered.print_garden(sick_only, healthy_only);
             } else if let Some(fam) = args.iter().position(|a| a == "--dying_fam")
                 .and_then(|p| args.get(p + 1)).cloned() {
                 // --dying_fam <name> — dying variants in this family
