@@ -566,6 +566,22 @@ fn main() {
                 }
                 println!("=== The Veldt (fitness >= {}) ===", min);
                 filtered.print_garden(sick_only, healthy_only);
+            } else if let Some(parent) = args.iter().position(|a| a == "--descendants")
+                .and_then(|p| args.get(p + 1)).cloned() {
+                // --descendants <fam#id> — variants whose origin mentions this parent
+                let mut filtered = veldt::Veldt::new();
+                filtered.probes = veldt.probes.clone();
+                filtered.obituaries = veldt.obituaries.clone();
+                filtered.run_count = veldt.run_count;
+                filtered.garden_path = veldt.garden_path.clone();
+                for (name, vs) in &veldt.functions {
+                    let keep: Vec<_> = vs.iter()
+                        .filter(|e| e.origin.contains(&parent))
+                        .cloned().collect();
+                    if !keep.is_empty() { filtered.functions.insert(name.clone(), keep); }
+                }
+                println!("=== The Veldt (descendants of {}) ===", parent);
+                filtered.print_garden(sick_only, healthy_only);
             } else if let Some(spec) = args.iter().position(|a| a == "--max_niche_score")
                 .and_then(|p| args.get(p + 1)).cloned() {
                 // --max_niche_score <niche:max> — variants scoring <= max on this niche
