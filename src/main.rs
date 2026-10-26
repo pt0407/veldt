@@ -3298,6 +3298,9 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
                 if let Expr::List(items) = iter {
                     if items.is_empty() { out.push("for over an empty list — dead loop".into()); }
                 }
+                if !name.starts_with('_') && bound.iter().any(|(_, b)| *b == name) {
+                    out.push(format!("for variable {} shadows an outer let", name));
+                }
                 if !body.iter().any(|s| has_exit(s)) {
                     out.push("loop body has no break/return/continue — check the exit condition".into());
                 }
