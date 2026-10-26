@@ -913,6 +913,94 @@ async function openFile(path) {
   const res = await fetch(path);
   const text = await res.text();
   editor.setValue(text);
+  lintEditor();
+}
+
+// --- Editor lint — /api/check squiggles, same anchor heuristic
+// as the LSP: fn-name prefix -> def line, then scan the body for
+// the warning's subject (let x / f( / x = / keyword).
+function warnAnchorJS(text, w) {
+  const findDefs = (name) => {
+    const out = [];
+    text.split('\n').forEach((l, i) => {
+      const t = l.trimStart();
+      if ((t.startsWith('fn ') || t.startsWith('grow fn '))
+          && t.replace(/^grow /, '').replace(/^fn /, '').startsWith(name + '('))
+        out.push(i);
+    });
+    return out;
+  };
+  const warnTok = (msg) => {
+    const li = msg.indexOf('let ');
+    if (li >= 0) {
+      const m = msg.slice(li + 4).match(/^[A-Za-z_][A-Za-z_0-9]*/);
+      if (m) return 'let ' + m[0];
+    }
+    const ci = msg.indexOf('()');
+    if (ci > 0) {
+      const m = msg.slice(0, ci).match(/[A-Za-z_][A-Za-z_0-9]*$/);
+      if (m) return m[0] + '(';
+    }
+    const ai = msg.indexOf(' assigned');
+    if (ai > 0) {
+      const m = msg.slice(0, ai).match(/[A-Za-z_][A-Za-z_0-9]*$/);
+      if (m) return m[0] + ' =';
+    }
+    for (const kw of ['match','while','for ','catch','test ','return',
+                      'break','continue','print','if '])
+      if (msg.includes(kw)) return kw.trimEnd();
+    return null;
+  };
+  const sp = w.split(': ');
+  let def = 0, msg = w;
+  if (sp.length > 1 && !sp[0].includes(' ')) {
+    const d = findDefs(sp[0]);
+    if (d.length) { def = d[0]; msg = sp.slice(1).join(': '); }
+  } else {
+    for (const mk of ['grow fn ', 'fn ']) {
+      if (w.startsWith(mk)) {
+        const name = w.slice(mk.length).match(/^[A-Za-z_][A-Za-z_0-9]*/);
+        if (name) { const d = findDefs(name[0]); if (d.length) def = d[0]; }
+      }
+    }
+  }
+  const tok = warnTok(msg);
+  if (tok) {
+    const lines = text.split('\n');
+    for (let i = def + 1; i < lines.length; i++) {
+      const t = lines[i].trimStart();
+      if (t.startsWith('fn ') || t.startsWith('grow fn ')) break;
+      if (lines[i].includes(tok)) return i;
+    }
+  }
+  return def;
+}
+
+let lintTimer = null;
+async function lintEditor() {
+  if (!editor) return;
+  const source = editor.getValue();
+  const model = editor.getModel();
+  if (!model) return;
+  if (!source.trim()) { monaco.editor.setModelMarkers(model, 'veldt', []); return; }
+  try {
+    const res = await fetch(API + '/api/check', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source, strict: true }) });
+    const d = await res.json();
+    if (!d.ok) {
+      monaco.editor.setModelMarkers(model, 'veldt', [{
+        severity: monaco.MarkerSeverity.Error, message: d.error || 'parse error',
+        startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 200 }]);
+      return;
+    }
+    const markers = (d.warnings || []).map(w => {
+      const ln = warnAnchorJS(source, w) + 1;
+      return { severity: monaco.MarkerSeverity.Warning, message: w,
+        startLineNumber: ln, startColumn: 1, endLineNumber: ln, endColumn: 200 };
+    });
+    monaco.editor.setModelMarkers(model, 'veldt', markers);
+  } catch (e) { /* server without /api/check — leave markers stale */ }
 }
 
 // --- Rendering ---
@@ -1261,6 +1349,13 @@ async function sendAgentTask() {
 // --- Event handlers ---
 document.getElementById('tabInspector').addEventListener('click', () => switchTab('inspector'));
 document.getElementById('tabAgent').addEventListener('click', () => switchTab('agent'));
+// debounced re-lint as the user types — the same ~91 checks
+// check --strict runs, as editor squiggles
+editor.onDidChangeModelContent(() => {
+  clearTimeout(lintTimer);
+  lintTimer = setTimeout(lintEditor, 800);
+});
+lintEditor();
 document.getElementById('agentSend').addEventListener('click', sendAgentTask);
 document.getElementById('agentInput').addEventListener('keydown', e => {
   if (e.key === 'Enter') sendAgentTask();
