@@ -115,3 +115,16 @@ fn try_catch_parity() {
         let ok = 7
     "#, &["ok"]);
 }
+
+#[test]
+fn jit_engages_on_hot_fn() {
+    let src = r#"
+        fn hot(x: int) { return x * 2 + 1 }
+        let acc = 0
+        for i in range(300) { acc = acc + hot(i) }
+    "#;
+    let mut v = vm_globals(src);
+    let _ = &mut v;
+    assert!(v.fns["hot"][0].jit.borrow().is_some(),
+        "hot() should have been JIT-compiled after 64 calls");
+}

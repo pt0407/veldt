@@ -1,5 +1,6 @@
 // Veldt CLI — main entry point
 
+mod jit;
 mod agent;
 mod ast;
 mod evolve;

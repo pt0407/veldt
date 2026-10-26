@@ -15,7 +15,7 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 #[derive(Debug, Clone, Copy)]
-enum Instr {
+pub enum Instr {
     // u32 fields index into Chunk.consts / Chunk.names — Instr stays
     // Copy so dispatch is a plain match on a copied instr, no heap.
     Const(u32),             // const pool index
@@ -55,18 +55,21 @@ enum Instr {
     Halt,
 }
 
-struct Chunk {
-    code: Vec<Instr>,
-    consts: Vec<Value>,
-    names: Vec<String>,
-    slot_names: Vec<String>,   // slot idx -> var name (for closure capture)
+pub struct Chunk {
+    pub(crate) code: Vec<Instr>,
+    pub(crate) consts: Vec<Value>,
+    pub(crate) names: Vec<String>,
+    pub(crate) slot_names: Vec<String>,   // slot idx -> var name (for closure capture)
 }
 
-struct CompiledFn {
-    id: u32,
-    fitness: f64,
-    params: Vec<String>,
-    code: Rc<Chunk>,   // shared — call pushes an Rc bump, not a clone
+pub struct CompiledFn {
+    pub id: u32,
+    pub fitness: f64,
+    pub params: Vec<String>,
+    pub code: Rc<Chunk>,   // shared — call pushes an Rc bump, not a clone
+    pub calls: std::cell::Cell<u64>,
+    pub jit_tried: std::cell::Cell<bool>,
+    pub jit: std::cell::RefCell<Option<crate::jit::JitFn>>,
 }
 
 struct Frame {
@@ -79,7 +82,7 @@ struct Frame {
 }
 
 pub struct Vm {
-    fns: HashMap<String, Vec<CompiledFn>>,
+    pub fns: HashMap<String, Vec<CompiledFn>>,
     pub globals: HashMap<String, Value>,
     helper: Interpreter,                // delegation for builtins/methods
     pub steps: u64,
@@ -550,6 +553,9 @@ impl Vm {
                         id, fitness: 1.0,
                         params: params.iter().map(|p| p.name.clone()).collect(),
                         code: Rc::new(code),
+                        calls: std::cell::Cell::new(0),
+                        jit_tried: std::cell::Cell::new(false),
+                        jit: std::cell::RefCell::new(None),
                     });
                 }
                 _ => {}
@@ -581,6 +587,9 @@ impl Vm {
                         fitness: entry.fitness,
                         params: entry.params.iter().map(|p| p.name.clone()).collect(),
                         code: Rc::new(code),
+                        calls: std::cell::Cell::new(0),
+                        jit_tried: std::cell::Cell::new(false),
+                        jit: std::cell::RefCell::new(None),
                     });
                 }
             }
@@ -651,6 +660,9 @@ impl Vm {
                 let entry = CompiledFn {
                     id: 1, fitness: 1.0,
                     params: pnames, code: std::rc::Rc::new(code),
+                    calls: std::cell::Cell::new(0),
+                    jit_tried: std::cell::Cell::new(false),
+                    jit: std::cell::RefCell::new(None),
                 };
                 if let Some(a) = alias {
                     self.fns.entry(format!("{}::{}", a, name))
@@ -658,12 +670,18 @@ impl Vm {
                             id: 1, fitness: 1.0,
                             params: entry.params.clone(),
                             code: entry.code.clone(),
+                            calls: std::cell::Cell::new(0),
+                            jit_tried: std::cell::Cell::new(false),
+                            jit: std::cell::RefCell::new(None),
                         });
                     self.fns.entry(name.clone())
                         .or_insert_with(|| vec![CompiledFn {
                             id: 1, fitness: 1.0,
                             params: entry.params.clone(),
                             code: entry.code.clone(),
+                            calls: std::cell::Cell::new(0),
+                            jit_tried: std::cell::Cell::new(false),
+                            jit: std::cell::RefCell::new(None),
                         }]);
                 } else {
                     self.fns.entry(name.clone()).or_default().push(entry);
@@ -937,6 +955,26 @@ impl Vm {
                     if args.len() != chosen.params.len() {
                         return Err(format!("{} expects {} args, got {}",
                             name, chosen.params.len(), args.len()));
+                    }
+                    // tier-2: after HOT_CALLS invocations on all-int
+                    // inputs, JIT the bytecode to native and call it.
+                    chosen.calls.set(chosen.calls.get() + 1);
+                    if chosen.calls.get() >= 64 && !chosen.jit_tried.get() {
+                        chosen.jit_tried.set(true);
+                        *chosen.jit.borrow_mut() = crate::jit::try_compile(
+                            &chosen.code, chosen.params.len());
+                    }
+                    if let Some(j) = chosen.jit.borrow().as_ref() {
+                        if args.iter().all(|a| matches!(a, Value::Int(_))) {
+                            let argv: Vec<i64> = args.iter().map(|a|
+                                if let Value::Int(n) = a { *n } else { 0 }
+                            ).collect();
+                            let f: crate::jit::NativeFn =
+                                unsafe { std::mem::transmute(j.code_ptr) };
+                            let r = unsafe { f(argv.as_ptr()) };
+                            stack.push(Value::Int(r));
+                            return Ok(());
+                        }
                     }
                     let env: Vec<Option<Value>> =
                         args.into_iter().map(Some).collect();
