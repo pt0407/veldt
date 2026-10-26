@@ -979,7 +979,7 @@ fn fmt_check(path: &str) {
 /// veldt check --strict — lint-lite warnings on a parsed program:
 /// grow fns without test clauses, statements after return, lets
 /// bound but never referenced.
-fn lint(stmts: &[ast::Stmt]) -> Vec<String> {
+pub fn lint(stmts: &[ast::Stmt]) -> Vec<String> {
     use ast::*;
     let mut out = Vec::new();
     lint_block(stmts, &mut out);

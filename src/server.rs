@@ -32,6 +32,7 @@ pub async fn start_server(port: u16) {
         .route("/api/fuzz", post(fuzz_family))
         .route("/api/absorb", post(absorb))
         .route("/api/stats", get(stats))
+        .route("/api/check", post(check_source))
         .route("/api/run", post(run_program))
         .route("/api/evolve", post(evolve))
         .route("/api/clear", post(clear_veldt))
@@ -92,6 +93,28 @@ async fn stats(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
         "probes": v.probes.values().map(|p| p.len()).sum::<usize>(),
         "deaths": v.obituaries.len(), "runs": v.run_count,
     }))
+}
+
+#[derive(Deserialize)]
+struct CheckRequest { source: String }
+
+async fn check_source(
+    Json(req): Json<CheckRequest>,
+) -> Json<serde_json::Value> {
+    // parse + lint the posted source — returns warnings JSON
+    let mut lx = crate::lexer::Lexer::new(&req.source);
+    let res = lx.tokenize().map_err(|e| format!("lex: {}", e))
+        .and_then(|t| {
+            let mut p = crate::parser::Parser::new_with_lines(t, lx.token_lines.clone());
+            p.parse_program().map_err(|e| format!("parse: {}", e))
+        });
+    match res {
+        Ok(stmts) => {
+            let warnings = crate::lint(&stmts);
+            Json(serde_json::json!({"ok": true, "warnings": warnings}))
+        }
+        Err(e) => Json(serde_json::json!({"ok": false, "error": e})),
+    }
 }
 
 async fn absorb(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
