@@ -1800,6 +1800,11 @@ fn main() {
                         .unwrap_or(std::cmp::Ordering::Equal));
                     let mut origins: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
                     for e in vs.iter() { *origins.entry(e.origin.clone()).or_insert(0) += 1; }
+                    let mut sorted = |f: fn(&crate::veldt::FunctionEntry) -> f64| {
+                        let mut v: Vec<f64> = vs.iter().map(f).collect();
+                        v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                        v
+                    };
                     serde_json::json!({
                         "family": fam,
                         "traces": veldt.traces.get(&fam).map(|t| t.len()).unwrap_or(0),
@@ -1809,6 +1814,11 @@ fn main() {
                         "origins": origins,
                         "champion": champ.map(|e| serde_json::json!({"id": e.id, "fitness": e.fitness})),
                         "weakest": weak.map(|e| serde_json::json!({"id": e.id, "fitness": e.fitness})),
+                        "fitness_dist": sorted(|e| e.fitness),
+                        "age_dist": sorted(|e| e.age as f64),
+                        "usage_dist": sorted(|e| e.usage_count as f64),
+                        "size_dist": sorted(|e| crate::fmt::format_program(&e.body).len() as f64),
+                        "eff_dist": sorted(|e| e.efficiency),
                     }).as_object().unwrap().clone()
                 } else {
                     serde_json::Map::new()
