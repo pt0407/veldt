@@ -46,6 +46,7 @@ pub async fn start_server(port: u16) {
         .route("/api/obituaries", get(obituaries))
         .route("/api/traces", get(traces))
         .route("/api/probes", get(probes))
+        .route("/api/niches", get(niches))
         .route("/api/run", post(run_program))
         .route("/api/evolve", post(evolve))
         .route("/api/clear", post(clear_veldt))
@@ -210,6 +211,27 @@ async fn probes() -> Json<serde_json::Value> {
         "niches": ps.iter().map(|p| p.niche.clone()).collect::<Vec<_>>(),
     })).collect();
     Json(serde_json::json!({"probes": pr}))
+}
+
+async fn niches() -> Json<serde_json::Value> {
+    let mut veldt = veldt::Veldt::new();
+    if veldt.load().is_err() {
+        return Json(serde_json::json!({"error": "garden load failed"}));
+    }
+    let mut niche_data: std::collections::HashMap<String, (usize, f64, f64)> =
+        std::collections::HashMap::new();
+    for vs in veldt.functions.values() {
+        for e in vs {
+            for (n, s) in &e.niche_scores {
+                let ent = niche_data.entry(n.clone()).or_default();
+                ent.0 += 1; ent.1 += s; ent.2 = s.max(ent.2);
+            }
+        }
+    }
+    let ni: Vec<serde_json::Value> = niche_data.iter().map(|(n, (c, s, mx))| serde_json::json!({
+        "niche": n, "count": c, "avg": s / (*c).max(1) as f64, "max": mx,
+    })).collect();
+    Json(serde_json::json!({"niches": ni}))
 }
 
 #[derive(Deserialize)]
