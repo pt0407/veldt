@@ -4920,7 +4920,10 @@ fn print_family_detail(veldt: &veldt::Veldt, fam: &String, vs: &[veldt::Function
         let avg = effs.iter().sum::<f64>() / effs.len() as f64;
         let max = effs.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
         let min = effs.iter().cloned().fold(f64::INFINITY, f64::min);
-        println!("  efficiency: {:.2}x – {:.2}x (avg {:.2}x)", min, max, avg);
+        let mut sorted = effs.clone();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        println!("  efficiency: {:.2}x – {:.2}x (avg {:.2}x)  {}", min, max, avg,
+            spark(&sorted));
     }
     // born — the family's birth timeline
     let borns: Vec<u64> = vs.iter().map(|e| e.born).collect();
