@@ -2309,7 +2309,7 @@ fn print_stats(veldt: &veldt::Veldt) {
                 println!("  lifecycle: {} growing · {} aging", growing, aging);
                 // workload — overworked (usage > lifespan) vs underused (usage < lifespan)
                 let over = vs.iter().filter(|e| e.usage_count as f64 > e.lifespan).count();
-                let under = vs.iter().filter(|e| e.usage_count as f64 < e.lifespan).count();
+                let under = vs.iter().filter(|e| (e.usage_count as f64) < e.lifespan).count();
                 println!("  workload: {} overworked · {} underused", over, under);
                 // source success — which mutation sources produced healthy variants
                 let mut src_healthy: std::collections::HashMap<String, (usize, usize)> = std::collections::HashMap::new();
@@ -2414,11 +2414,14 @@ fn print_stats(veldt: &veldt::Veldt) {
                 if !all_niches.is_empty() {
                     let mut niches: Vec<_> = all_niches.iter().collect();
                     niches.sort();
-                    let header: Vec<_> = niches.iter().take(6).map(|n| n.split(':').last().unwrap_or(n)).collect();
+                    let header: Vec<_> = niches.iter().take(6).map(|n| {
+                        let s: &str = n.as_str();
+                        s.rsplit(':').next().unwrap_or(s)
+                    }).collect();
                     println!("  niche matrix ({}):", header.join(" "));
                     for e in vs.iter().take(6) {
                         let scores: Vec<_> = niches.iter().take(6).map(|n|
-                            format!("{:.2}", e.niche_scores.get(*n).copied().unwrap_or(0.0))).collect();
+                            format!("{:.2}", e.niche_scores.get(n.as_str()).copied().unwrap_or(0.0))).collect();
                         println!("    {}#{:<3} {}", e.name, e.id, scores.join(" "));
                     }
                 }
@@ -2438,7 +2441,7 @@ fn print_stats(veldt: &veldt::Veldt) {
                 if borns.len() > 1 {
                     let mut runs: Vec<_> = borns.iter().collect();
                     runs.sort_by_key(|(r, _)| *r);
-                    let timeline: Vec<_> = runs.iter().map(|(r, n)| format!("{}:{}", r % 100, n)).collect();
+                    let timeline: Vec<_> = runs.iter().map(|(r, n)| format!("{}:{}", **r % 100, n)).collect();
                     println!("  birth timeline: {}", timeline.join(" "));
                 }
                 // siblings — variants sharing a parent (the sibling map)
@@ -2490,7 +2493,7 @@ fn print_stats(veldt: &veldt::Veldt) {
                     }
                 }
                 let gaps: Vec<_> = niche_avg.iter()
-                    .filter(|(_, (t, n))| *n > 0 && *t / *n as f64 < 0.5).collect();
+                    .filter(|(_, (t, n))| *n > 0 && (*t / *n as f64) < 0.5).collect();
                 if !gaps.is_empty() {
                     println!("  niche gaps:");
                     for (niche, (t, n)) in gaps.iter().take(5) {
@@ -3591,6 +3594,34 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
         | Stmt::StructDef(..) | Stmt::Import(..)));
     if !stmts.is_empty() && !has_toplevel {
         out.push("no top-level statements — file is a module, not a program".into());
+    }
+    // duplicate fn defs — same name defined twice in this block
+    let mut fndefs: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    for s in stmts {
+        let name = match s {
+            Stmt::FnDef(n, _, _) | Stmt::Grow(GrowItem::Fn(n, _, _, _)) => Some(n.as_str()),
+            _ => None,
+        };
+        if let Some(n) = name {
+            if !fndefs.insert(n) {
+                out.push(format!("fn {} defined twice in this block — later def shadows", n));
+            }
+        }
+    }
+    // empty bodies + non-exhaustive match + empty test clauses
+    for s in stmts {
+        match s {
+            Stmt::FnDef(n, _, body) if body.is_empty() =>
+                out.push(format!("fn {} has an empty body", n)),
+            Stmt::Grow(GrowItem::Fn(n, _, body, _)) if body.is_empty() =>
+                out.push(format!("grow fn {} has an empty body", n)),
+            Stmt::Match(_, _, None) =>
+                out.push("match without else arm — non-exhaustive on unmatched inputs".into()),
+            Stmt::Grow(GrowItem::Fn(n, _, _, tests))
+                if !tests.is_empty() && tests.iter().all(|t| t.expected.is_none()) =>
+                out.push(format!("grow fn {} tests are all property-only — no expected values", n)),
+            _ => {}
+        }
     }
 }
 
