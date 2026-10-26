@@ -33,6 +33,7 @@ pub async fn start_server(port: u16) {
         .route("/api/absorb", post(absorb))
         .route("/api/stats", get(stats))
         .route("/api/check", post(check_source))
+        .route("/api/tournament", post(tournament))
         .route("/api/run", post(run_program))
         .route("/api/evolve", post(evolve))
         .route("/api/clear", post(clear_veldt))
@@ -64,6 +65,16 @@ async fn fuzz_family(
     let report = resp.reply;
     { let mut v = state.veldt.lock().unwrap(); *v = veldt; }
     Json(serde_json::json!({ "report": report }))
+}
+
+#[derive(Deserialize)]
+struct TournamentRequest { url: String }
+
+async fn tournament(
+    Json(req): Json<TournamentRequest>,
+) -> Json<serde_json::Value> {
+    crate::tournament(&req.url, None);
+    Json(serde_json::json!({ "ok": true, "url": req.url }))
 }
 
 async fn stats(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
