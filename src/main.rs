@@ -2993,8 +2993,11 @@ fn print_stats(veldt: &veldt::Veldt) {
     }
     if !best.is_empty() {
         println!("top families:");
+        let peak = best.iter().take(10)
+            .map(|(_, _, f, _)| *f).fold(f64::NEG_INFINITY, f64::max);
         for (name, _key, fit, n) in best.iter().take(10) {
-            println!("  {:<20} fitness {:>5.2}  ({} variants)", name, fit, n);
+            let bar = "█".repeat(((fit / peak.max(f64::EPSILON)) * 8.0).round() as usize);
+            println!("  {:<20} fitness {:>5.2}  {}  ({} variants)", name, fit, bar, n);
         }
     }
 }
