@@ -709,8 +709,18 @@ fn main() {
                                         .unwrap_or(std::cmp::Ordering::Equal)));
                             let key = fit.map(|f|
                                 format!("{}#{}", name, f.id));
-                            let reason = key.and_then(|k|
-                                engine.fail_at.get(&k).copied())
+                            // deciding attempt is the value-mode one
+                            // (last tried) — fall back through the
+                            // scalar keys for older entries
+                            let reason = key.and_then(|k| {
+                                for suf in ["$v", "$f", ""] {
+                                    let kk = format!("{}{}", k, suf);
+                                    if let Some(pc) = engine.fail_at.get(&kk) {
+                                        return Some(*pc);
+                                    }
+                                }
+                                None
+                            })
                                 .and_then(|pc| fit
                                     .map(|f| format!(" at pc {}: {:?}",
                                         pc, f.code.code.get(pc))))
