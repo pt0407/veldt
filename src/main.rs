@@ -1076,6 +1076,15 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
             }
         }
     }
+    // shadowed lets — `let x` redefining an earlier `let x` in the same block
+    let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    for s in stmts {
+        if let Stmt::Let(name, _) = s {
+            if !seen.insert(name.as_str()) {
+                out.push(format!("let {} shadows an earlier binding in this block", name));
+            }
+        }
+    }
 }
 
 fn stmt_mentions(s: &ast::Stmt, name: &str) -> bool {
