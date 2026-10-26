@@ -3504,8 +3504,8 @@ fn print_stats(veldt: &veldt::Veldt) {
     let mut healthy = 0usize;
     let mut sick = 0usize;
     let mut dying = 0usize;
-    // (name, peak_fitness, count, avg_age, total_usage, avg_size)
-    let mut best: Vec<(String, f64, usize, f64, u64, f64)> = Vec::new();
+    // (name, peak_fitness, count, avg_age, total_usage, avg_size, probes, deaths)
+    let mut best: Vec<(String, f64, usize, f64, u64, f64, usize, usize)> = Vec::new();
     for (name, variants) in &veldt.functions {
         let top = variants.iter().map(|e| e.fitness)
             .fold(f64::NEG_INFINITY, f64::max);
@@ -3515,8 +3515,10 @@ fn print_stats(veldt: &veldt::Veldt) {
         let avg_size = variants.iter()
             .map(|e| crate::fmt::format_program(&e.body).len() as f64)
             .sum::<f64>() / n;
+        let probes = veldt.probes.get(name).map(|p| p.len()).unwrap_or(0);
+        let deaths = veldt.obituaries.iter().filter(|o| o.name == *name).count();
         best.push((name.clone(), if variants.is_empty() { 0.0 } else { top },
-            variants.len(), avg_age, usage, avg_size));
+            variants.len(), avg_age, usage, avg_size, probes, deaths));
         for e in variants {
             total += 1;
             match e.health {
@@ -3537,6 +3539,8 @@ fn print_stats(veldt: &veldt::Veldt) {
         "avg_age" => best.sort_by(|a, b| b.3.partial_cmp(&a.3).unwrap_or(std::cmp::Ordering::Equal)),
         "usage" => best.sort_by(|a, b| b.4.cmp(&a.4)),
         "size" => best.sort_by(|a, b| b.5.partial_cmp(&a.5).unwrap_or(std::cmp::Ordering::Equal)),
+        "probes" => best.sort_by(|a, b| b.6.cmp(&a.6)),
+        "deaths" => best.sort_by(|a, b| b.7.cmp(&a.7)),
         _ => best.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)),
     }
     let probe_count: usize = veldt.probes.values().map(|v| v.len()).sum();
