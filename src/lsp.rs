@@ -57,6 +57,7 @@ pub fn run_lsp() {
                         "textDocumentSync": 1,
                         "hoverProvider": true,
                         "definitionProvider": true,
+                        "documentSymbolProvider": true,
                         "completionProvider": {"triggerCharacters": [".", ":"]}
                     },
                     "serverInfo": {"name": "veldt-lsp", "version": env!("CARGO_PKG_VERSION")}
@@ -66,6 +67,7 @@ pub fn run_lsp() {
                 "textDocument/hover" => hover(params, &docs),
                 "textDocument/definition" => definition(params, &docs),
                 "textDocument/completion" => completion(params, &docs),
+                "textDocument/documentSymbol" => document_symbol(params, &docs),
                 _ => None,
             };
 
@@ -172,6 +174,37 @@ fn find_defs(text: &str, name: &str) -> Vec<u32> {
             && t.trim_start_matches("grow ").trim_start_matches("fn ")
                 .starts_with(&format!("{}(", name))
     }).map(|(i, _)| i as u32).collect()
+}
+
+/// Outline view — top-level grow fn/fn/struct declarations + lets.
+/// LSP SymbolKind: 12 Function, 13 Variable, 23 Struct.
+fn document_symbol(params: &Value, docs: &HashMap<String, Doc>) -> Option<Value> {
+    let doc = doc_of(params, docs)?;
+    let mut out = Vec::new();
+    for (line, text) in doc.text.lines().enumerate() {
+        let t = text.trim_start();
+        let (kind, name) = if t.starts_with("grow fn ") || t.starts_with("fn ") {
+            let n = t.trim_start_matches("grow fn ").trim_start_matches("fn ")
+                .split(|c: char| c == '(' || c == '<' || c.is_whitespace())
+                .next().unwrap_or("").to_string();
+            (12u32, n)
+        } else if t.starts_with("struct ") {
+            (23u32, t[7..].split(|c: char| c == '{' || c.is_whitespace())
+                .next().unwrap_or("").to_string())
+        } else if t.starts_with("let ") {
+            (13u32, t[4..].split(|c: char| c == '=' || c == ':' || c.is_whitespace())
+                .next().unwrap_or("").to_string())
+        } else { continue };
+        if name.is_empty() { continue; }
+        out.push(json!({
+            "name": name, "kind": kind,
+            "range": {"start": {"line": line as u32, "character": 0},
+                      "end": {"line": line as u32, "character": text.len() as u32}},
+            "selectionRange": {"start": {"line": line as u32, "character": 0},
+                               "end": {"line": line as u32, "character": text.len() as u32}},
+        }));
+    }
+    Some(Value::Array(out))
 }
 
 fn hover(params: &Value, docs: &HashMap<String, Doc>) -> Option<Value> {
