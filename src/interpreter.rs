@@ -3111,6 +3111,231 @@ impl Interpreter {
                 }
                 Ok(Some(Value::List(out.into_iter().collect())))
             }
+            // === std:fintech — limit-order book + matching engine ===
+            "book_new" => {
+                let mut d = im::HashMap::new();
+                d.insert("bids".to_string(), Value::List(im::vector![]));
+                d.insert("asks".to_string(), Value::List(im::vector![]));
+                Ok(Some(Value::Dict(d)))
+            }
+            "book_add" => {
+                // book_add(book, side, price, qty) — side "bid"|"ask"
+                let (d, side, price, qty) = match (args.get(0), args.get(1), args.get(2), args.get(3)) {
+                    (Some(Value::Dict(d)), Some(Value::Str(s)), Some(Value::Int(p)), Some(Value::Int(q)))
+                        => (d.clone(), s.clone(), *p, *q),
+                    (Some(Value::Dict(d)), Some(Value::Str(s)), Some(Value::Float(p)), Some(Value::Float(q)))
+                        => (d.clone(), s.clone(), *p as i64, *q as i64),
+                    _ => return Err("book_add(book, side, price, qty) expects dict + str + 2 nums".into()),
+                };
+                let key = if *side == *"bid" { "bids" } else { "asks" };
+                let mut d2 = d.clone();
+                let mut orders: im::Vector<Value> = d.get(key)
+                    .and_then(|v| if let Value::List(l) = v { Some(l.clone()) } else { None })
+                    .unwrap_or_default();
+                let mut o = im::HashMap::new();
+                o.insert("price".to_string(), Value::Int(price));
+                o.insert("qty".to_string(), Value::Int(qty));
+                o.insert("side".to_string(), Value::Str(side));
+                orders.push_back(Value::Dict(o));
+                // keep bids sorted desc, asks sorted asc
+                let mut v: Vec<Value> = orders.iter().cloned().collect();
+                v.sort_by(|a, b| {
+                    let pa = if let Value::Dict(d) = a { d.get("price").and_then(|v| if let Value::Int(i) = v { Some(*i) } else { None }).unwrap_or(0) } else { 0 };
+                    let pb = if let Value::Dict(d) = b { d.get("price").and_then(|v| if let Value::Int(i) = v { Some(*i) } else { None }).unwrap_or(0) } else { 0 };
+                    if key == "bids" { pb.cmp(&pa) } else { pa.cmp(&pb) }
+                });
+                d2.insert(key.to_string(), Value::List(v.into_iter().collect()));
+                Ok(Some(Value::Dict(d2)))
+            }
+            "book_mid" => {
+                let Some(Value::Dict(d)) = args.get(0) else { return Err("book_mid(book) expects a book".into()) };
+                let best_bid = d.get("bids").and_then(|v| if let Value::List(l) = v { l.get(0) } else { None })
+                    .and_then(|o| if let Value::Dict(d) = o { d.get("price") } else { None });
+                let best_ask = d.get("asks").and_then(|v| if let Value::List(l) = v { l.get(0) } else { None })
+                    .and_then(|o| if let Value::Dict(d) = o { d.get("price") } else { None });
+                match (best_bid, best_ask) {
+                    (Some(Value::Int(b)), Some(Value::Int(a))) => Ok(Some(Value::Float((*b as f64 + *a as f64) / 2.0))),
+                    _ => Ok(Some(Value::Null)),
+                }
+            }
+            "book_spread" => {
+                let Some(Value::Dict(d)) = args.get(0) else { return Err("book_spread(book) expects a book".into()) };
+                let best_bid = d.get("bids").and_then(|v| if let Value::List(l) = v { l.get(0) } else { None })
+                    .and_then(|o| if let Value::Dict(d) = o { d.get("price") } else { None });
+                let best_ask = d.get("asks").and_then(|v| if let Value::List(l) = v { l.get(0) } else { None })
+                    .and_then(|o| if let Value::Dict(d) = o { d.get("price") } else { None });
+                match (best_bid, best_ask) {
+                    (Some(Value::Int(b)), Some(Value::Int(a))) => Ok(Some(Value::Int(a - b))),
+                    _ => Ok(Some(Value::Null)),
+                }
+            }
+            "match_order" => {
+                // match_order(book, side, price, qty) — walk the book, fill at
+                // the best prices. Returns {filled, avg_price, book}.
+                let (d, side, price, qty) = match (args.get(0), args.get(1), args.get(2), args.get(3)) {
+                    (Some(Value::Dict(d)), Some(Value::Str(s)), Some(Value::Int(p)), Some(Value::Int(q)))
+                        => (d.clone(), s.clone(), *p, *q),
+                    _ => return Err("match_order(book, side, price, qty) expects dict + str + 2 ints".into()),
+                };
+                let contra = if *side == *"bid" { "asks" } else { "bids" };
+                let Some(Value::List(orders)) = d.get(contra) else { return Err("book: no contra side".into()) };
+                let (mut remaining, mut filled, mut cost) = (qty, 0i64, 0i64);
+                let mut new_orders = orders.clone();
+                let mut i = 0;
+                while remaining > 0 && i < new_orders.len() {
+                    if let Value::Dict(o) = &new_orders[i] {
+                        let (p, q) = (o.get("price").and_then(|v| if let Value::Int(v) = v { Some(*v) } else { None }).unwrap_or(0),
+                                      o.get("qty").and_then(|v| if let Value::Int(v) = v { Some(*v) } else { None }).unwrap_or(0));
+                        let fill = remaining.min(q);
+                        if (side.as_ref() == "bid" && p <= price) || (side.as_ref() == "ask" && p >= price) {
+                            filled += fill;
+                            cost += fill * p;
+                            remaining -= fill;
+                            if fill == q {
+                                new_orders.remove(i);
+                            } else {
+                                let mut no = o.clone();
+                                no.insert("qty".to_string(), Value::Int(q - fill));
+                                new_orders[i] = Value::Dict(no);
+                                i += 1;
+                            }
+                        } else { break; } // price crossed — book sorted
+                    } else { i += 1; }
+                }
+                let mut d2 = d.clone();
+                d2.insert(contra.to_string(), Value::List(new_orders));
+                let mut out = im::HashMap::new();
+                out.insert("filled".to_string(), Value::Int(filled));
+                out.insert("avg_price".to_string(), Value::Float(if filled > 0 { cost as f64 / filled as f64 } else { 0.0 }));
+                out.insert("book".to_string(), Value::Dict(d2));
+                Ok(Some(Value::Dict(out)))
+            }
+            // === std:robotics — sim-robot sensor/actuator ===
+            "robot_new" => {
+                // robot_new(x, y, dir, range?) — dir is "n"|"e"|"s"|"w"
+                let (x, y, dir, range) = match (args.get(0), args.get(1), args.get(2), args.get(3)) {
+                    (Some(Value::Int(x)), Some(Value::Int(y)), Some(Value::Str(d)), r)
+                        => (*x, *y, d.clone(), if let Some(Value::Int(r)) = r { *r } else { 3 }),
+                    _ => return Err("robot_new(x, y, dir, range?) expects 3 ints + str".into()),
+                };
+                let mut d = im::HashMap::new();
+                d.insert("x".to_string(), Value::Int(x));
+                d.insert("y".to_string(), Value::Int(y));
+                d.insert("dir".to_string(), Value::Str(dir));
+                d.insert("range".to_string(), Value::Int(range));
+                Ok(Some(Value::Dict(d)))
+            }
+            "robot_sensor" => {
+                // robot_sensor(robot, canvas, wall_ch) — scan ahead in the
+                // facing dir up to range; returns {dist, hit}.
+                let (r, c, wall) = match (args.get(0), args.get(1), args.get(2)) {
+                    (Some(Value::Dict(r)), Some(Value::Dict(c)), Some(Value::Str(w)))
+                        => (r, c, w.clone()),
+                    _ => return Err("robot_sensor(robot, canvas, wall_ch) expects 2 dicts + str".into()),
+                };
+                let (rx, ry) = (r.get("x").and_then(|v| if let Value::Int(x) = v { Some(*x) } else { None }),
+                                r.get("y").and_then(|v| if let Value::Int(y) = v { Some(*y) } else { None }));
+                let (Some(mut x), Some(mut y)) = (rx, ry) else { return Err("robot: missing x/y".into()) };
+                let dir = r.get("dir").and_then(|v| if let Value::Str(d) = v { Some(d.clone()) } else { None }).unwrap_or("n".into());
+                let range = r.get("range").and_then(|v| if let Value::Int(n) = v { Some(*n) } else { None }).unwrap_or(3);
+                let (dx, dy) = match dir.as_ref() { "e" => (1,0), "s" => (0,1), "w" => (-1,0), _ => (0,-1) };
+                let Some(Value::List(cells)) = c.get("cells") else { return Err("canvas: no cells".into()) };
+                let (w, h) = (c.get("w").and_then(|v| if let Value::Int(w) = v { Some(*w) } else { None }),
+                              c.get("h").and_then(|v| if let Value::Int(h) = v { Some(*h) } else { None }));
+                let (Some(w), Some(h)) = (w, h) else { return Err("canvas: missing w/h".into()) };
+                let mut dist = 0i64;
+                let mut hit = false;
+                for _ in 0..range {
+                    x += dx; y += dy;
+                    if x < 0 || y < 0 || x >= w || y >= h { hit = true; break; }
+                    if let Value::List(row) = &cells[y as usize] {
+                        if let Some(Value::Str(s)) = row.get(x as usize) {
+                            if *s == wall { hit = true; break; }
+                        }
+                    }
+                    dist += 1;
+                }
+                let mut out = im::HashMap::new();
+                out.insert("dist".to_string(), Value::Int(dist));
+                out.insert("hit".to_string(), Value::Bool(hit));
+                Ok(Some(Value::Dict(out)))
+            }
+            "robot_turn" => {
+                // robot_turn(robot, "left"|"right") — rotate facing
+                let (r, dir) = match (args.get(0), args.get(1)) {
+                    (Some(Value::Dict(r)), Some(Value::Str(d))) => (r.clone(), d.clone()),
+                    _ => return Err("robot_turn(robot, dir) expects dict + str".into()),
+                };
+                let cur = r.get("dir").and_then(|v| if let Value::Str(d) = v { Some(d.clone()) } else { None }).unwrap_or("n".into());
+                let order = ["n", "e", "s", "w"];
+                let idx = order.iter().position(|&d| d == cur.as_ref()).unwrap_or(0);
+                let next = if dir.as_ref() == "right" { order[(idx + 1) % 4] } else { order[(idx + 3) % 4] };
+                let mut d2 = r.clone();
+                d2.insert("dir".to_string(), Value::Str(next.into()));
+                Ok(Some(Value::Dict(d2)))
+            }
+            "robot_move" => {
+                // robot_move(robot, canvas, wall_ch) — step ahead if clear;
+                // returns {robot, moved}.
+                let (r, c, wall) = match (args.get(0), args.get(1), args.get(2)) {
+                    (Some(Value::Dict(r)), Some(Value::Dict(c)), Some(Value::Str(w)))
+                        => (r.clone(), c, w.clone()),
+                    _ => return Err("robot_move(robot, canvas, wall_ch) expects 2 dicts + str".into()),
+                };
+                let (rx, ry) = (r.get("x").and_then(|v| if let Value::Int(x) = v { Some(*x) } else { None }),
+                                r.get("y").and_then(|v| if let Value::Int(y) = v { Some(*y) } else { None }));
+                let (Some(x), Some(y)) = (rx, ry) else { return Err("robot: missing x/y".into()) };
+                let dir = r.get("dir").and_then(|v| if let Value::Str(d) = v { Some(d.clone()) } else { None }).unwrap_or("n".into());
+                let (dx, dy) = match dir.as_ref() { "e" => (1,0), "s" => (0,1), "w" => (-1,0), _ => (0,-1) };
+                let (nx, ny) = (x + dx, y + dy);
+                let Some(Value::List(cells)) = c.get("cells") else { return Err("canvas: no cells".into()) };
+                let (w, h) = (c.get("w").and_then(|v| if let Value::Int(w) = v { Some(*w) } else { None }),
+                              c.get("h").and_then(|v| if let Value::Int(h) = v { Some(*h) } else { None }));
+                let (Some(w), Some(h)) = (w, h) else { return Err("canvas: missing w/h".into()) };
+                let mut moved = false;
+                let mut d2 = r.clone();
+                if nx >= 0 && ny >= 0 && nx < w && ny < h {
+                    if let Value::List(row) = &cells[ny as usize] {
+                        if let Some(Value::Str(s)) = row.get(nx as usize) {
+                            if *s != wall {
+                                d2.insert("x".to_string(), Value::Int(nx));
+                                d2.insert("y".to_string(), Value::Int(ny));
+                                moved = true;
+                            }
+                        }
+                    }
+                }
+                let mut out = im::HashMap::new();
+                out.insert("robot".to_string(), Value::Dict(d2));
+                out.insert("moved".to_string(), Value::Bool(moved));
+                Ok(Some(Value::Dict(out)))
+            }
+            "robot_draw" => {
+                // robot_draw(robot, canvas) — stamp the robot's glyph on the canvas
+                let (r, c) = match (args.get(0), args.get(1)) {
+                    (Some(Value::Dict(r)), Some(Value::Dict(c))) => (r, c.clone()),
+                    _ => return Err("robot_draw(robot, canvas) expects 2 dicts".into()),
+                };
+                let (rx, ry) = (r.get("x").and_then(|v| if let Value::Int(x) = v { Some(*x) } else { None }),
+                                r.get("y").and_then(|v| if let Value::Int(y) = v { Some(*y) } else { None }));
+                let (Some(x), Some(y)) = (rx, ry) else { return Err("robot: missing x/y".into()) };
+                let dir = r.get("dir").and_then(|v| if let Value::Str(d) = v { Some(d.clone()) } else { None }).unwrap_or("n".into());
+                let glyph = match dir.as_ref() { "e" => ">", "s" => "v", "w" => "<", _ => "^" };
+                let Some(Value::List(rows)) = c.get("cells") else { return Err("canvas: no cells".into()) };
+                let mut rows2 = rows.clone();
+                if (y as usize) < rows2.len() {
+                    if let Value::List(row) = &rows2[y as usize] {
+                        if (x as usize) < row.len() {
+                            let mut nr = row.clone();
+                            nr[x as usize] = Value::Str(glyph.into());
+                            rows2[y as usize] = Value::List(nr);
+                        }
+                    }
+                }
+                let mut d2 = c.clone();
+                d2.insert("cells".to_string(), Value::List(rows2));
+                Ok(Some(Value::Dict(d2)))
+            }
             "dist_stats" => {
                 // dist_stats(fn, trials) — mean/stddev/min/max over n samples
                 let (f, trials) = match (args.get(0), args.get(1)) {
