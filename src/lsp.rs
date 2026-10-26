@@ -64,6 +64,7 @@ pub fn run_lsp() {
                         "referencesProvider": true,
                         "signatureHelpProvider": {"triggerCharacters": ["(", ","]},
                         "codeLensProvider": {"resolveProvider": false},
+                        "foldingRangeProvider": true,
                         "semanticTokensProvider": {
                             "legend": {"tokenTypes": ["keyword","function","variable","string","number","comment","property","operator"], "tokenModifiers": []},
                             "full": true,
@@ -85,6 +86,7 @@ pub fn run_lsp() {
                 "textDocument/signatureHelp" => signature_help(params, &docs),
                 "textDocument/codeLens" => code_lens(params, &docs),
                 "textDocument/semanticTokens/full" => semantic_tokens(params, &docs),
+                "textDocument/foldingRange" => folding_range(params, &docs),
                 _ => None,
             };
 
@@ -466,6 +468,33 @@ fn emit(data: &mut Vec<u32>, line: usize, col: usize, len: usize, tt: u32, prev:
     data.push(dl as u32); data.push(dc as u32); data.push(len as u32);
     data.push(tt); data.push(0);
     *prev = (line, col);
+}
+
+/// Foldable regions — brace-delimited blocks (fn/if/while/for/try/
+/// match/struct/grow fn) get startLine..endLine ranges.
+fn folding_range(params: &Value, docs: &HashMap<String, Doc>) -> Option<Value> {
+    let doc = doc_of(params, docs)?;
+    let openers = ["fn ","grow fn ","if ","while ","for ","try ","match ","struct "];
+    let mut out = Vec::new();
+    let mut stack: Vec<(usize, u32)> = Vec::new(); // (line, depth)
+    let mut depth = 0u32;
+    for (line, text) in doc.text.lines().enumerate() {
+        let t = text.trim_start();
+        let is_opener = openers.iter().any(|o| t.starts_with(o)) && t.contains('{');
+        if is_opener {
+            stack.push((line, depth + text.matches('{').count() as u32
+                - text.matches('}').count() as u32));
+        }
+        depth = (depth as i64 + text.matches('{').count() as i64
+            - text.matches('}').count() as i64).max(0) as u32;
+        while let Some(&(start_line, start_depth)) = stack.last() {
+            if depth < start_depth && line > start_line {
+                out.push(json!({"startLine": start_line as u32, "endLine": line as u32}));
+                stack.pop();
+            } else { break; }
+        }
+    }
+    Some(Value::Array(out))
 }
 
 fn hover(params: &Value, docs: &HashMap<String, Doc>) -> Option<Value> {
