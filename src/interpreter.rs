@@ -22,6 +22,15 @@ pub enum Value {
     Null,
 }
 
+/// Extract a numeric arg (Int or Float) as f64 — used by game-math builtins.
+fn num_at(args: &[Value], i: usize) -> Result<f64, String> {
+    match args.get(i) {
+        Some(Value::Int(n)) => Ok(*n as f64),
+        Some(Value::Float(f)) => Ok(*f),
+        _ => Err(format!("arg {} expects a number", i)),
+    }
+}
+
 impl std::fmt::Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
@@ -1293,6 +1302,74 @@ impl Interpreter {
         Ok(())
     }
 
+    /// Evaluate a behavior-tree node: ["seq", ...] all must succeed,
+    /// ["sel", ...] first success wins, ["inv", a] flips, ["act", fn]
+    /// calls fn(ctx) → bool. Returns Ok(true) on success.
+    fn bt_tick(&mut self, node: &im::Vector<Value>, ctx: &Value) -> Result<bool, String> {
+        let Some(Value::Str(kind)) = node.get(0) else {
+            return Err("bt node must start with a kind string".into());
+        };
+        match &**kind {
+            "seq" => {
+                for child in node.iter().skip(1) {
+                    let Value::List(c) = child else { return Err("bt child must be a node".into()) };
+                    if !self.bt_tick(c, ctx)? { return Ok(false); }
+                }
+                Ok(true)
+            }
+            "sel" => {
+                for child in node.iter().skip(1) {
+                    let Value::List(c) = child else { return Err("bt child must be a node".into()) };
+                    if self.bt_tick(c, ctx)? { return Ok(true); }
+                }
+                Ok(false)
+            }
+            "inv" => {
+                let Some(Value::List(c)) = node.get(1) else { return Err("inv expects one child".into()) };
+                Ok(!self.bt_tick(c, ctx)?)
+            }
+            "act" => {
+                let Some(f @ Value::Closure(_, _, _)) = node.get(1) else {
+                    return Err("act expects a closure".into())
+                };
+                match self.call_closure_value(f, vec![ctx.clone()])? {
+                    Value::Bool(b) => Ok(b),
+                    _ => Err("act closure must return bool".into()),
+                }
+            }
+            "cond" => {
+                // ["cond", check_fn, then_node, else_node?]
+                let Some(f @ Value::Closure(_, _, _)) = node.get(1) else {
+                    return Err("cond expects a check closure".into())
+                };
+                let pass = match self.call_closure_value(f, vec![ctx.clone()])? {
+                    Value::Bool(b) => b,
+                    _ => return Err("cond check must return bool".into()),
+                };
+                if pass {
+                    let Some(Value::List(c)) = node.get(2) else { return Err("cond expects a then-node".into()) };
+                    self.bt_tick(c, ctx)
+                } else if let Some(Value::List(c)) = node.get(3) {
+                    self.bt_tick(c, ctx)
+                } else {
+                    Ok(false)
+                }
+            }
+            "rep" => {
+                // ["rep", n, child] — tick child n times, succeed on last
+                let (Some(Value::Int(n)), Some(Value::List(c))) = (node.get(1), node.get(2))
+                    else { return Err("rep expects n and a child".into()) };
+                for _ in 0..*n {
+                    if !self.bt_tick(c, ctx)? { return Ok(false); }
+                }
+                Ok(true)
+            }
+            "succeed" => Ok(true),
+            "fail" => Ok(false),
+            other => Err(format!("unknown bt node kind: {}", other)),
+        }
+    }
+
     pub(crate) fn try_builtin(&mut self, name: &str, args: &[Value]) -> Result<Option<Value>, String> {
         // std:sandbox gate — denied capabilities error before dispatch
         if self.caps.denied(name) {
@@ -1454,6 +1531,788 @@ impl Interpreter {
                     }
                     _ => Err("rand() expects an integer".into()),
                 }
+            }
+            // === std:render / std:ui — ASCII canvas (game pillar) ===
+            // A canvas is a dict {w, h, cells: [[str]]} — all ops return
+            // a new dict (persistent, matches the immutable-value style).
+            "canvas_new" => {
+                let (w, h) = match (args.get(0), args.get(1)) {
+                    (Some(Value::Int(w)), Some(Value::Int(h))) => (*w as usize, *h as usize),
+                    _ => return Err("canvas_new(w, h) expects two ints".into()),
+                };
+                let row: im::Vector<Value> = (0..w).map(|_| Value::Str(" ".into())).collect();
+                let cells: im::Vector<Value> = (0..h).map(|_| Value::List(row.clone())).collect();
+                let mut d = im::HashMap::new();
+                d.insert("w".to_string(), Value::Int(w as i64));
+                d.insert("h".to_string(), Value::Int(h as i64));
+                d.insert("cells".to_string(), Value::List(cells));
+                Ok(Some(Value::Dict(d)))
+            }
+            "canvas_set" => {
+                let (c, x, y, ch) = match (args.get(0), args.get(1), args.get(2), args.get(3)) {
+                    (Some(Value::Dict(d)), Some(Value::Int(x)), Some(Value::Int(y)), Some(Value::Str(ch)))
+                        => (d.clone(), *x as usize, *y as usize, ch.clone()),
+                    _ => return Err("canvas_set(c, x, y, ch) expects dict, x, y, str".into()),
+                };
+                let Some(Value::List(rows)) = c.get("cells") else { return Err("canvas: no cells".into()) };
+                if y >= rows.len() { return Ok(Some(Value::Dict(c))); }
+                let mut rows2 = rows.clone();
+                if let Value::List(r2) = &rows[y] {
+                    let mut nr = r2.clone();
+                    if x < nr.len() { nr[x] = Value::Str(ch); }
+                    rows2[y] = Value::List(nr);
+                }
+                let mut d = c.clone();
+                d.insert("cells".to_string(), Value::List(rows2));
+                Ok(Some(Value::Dict(d)))
+            }
+            "canvas_get" => {
+                let (d, x, y) = match (args.get(0), args.get(1), args.get(2)) {
+                    (Some(Value::Dict(d)), Some(Value::Int(x)), Some(Value::Int(y)))
+                        => (d, *x as usize, *y as usize),
+                    _ => return Err("canvas_get(c, x, y) expects dict, x, y".into()),
+                };
+                let Some(Value::List(rows)) = d.get("cells") else { return Err("canvas: no cells".into()) };
+                if y >= rows.len() { return Ok(Some(Value::Null)); }
+                let Value::List(r) = &rows[y] else { return Ok(Some(Value::Null)) };
+                if x >= r.len() { return Ok(Some(Value::Null)); }
+                Ok(Some(r[x].clone()))
+            }
+            "canvas_fill" => {
+                let (c, x0, y0, w, h, ch) = match (args.get(0), args.get(1), args.get(2), args.get(3), args.get(4), args.get(5)) {
+                    (Some(Value::Dict(d)), Some(Value::Int(x0)), Some(Value::Int(y0)),
+                     Some(Value::Int(w)), Some(Value::Int(h)), Some(Value::Str(ch)))
+                        => (d.clone(), *x0 as usize, *y0 as usize, *w as usize, *h as usize, ch.clone()),
+                    _ => return Err("canvas_fill(c, x, y, w, h, ch) expects dict + 4 ints + str".into()),
+                };
+                let Some(Value::List(rows)) = c.get("cells") else { return Err("canvas: no cells".into()) };
+                let mut rows2 = rows.clone();
+                for yy in y0..(y0 + h).min(rows2.len()) {
+                    if let Value::List(r) = &rows2[yy] {
+                        let mut nr = r.clone();
+                        for xx in x0..(x0 + w).min(nr.len()) { nr[xx] = Value::Str(ch.clone()); }
+                        rows2[yy] = Value::List(nr);
+                    }
+                }
+                let mut d = c.clone();
+                d.insert("cells".to_string(), Value::List(rows2));
+                Ok(Some(Value::Dict(d)))
+            }
+            "canvas_line" => {
+                let (c, mut x, mut y, x2, y2, ch) = match (args.get(0), args.get(1), args.get(2), args.get(3), args.get(4), args.get(5)) {
+                    (Some(Value::Dict(d)), Some(Value::Int(a)), Some(Value::Int(b)),
+                     Some(Value::Int(c2)), Some(Value::Int(d2)), Some(Value::Str(ch)))
+                        => (d.clone(), *a, *b, *c2, *d2, ch.clone()),
+                    _ => return Err("canvas_line(c, x1, y1, x2, y2, ch) expects dict + 4 ints + str".into()),
+                };
+                let Some(Value::List(rows)) = c.get("cells") else { return Err("canvas: no cells".into()) };
+                let mut rows2 = rows.clone();
+                let (dx, dy) = (x2 - x, y2 - y);
+                let steps = dx.abs().max(dy.abs()).max(1);
+                for i in 0..=steps {
+                    let px = x + dx * i / steps;
+                    let py = y + dy * i / steps;
+                    if py >= 0 && (py as usize) < rows2.len() {
+                        if let Value::List(r) = &rows2[py as usize] {
+                            if px >= 0 && (px as usize) < r.len() {
+                                let mut nr = r.clone();
+                                nr[px as usize] = Value::Str(ch.clone());
+                                rows2[py as usize] = Value::List(nr);
+                            }
+                        }
+                    }
+                }
+                let mut d = c.clone();
+                d.insert("cells".to_string(), Value::List(rows2));
+                Ok(Some(Value::Dict(d)))
+            }
+            "canvas_render" => {
+                let Some(Value::Dict(d)) = args.get(0) else { return Err("canvas_render(c) expects a canvas".into()) };
+                let Some(Value::List(rows)) = d.get("cells") else { return Err("canvas: no cells".into()) };
+                let mut out = String::new();
+                for r in rows {
+                    if let Value::List(row) = r {
+                        for c in row {
+                            if let Value::Str(s) = c { out.push_str(s.as_ref()); }
+                        }
+                        out.push('\n');
+                    }
+                }
+                Ok(Some(Value::Str(out.into())))
+            }
+            "canvas_print" => {
+                let Some(Value::Dict(d)) = args.get(0) else { return Err("canvas_print(c) expects a canvas".into()) };
+                let Some(Value::List(rows)) = d.get("cells") else { return Err("canvas: no cells".into()) };
+                for r in rows {
+                    if let Value::List(row) = r {
+                        for c in row { if let Value::Str(s) = c { print!("{}", s); } }
+                        println!();
+                    }
+                }
+                Ok(Some(Value::Null))
+            }
+            "sprite" => {
+                // sprite(c, x, y, lines) — draw a multi-line string sprite
+                let (c, x0, y0, lines) = match (args.get(0), args.get(1), args.get(2), args.get(3)) {
+                    (Some(Value::Dict(d)), Some(Value::Int(x)), Some(Value::Int(y)), Some(Value::Str(s)))
+                        => (d.clone(), *x, *y, s.clone()),
+                    _ => return Err("sprite(c, x, y, str) expects dict, x, y, str".into()),
+                };
+                let Some(Value::List(rows)) = c.get("cells") else { return Err("canvas: no cells".into()) };
+                let mut rows2 = rows.clone();
+                for (dy, line) in lines.lines().enumerate() {
+                    let yy = (y0 + dy as i64) as usize;
+                    if yy >= rows2.len() { break; }
+                    if let Value::List(r) = &rows2[yy] {
+                        let mut nr = r.clone();
+                        for (dx, ch) in line.chars().enumerate() {
+                            let xx = (x0 + dx as i64) as usize;
+                            if xx < nr.len() { nr[xx] = Value::Str(ch.to_string().into()); }
+                        }
+                        rows2[yy] = Value::List(nr);
+                    }
+                }
+                let mut d = c.clone();
+                d.insert("cells".to_string(), Value::List(rows2));
+                Ok(Some(Value::Dict(d)))
+            }
+            "choice" => {
+                let Value::List(items) = args.get(0).cloned().unwrap_or(Value::Null) else {
+                    return Err("choice(list) expects a list".into())
+                };
+                if items.is_empty() { return Ok(Some(Value::Null)); }
+                let mut x = self.rng_state;
+                x ^= x << 13; x ^= x >> 7; x ^= x << 17;
+                self.rng_state = x;
+                Ok(Some(items[(x % items.len() as u64) as usize].clone()))
+            }
+            "randf" => {
+                let mut x = self.rng_state;
+                x ^= x << 13; x ^= x >> 7; x ^= x << 17;
+                self.rng_state = x;
+                Ok(Some(Value::Float((x % 1_000_000) as f64 / 1_000_000.0)))
+            }
+            "rand_range" => {
+                let (lo, hi) = match (args.get(0), args.get(1)) {
+                    (Some(Value::Int(lo)), Some(Value::Int(hi))) => (*lo, *hi),
+                    _ => return Err("rand_range(lo, hi) expects two ints".into()),
+                };
+                if hi <= lo { return Ok(Some(Value::Int(lo))); }
+                let mut x = self.rng_state;
+                x ^= x << 13; x ^= x >> 7; x ^= x << 17;
+                self.rng_state = x;
+                Ok(Some(Value::Int(lo + (x % ((hi - lo + 1) as u64)) as i64)))
+            }
+            "dice" => {
+                let (n, sides) = match (args.get(0), args.get(1)) {
+                    (Some(Value::Int(n)), Some(Value::Int(s))) => (*n as usize, *s as i64),
+                    _ => return Err("dice(n, sides) expects two ints".into()),
+                };
+                let mut total = 0i64;
+                for _ in 0..n {
+                    let mut x = self.rng_state;
+                    x ^= x << 13; x ^= x >> 7; x ^= x << 17;
+                    self.rng_state = x;
+                    total += 1 + (x % (sides.max(1) as u64)) as i64;
+                }
+                Ok(Some(Value::Int(total)))
+            }
+            "balance_compare" => {
+                // balance_compare(f1, f2, trials) — A/B two strategies, f returns
+                // a score; report which wins more often.
+                let (f1, f2, trials) = match (args.get(0), args.get(1), args.get(2)) {
+                    (Some(f1 @ Value::Closure(_, _, _)), Some(f2 @ Value::Closure(_, _, _)), Some(Value::Int(t)))
+                        => (f1, f2, *t as usize),
+                    _ => return Err("balance_compare(f1, f2, trials) expects two closures + int".into()),
+                };
+                let (mut a_wins, mut b_wins, mut draws) = (0usize, 0usize, 0usize);
+                for _ in 0..trials {
+                    let a = self.call_closure_value(f1, vec![])?;
+                    let b = self.call_closure_value(f2, vec![])?;
+                    let score_of = |v: &Value| match v {
+                        Value::Int(i) => *i as f64,
+                        Value::Float(f) => *f,
+                        Value::Dict(d) => d.get("score").and_then(|v| match v {
+                            Value::Int(i) => Some(*i as f64), Value::Float(f) => Some(*f), _ => None }).unwrap_or(0.0),
+                        _ => 0.0,
+                    };
+                    let (sa, sb) = (score_of(&a), score_of(&b));
+                    if sa > sb { a_wins += 1; } else if sb > sa { b_wins += 1; } else { draws += 1; }
+                }
+                let mut out = im::HashMap::new();
+                out.insert("a_wins".to_string(), Value::Int(a_wins as i64));
+                out.insert("b_wins".to_string(), Value::Int(b_wins as i64));
+                out.insert("draws".to_string(), Value::Int(draws as i64));
+                out.insert("winner".to_string(), Value::Str(if a_wins > b_wins { "a".into() } else if b_wins > a_wins { "b".into() } else { "draw".into() }));
+                Ok(Some(Value::Dict(out)))
+            }
+            "lerp" => {
+                let (a, b, t) = (num_at(args, 0)?, num_at(args, 1)?, num_at(args, 2)?);
+                Ok(Some(Value::Float(a + (b - a) * t)))
+            }
+            "clamp" => {
+                let (v, lo, hi) = (num_at(args, 0)?, num_at(args, 1)?, num_at(args, 2)?);
+                Ok(Some(Value::Float(v.max(lo).min(hi))))
+            }
+            "dist" => {
+                let (x1, y1, x2, y2) = (num_at(args, 0)?, num_at(args, 1)?, num_at(args, 2)?, num_at(args, 3)?);
+                Ok(Some(Value::Float(((x2 - x1).powi(2) + (y2 - y1).powi(2)).sqrt())))
+            }
+            "aabb" => {
+                // aabb(ax,ay,aw,ah, bx,by,bw,bh) — rect overlap
+                let (ax, ay, aw, ah, bx, by, bw, bh) = (
+                    num_at(args, 0)?, num_at(args, 1)?, num_at(args, 2)?, num_at(args, 3)?,
+                    num_at(args, 4)?, num_at(args, 5)?, num_at(args, 6)?, num_at(args, 7)?);
+                Ok(Some(Value::Bool(ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by)))
+            }
+            "bfs" => {
+                // bfs(c, sx, sy, tx, ty, walkable_ch) — shortest path on a
+                // canvas, walking cells that contain walkable_ch. Returns
+                // [[x,y],...] or null if unreachable.
+                let (d, sx, sy, tx, ty, walk) = match (args.get(0), args.get(1), args.get(2), args.get(3), args.get(4), args.get(5)) {
+                    (Some(Value::Dict(d)), Some(Value::Int(sx)), Some(Value::Int(sy)),
+                     Some(Value::Int(tx)), Some(Value::Int(ty)), Some(Value::Str(w)))
+                        => (d, *sx as i64, *sy as i64, *tx as i64, *ty as i64, w.clone()),
+                    _ => return Err("bfs(c, sx, sy, tx, ty, walkable_ch) expects dict + 4 ints + str".into()),
+                };
+                let (w, h) = (d.get("w").and_then(|v| if let Value::Int(w) = v { Some(*w as i64) } else { None }),
+                              d.get("h").and_then(|v| if let Value::Int(h) = v { Some(*h as i64) } else { None }));
+                let (Some(w), Some(h)) = (w, h) else { return Err("canvas: missing w/h".into()) };
+                let Some(Value::List(cells)) = d.get("cells") else { return Err("canvas: no cells".into()) };
+                let cell_ok = |x: i64, y: i64| -> bool {
+                    if x < 0 || y < 0 || x >= w || y >= h { return false; }
+                    if let Value::List(r) = &cells[y as usize] {
+                        if let Some(Value::Str(s)) = r.get(x as usize) {
+                            return *s == walk;
+                        }
+                    }
+                    false
+                };
+                // bfs
+                let mut prev: std::collections::HashMap<(i64, i64), (i64, i64)> = std::collections::HashMap::new();
+                let mut q: std::collections::VecDeque<(i64, i64)> = std::collections::VecDeque::new();
+                let mut seen: std::collections::HashSet<(i64, i64)> = std::collections::HashSet::new();
+                q.push_back((sx, sy));
+                seen.insert((sx, sy));
+                while let Some((cx, cy)) = q.pop_front() {
+                    if cx == tx && cy == ty { break; }
+                    for (dx, dy) in [(0, -1), (0, 1), (-1, 0), (1, 0)] {
+                        let (nx, ny) = (cx + dx, cy + dy);
+                        if !seen.contains(&(nx, ny)) && (cell_ok(nx, ny) || (nx == tx && ny == ty)) {
+                            seen.insert((nx, ny));
+                            prev.insert((nx, ny), (cx, cy));
+                            q.push_back((nx, ny));
+                        }
+                    }
+                }
+                if !seen.contains(&(tx, ty)) { return Ok(Some(Value::Null)); }
+                let mut path = Vec::new();
+                let mut cur = (tx, ty);
+                loop {
+                    path.push(Value::List(im::vector![Value::Int(cur.0), Value::Int(cur.1)]));
+                    if cur == (sx, sy) { break; }
+                    cur = prev[&cur];
+                }
+                path.reverse();
+                Ok(Some(Value::List(path.into_iter().collect())))
+            }
+            "los" => {
+                // los(c, x1, y1, x2, y2, wall_ch) — Bresenham line of sight:
+                // true if no cell containing wall_ch blocks the segment.
+                let (d, x1, y1, x2, y2, wall) = match (args.get(0), args.get(1), args.get(2), args.get(3), args.get(4), args.get(5)) {
+                    (Some(Value::Dict(d)), Some(Value::Int(a)), Some(Value::Int(b)),
+                     Some(Value::Int(c2)), Some(Value::Int(d2)), Some(Value::Str(w)))
+                        => (d, *a, *b, *c2, *d2, w.clone()),
+                    _ => return Err("los(c, x1, y1, x2, y2, wall_ch) expects dict + 4 ints + str".into()),
+                };
+                let Some(Value::List(cells)) = d.get("cells") else { return Err("canvas: no cells".into()) };
+                let (w, h) = (d.get("w").and_then(|v| if let Value::Int(w) = v { Some(*w as i64) } else { None }),
+                              d.get("h").and_then(|v| if let Value::Int(h) = v { Some(*h as i64) } else { None }));
+                let (Some(w), Some(h)) = (w, h) else { return Err("canvas: missing w/h".into()) };
+                let (mut x, mut y) = (x1, y1);
+                let (dx, dy) = ((x2 - x1).abs(), (y2 - y1).abs());
+                let (sx, sy) = (if x1 < x2 { 1 } else { -1 }, if y1 < y2 { 1 } else { -1 });
+                let mut err = dx - dy;
+                loop {
+                    if x >= 0 && y >= 0 && x < w && y < h {
+                        if let Value::List(r) = &cells[y as usize] {
+                            if let Some(Value::Str(s)) = r.get(x as usize) {
+                                if *s == wall && (x, y) != (x1, y1) && (x, y) != (x2, y2) {
+                                    return Ok(Some(Value::Bool(false)));
+                                }
+                            }
+                        }
+                    }
+                    if x == x2 && y == y2 { break; }
+                    let e2 = 2 * err;
+                    if e2 > -dy { err -= dy; x += sx; }
+                    if e2 < dx { err += dx; y += sy; }
+                }
+                Ok(Some(Value::Bool(true)))
+            }
+            "astar" => {
+                // astar(c, sx, sy, tx, ty, walkable_ch, diagonal?) — A* on a
+                // canvas, Manhattan heuristic. Returns [[x,y],...] or null.
+                let (d, sx, sy, tx, ty, walk, diag) = match (args.get(0), args.get(1), args.get(2), args.get(3), args.get(4), args.get(5), args.get(6)) {
+                    (Some(Value::Dict(d)), Some(Value::Int(sx)), Some(Value::Int(sy)),
+                     Some(Value::Int(tx)), Some(Value::Int(ty)), Some(Value::Str(w)), diag)
+                        => (d, *sx, *sy, *tx, *ty, w.clone(), matches!(diag, Some(Value::Bool(true)))),
+                    _ => return Err("astar(c, sx, sy, tx, ty, walkable_ch, diag?) expects dict + 4 ints + str + bool".into()),
+                };
+                let (w, h) = (d.get("w").and_then(|v| if let Value::Int(w) = v { Some(*w as i64) } else { None }),
+                              d.get("h").and_then(|v| if let Value::Int(h) = v { Some(*h as i64) } else { None }));
+                let (Some(w), Some(h)) = (w, h) else { return Err("canvas: missing w/h".into()) };
+                let Some(Value::List(cells)) = d.get("cells") else { return Err("canvas: no cells".into()) };
+                let cell_ok = |x: i64, y: i64| -> bool {
+                    if x < 0 || y < 0 || x >= w || y >= h { return false; }
+                    if let Value::List(r) = &cells[y as usize] {
+                        if let Some(Value::Str(s)) = r.get(x as usize) { return *s == walk; }
+                    }
+                    false
+                };
+                let dirs: &[(i64, i64)] = if diag {
+                    &[(0,-1),(0,1),(-1,0),(1,0),(-1,-1),(1,-1),(-1,1),(1,1)]
+                } else {
+                    &[(0,-1),(0,1),(-1,0),(1,0)]
+                };
+                let mut open: std::collections::BinaryHeap<(std::cmp::Reverse<i64>, i64, i64)> = std::collections::BinaryHeap::new();
+                let mut g: std::collections::HashMap<(i64, i64), i64> = std::collections::HashMap::new();
+                let mut prev: std::collections::HashMap<(i64, i64), (i64, i64)> = std::collections::HashMap::new();
+                let h_of = |x: i64, y: i64| (tx - x).abs() + (ty - y).abs();
+                g.insert((sx, sy), 0);
+                open.push((std::cmp::Reverse(h_of(sx, sy)), sx, sy));
+                while let Some((_, cx, cy)) = open.pop() {
+                    if cx == tx && cy == ty { break; }
+                    let cg = g[&(cx, cy)];
+                    for &(dx, dy) in dirs {
+                        let (nx, ny) = (cx + dx, cy + dy);
+                        let ok = cell_ok(nx, ny) || (nx == tx && ny == ty);
+                        let ng = cg + if dx != 0 && dy != 0 { 14 } else { 10 };
+                        if ok && g.get(&(nx, ny)).map(|&v| ng < v).unwrap_or(true) {
+                            g.insert((nx, ny), ng);
+                            prev.insert((nx, ny), (cx, cy));
+                            open.push((std::cmp::Reverse(ng + h_of(nx, ny) * 10), nx, ny));
+                        }
+                    }
+                }
+                if !prev.contains_key(&(tx, ty)) && (sx, sy) != (tx, ty) {
+                    return Ok(Some(Value::Null));
+                }
+                let mut path = Vec::new();
+                let mut cur = (tx, ty);
+                loop {
+                    path.push(Value::List(im::vector![Value::Int(cur.0), Value::Int(cur.1)]));
+                    if cur == (sx, sy) { break; }
+                    cur = prev[&cur];
+                }
+                path.reverse();
+                Ok(Some(Value::List(path.into_iter().collect())))
+            }
+            "flood_fill" => {
+                // flood_fill(c, x, y, ch) — fill all connected cells that
+                // share the source cell's char with ch.
+                let (d, x0, y0, ch) = match (args.get(0), args.get(1), args.get(2), args.get(3)) {
+                    (Some(Value::Dict(d)), Some(Value::Int(x)), Some(Value::Int(y)), Some(Value::Str(ch)))
+                        => (d.clone(), *x as usize, *y as usize, ch.clone()),
+                    _ => return Err("flood_fill(c, x, y, ch) expects dict + 2 ints + str".into()),
+                };
+                let Some(Value::List(rows)) = d.get("cells") else { return Err("canvas: no cells".into()) };
+                let (w, h) = (rows.get(0).and_then(|r| if let Value::List(r) = r { Some(r.len()) } else { None }), rows.len());
+                let Some(w) = w else { return Err("canvas: missing w".into()) };
+                let Some(Value::Str(target)) = rows.get(y0)
+                    .and_then(|r| if let Value::List(r) = r { r.get(x0) } else { None })
+                    .cloned() else { return Ok(Some(Value::Dict(d))); };
+                if target == ch { return Ok(Some(Value::Dict(d))); }
+                let mut rows2 = rows.clone();
+                let mut stack = vec![(x0, y0)];
+                let mut seen: std::collections::HashSet<(usize, usize)> = std::collections::HashSet::new();
+                while let Some((x, y)) = stack.pop() {
+                    if x >= w || y >= h || !seen.insert((x, y)) { continue; }
+                    let is_target = rows2.get(y)
+                        .and_then(|r| if let Value::List(r) = r { r.get(x) } else { None })
+                        .map(|v| if let Value::Str(s) = v { *s == target } else { false })
+                        .unwrap_or(false);
+                    if !is_target { continue; }
+                    if let Value::List(r) = &mut rows2[y] {
+                        let mut nr = r.clone();
+                        nr[x] = Value::Str(ch.clone());
+                        *r = nr;
+                    }
+                    stack.extend([(x.wrapping_sub(1), y), (x + 1, y), (x, y.wrapping_sub(1)), (x, y + 1)]);
+                }
+                let mut d2 = d.clone();
+                d2.insert("cells".to_string(), Value::List(rows2));
+                Ok(Some(Value::Dict(d2)))
+            }
+            "neighbors" => {
+                // neighbors(c, x, y, diag?) — 4-dir (or 8-dir) in-bounds cells
+                let (d, x0, y0, diag) = match (args.get(0), args.get(1), args.get(2), args.get(3)) {
+                    (Some(Value::Dict(d)), Some(Value::Int(x)), Some(Value::Int(y)), dg)
+                        => (d, *x, *y, matches!(dg, Some(Value::Bool(true)))),
+                    _ => return Err("neighbors(c, x, y, diag?) expects dict + 2 ints + bool".into()),
+                };
+                let (w, h) = (d.get("w").and_then(|v| if let Value::Int(w) = v { Some(*w) } else { None }),
+                              d.get("h").and_then(|v| if let Value::Int(h) = v { Some(*h) } else { None }));
+                let (Some(w), Some(h)) = (w, h) else { return Err("canvas: missing w/h".into()) };
+                let dirs: &[(i64, i64)] = if diag {
+                    &[(0,-1),(0,1),(-1,0),(1,0),(-1,-1),(1,-1),(-1,1),(1,1)]
+                } else { &[(0,-1),(0,1),(-1,0),(1,0)] };
+                let out: Vec<Value> = dirs.iter()
+                    .map(|(dx, dy)| (x0 + dx, y0 + dy))
+                    .filter(|(x, y)| *x >= 0 && *y >= 0 && *x < w && *y < h)
+                    .map(|(x, y)| Value::List(im::vector![Value::Int(x), Value::Int(y)]))
+                    .collect();
+                Ok(Some(Value::List(out.into_iter().collect())))
+            }
+            "noise2" => {
+                // noise2(x, y) — deterministic value noise in [0,1]. Bilinear
+                // interp over a hash-seeded lattice.
+                let (x, y) = (num_at(args, 0)?, num_at(args, 1)?);
+                let hash = |ix: i64, iy: i64| -> f64 {
+                    let mut n = ix.wrapping_mul(374761393).wrapping_add(iy.wrapping_mul(668265263));
+                    n = (n ^ (n >> 13)).wrapping_mul(1274126177);
+                    ((n ^ (n >> 16)) as u64 & 0xffffff) as f64 / 0xffffff as f64
+                };
+                let (ix, iy) = (x.floor() as i64, y.floor() as i64);
+                let (fx, fy) = (x - x.floor(), y - y.floor());
+                let s = |t: f64| t * t * (3.0 - 2.0 * t); // smoothstep
+                let (a, b, c, d) = (hash(ix, iy), hash(ix + 1, iy), hash(ix, iy + 1), hash(ix + 1, iy + 1));
+                let v = a + (b - a) * s(fx) + (c - a) * s(fy) + (a - b - c + d) * s(fx) * s(fy);
+                Ok(Some(Value::Float(v)))
+            }
+            "ease_in" => { let t = num_at(args, 0)?; Ok(Some(Value::Float(t * t))) }
+            "ease_out" => { let t = num_at(args, 0)?; Ok(Some(Value::Float(1.0 - (1.0 - t) * (1.0 - t)))) }
+            "ease_in_out" => {
+                let t = num_at(args, 0)?;
+                Ok(Some(Value::Float(if t < 0.5 { 2.0 * t * t } else { 1.0 - (-2.0 * t + 2.0).powi(2) / 2.0 })))
+            }
+            "bounce" => {
+                // bounce(t) — quadratic bounce-out
+                let t = num_at(args, 0)?.clamp(0.0, 1.0);
+                let (n1, d1) = (7.5625f64, 2.75f64);
+                let v = if t < 1.0 / d1 { n1 * t * t }
+                    else if t < 2.0 / d1 { let t2 = t - 1.5 / d1; n1 * t2 * t2 + 0.75 }
+                    else if t < 2.5 / d1 { let t2 = t - 2.25 / d1; n1 * t2 * t2 + 0.9375 }
+                    else { let t2 = t - 2.625 / d1; n1 * t2 * t2 + 0.984375 };
+                Ok(Some(Value::Float(v)))
+            }
+            // === std:ui — immediate-mode ASCII widgets on the canvas ===
+            "ui_box" => {
+                // ui_box(c, x, y, w, h, title?) — bordered panel
+                let (d, x0, y0, w, h, title) = match (args.get(0), args.get(1), args.get(2), args.get(3), args.get(4), args.get(5)) {
+                    (Some(Value::Dict(d)), Some(Value::Int(x)), Some(Value::Int(y)),
+                     Some(Value::Int(w)), Some(Value::Int(h)), t)
+                        => (d.clone(), *x as usize, *y as usize, *w as usize, *h as usize,
+                            if let Some(Value::Str(s)) = t { s.clone() } else { "".into() }),
+                    _ => return Err("ui_box(c, x, y, w, h, title?) expects dict + 4 ints + str?".into()),
+                };
+                let Some(Value::List(rows)) = d.get("cells") else { return Err("canvas: no cells".into()) };
+                let mut rows2 = rows.clone();
+                let set = |rows2: &mut im::Vector<Value>, x: usize, y: usize, ch: &str| {
+                    if y < rows2.len() {
+                        if let Value::List(r) = &rows2[y] {
+                            if x < r.len() {
+                                let mut nr = r.clone();
+                                nr[x] = Value::Str(ch.into());
+                                rows2[y] = Value::List(nr);
+                            }
+                        }
+                    }
+                };
+                for xx in x0..(x0 + w) {
+                    set(&mut rows2, xx, y0, if xx == x0 { "+" } else if xx == x0 + w - 1 { "+" } else { "-" });
+                    set(&mut rows2, xx, y0 + h - 1, if xx == x0 { "+" } else if xx == x0 + w - 1 { "+" } else { "-" });
+                }
+                for yy in y0..(y0 + h) {
+                    set(&mut rows2, x0, yy, "|");
+                    set(&mut rows2, x0 + w - 1, yy, "|");
+                }
+                for (i, ch) in title.chars().take(w.saturating_sub(4)).enumerate() {
+                    set(&mut rows2, x0 + 2 + i, y0, &ch.to_string());
+                }
+                let mut d2 = d.clone();
+                d2.insert("cells".to_string(), Value::List(rows2));
+                Ok(Some(Value::Dict(d2)))
+            }
+            "ui_label" => {
+                // ui_label(c, x, y, text) — write text starting at (x, y)
+                let (d, x0, y0, text) = match (args.get(0), args.get(1), args.get(2), args.get(3)) {
+                    (Some(Value::Dict(d)), Some(Value::Int(x)), Some(Value::Int(y)), Some(Value::Str(t)))
+                        => (d.clone(), *x as usize, *y as usize, t.clone()),
+                    _ => return Err("ui_label(c, x, y, text) expects dict + 2 ints + str".into()),
+                };
+                let Some(Value::List(rows)) = d.get("cells") else { return Err("canvas: no cells".into()) };
+                let mut rows2 = rows.clone();
+                for (dy, line) in text.lines().enumerate() {
+                    let yy = y0 + dy;
+                    if yy >= rows2.len() { break; }
+                    if let Value::List(r) = &rows2[yy] {
+                        let mut nr = r.clone();
+                        for (dx, ch) in line.chars().enumerate() {
+                            let xx = x0 + dx;
+                            if xx < nr.len() { nr[xx] = Value::Str(ch.to_string().into()); }
+                        }
+                        rows2[yy] = Value::List(nr);
+                    }
+                }
+                let mut d2 = d.clone();
+                d2.insert("cells".to_string(), Value::List(rows2));
+                Ok(Some(Value::Dict(d2)))
+            }
+            "ui_button" => {
+                // ui_button(c, x, y, label, hot?) — bracketed button [ label ]
+                let (d, x, y, label, hot) = match (args.get(0), args.get(1), args.get(2), args.get(3), args.get(4)) {
+                    (Some(Value::Dict(d)), Some(Value::Int(x)), Some(Value::Int(y)), Some(Value::Str(l)), h)
+                        => (d.clone(), *x as usize, *y as usize, l.clone(),
+                            matches!(h, Some(Value::Bool(true)))),
+                    _ => return Err("ui_button(c, x, y, label, hot?) expects dict + 2 ints + str + bool".into()),
+                };
+                let Some(Value::List(rows)) = d.get("cells") else { return Err("canvas: no cells".into()) };
+                let mut rows2 = rows.clone();
+                let rendered = if hot { format!(">{}<", label) } else { format!("[{}]", label) };
+                if y < rows2.len() {
+                    if let Value::List(r) = &rows2[y] {
+                        let mut nr = r.clone();
+                        for (i, ch) in rendered.chars().enumerate() {
+                            if x + i < nr.len() { nr[x + i] = Value::Str(ch.to_string().into()); }
+                        }
+                        rows2[y] = Value::List(nr);
+                    }
+                }
+                let mut d2 = d.clone();
+                d2.insert("cells".to_string(), Value::List(rows2));
+                Ok(Some(Value::Dict(d2)))
+            }
+            "fov" => {
+                // fov(c, x, y, radius, wall_ch) — list of [x,y] cells visible
+                // from (x,y) within radius, walls blocking. Uses los() on each.
+                let (d, x0, y0, rad, wall) = match (args.get(0), args.get(1), args.get(2), args.get(3), args.get(4)) {
+                    (Some(Value::Dict(d)), Some(Value::Int(x)), Some(Value::Int(y)),
+                     Some(Value::Int(r)), Some(Value::Str(w)))
+                        => (d, *x, *y, *r, w.clone()),
+                    _ => return Err("fov(c, x, y, radius, wall_ch) expects dict + 3 ints + str".into()),
+                };
+                let Some(Value::List(cells)) = d.get("cells") else { return Err("canvas: no cells".into()) };
+                let (w, h) = (d.get("w").and_then(|v| if let Value::Int(w) = v { Some(*w) } else { None }),
+                              d.get("h").and_then(|v| if let Value::Int(h) = v { Some(*h) } else { None }));
+                let (Some(w), Some(h)) = (w, h) else { return Err("canvas: missing w/h".into()) };
+                let is_wall = |x: i64, y: i64| -> bool {
+                    if x < 0 || y < 0 || x >= w || y >= h { return true; }
+                    if let Value::List(r) = &cells[y as usize] {
+                        if let Some(Value::Str(s)) = r.get(x as usize) { return *s == wall; }
+                    }
+                    false
+                };
+                let los_clear = |x1: i64, y1: i64, x2: i64, y2: i64| -> bool {
+                    let (dx, dy) = ((x2 - x1).abs(), (y2 - y1).abs());
+                    let (sx, sy) = (if x1 < x2 { 1 } else { -1 }, if y1 < y2 { 1 } else { -1 });
+                    let (mut x, mut y, mut err) = (x1, y1, dx - dy);
+                    loop {
+                        if (x, y) != (x1, y1) && (x, y) != (x2, y2) && is_wall(x, y) { return false; }
+                        if x == x2 && y == y2 { return true; }
+                        let e2 = 2 * err;
+                        if e2 > -dy { err -= dy; x += sx; }
+                        if e2 < dx { err += dx; y += sy; }
+                    }
+                };
+                let mut out = Vec::new();
+                for y in (y0 - rad)..=(y0 + rad) {
+                    for x in (x0 - rad)..=(x0 + rad) {
+                        if x >= 0 && y >= 0 && x < w && y < h
+                            && !is_wall(x, y)
+                            && los_clear(x0, y0, x, y) {
+                            out.push(Value::List(im::vector![Value::Int(x), Value::Int(y)]));
+                        }
+                    }
+                }
+                Ok(Some(Value::List(out.into_iter().collect())))
+            }
+            "maze_gen" => {
+                // maze_gen(w, h, wall_ch) — recursive-backtracker maze on a canvas.
+                // Odd grid: wall on even coords, corridors on odd.
+                let (w, h, wall) = match (args.get(0), args.get(1), args.get(2)) {
+                    (Some(Value::Int(w)), Some(Value::Int(h)), Some(Value::Str(ch)))
+                        => (*w as usize, *h as usize, ch.clone()),
+                    _ => return Err("maze_gen(w, h, wall_ch) expects 2 ints + str".into()),
+                };
+                let mut grid: Vec<Vec<bool>> = vec![vec![true; w]; h]; // true = wall
+                let carve = |x: usize, y: usize| x % 2 == 1 && y % 2 == 1 && x < w && y < h;
+                let mut stack = vec![(1usize, 1usize)];
+                let mut rng = self.rng_state;
+                while let Some(&(cx, cy)) = stack.last() {
+                    grid[cy][cx] = false;
+                    let mut dirs = [(0i64,-2i64), (0,2), (-2,0), (2,0)];
+                    // shuffle dirs
+                    for i in (1..4).rev() {
+                        rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17;
+                        let j = (rng % (i + 1) as u64) as usize;
+                        dirs.swap(i, j);
+                    }
+                    let mut moved = false;
+                    for (dx, dy) in dirs {
+                        let (nx, ny) = ((cx as i64 + dx) as usize, (cy as i64 + dy) as usize);
+                        if carve(nx, ny) && grid[ny][nx] {
+                            grid[(cy as i64 + dy / 2) as usize][(cx as i64 + dx / 2) as usize] = false;
+                            grid[ny][nx] = false;
+                            stack.push((nx, ny));
+                            moved = true;
+                            break;
+                        }
+                    }
+                    if !moved { stack.pop(); }
+                }
+                self.rng_state = rng;
+                let cells: im::Vector<Value> = grid.iter().map(|row|
+                    Value::List(row.iter().map(|&wall_cell|
+                        Value::Str(if wall_cell { wall.clone() } else { " ".into() })).collect())
+                ).collect();
+                let mut d = im::HashMap::new();
+                d.insert("w".to_string(), Value::Int(w as i64));
+                d.insert("h".to_string(), Value::Int(h as i64));
+                d.insert("cells".to_string(), Value::List(cells));
+                Ok(Some(Value::Dict(d)))
+            }
+            "rand_gauss" => {
+                // rand_gauss(mean, stddev) — Box-Muller on two uniform draws
+                let (mean, sd) = match (args.get(0), args.get(1)) {
+                    (Some(Value::Int(m)), Some(Value::Int(s))) => (*m as f64, *s as f64),
+                    (Some(Value::Float(m)), Some(Value::Float(s))) => (*m, *s),
+                    (Some(Value::Int(m)), Some(Value::Float(s))) => (*m as f64, *s),
+                    (Some(Value::Float(m)), Some(Value::Int(s))) => (*m, *s as f64),
+                    _ => return Err("rand_gauss(mean, stddev) expects two numbers".into()),
+                };
+                let mut u = || {
+                    let mut x = self.rng_state;
+                    x ^= x << 13; x ^= x >> 7; x ^= x << 17;
+                    self.rng_state = x;
+                    (x % 1_000_000) as f64 / 1_000_000.0
+                };
+                let (u1, u2) = (u().max(1e-9), u());
+                let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
+                Ok(Some(Value::Float(mean + sd * z)))
+            }
+            "fsm_next" => {
+                // fsm_next(transitions, state, event) — dict-of-dicts FSM:
+                // {state: {event: next_state}}. Returns next state or null.
+                let (d, state, event) = match (args.get(0), args.get(1), args.get(2)) {
+                    (Some(Value::Dict(d)), Some(Value::Str(s)), Some(Value::Str(e)))
+                        => (d, s.clone(), e.clone()),
+                    _ => return Err("fsm_next(transitions, state, event) expects dict + 2 strs".into()),
+                };
+                let Some(Value::Dict(row)) = d.get(state.as_ref() as &str) else {
+                    return Ok(Some(Value::Null));
+                };
+                match row.get(event.as_ref() as &str) {
+                    Some(Value::Str(next)) => Ok(Some(Value::Str(next.clone()))),
+                    Some(v) => Ok(Some(v.clone())),
+                    None => Ok(Some(Value::Null)),
+                }
+            }
+            "dist_stats" => {
+                // dist_stats(fn, trials) — mean/stddev/min/max over n samples
+                let (f, trials) = match (args.get(0), args.get(1)) {
+                    (Some(f @ Value::Closure(_, _, _)), Some(Value::Int(t))) => (f, *t as usize),
+                    _ => return Err("dist_stats(fn, trials) expects a closure + int".into()),
+                };
+                let mut vals: Vec<f64> = Vec::with_capacity(trials);
+                for _ in 0..trials {
+                    let v = self.call_closure_value(f, vec![])?;
+                    let n = match v { Value::Int(i) => i as f64, Value::Float(f) => f, _ => return Err("fn must return a number".into()) };
+                    vals.push(n);
+                }
+                let mean = vals.iter().sum::<f64>() / vals.len().max(1) as f64;
+                let var = vals.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / vals.len().max(1) as f64;
+                let (mn, mx) = vals.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), &v| (a.min(v), b.max(v)));
+                let mut out = im::HashMap::new();
+                out.insert("mean".to_string(), Value::Float(mean));
+                out.insert("stddev".to_string(), Value::Float(var.sqrt()));
+                out.insert("min".to_string(), Value::Float(if vals.is_empty() { 0.0 } else { mn }));
+                out.insert("max".to_string(), Value::Float(if vals.is_empty() { 0.0 } else { mx }));
+                out.insert("n".to_string(), Value::Int(vals.len() as i64));
+                Ok(Some(Value::Dict(out)))
+            }
+            "canvas_clear" => {
+                let (d, ch) = match (args.get(0), args.get(1)) {
+                    (Some(Value::Dict(d)), Some(Value::Str(ch))) => (d.clone(), ch.clone()),
+                    (Some(Value::Dict(d)), None) => (d.clone(), " ".into()),
+                    _ => return Err("canvas_clear(c, ch?) expects a canvas".into()),
+                };
+                let (w, h) = (d.get("w").and_then(|v| if let Value::Int(w) = v { Some(*w as usize) } else { None }),
+                              d.get("h").and_then(|v| if let Value::Int(h) = v { Some(*h as usize) } else { None }));
+                let (Some(w), Some(h)) = (w, h) else { return Err("canvas: missing w/h".into()) };
+                let row: im::Vector<Value> = (0..w).map(|_| Value::Str(ch.clone())).collect();
+                let cells: im::Vector<Value> = (0..h).map(|_| Value::List(row.clone())).collect();
+                let mut d2 = d.clone();
+                d2.insert("cells".to_string(), Value::List(cells));
+                Ok(Some(Value::Dict(d2)))
+            }
+            // === std:balance — monte-carlo playtesting ===
+            "balance_test" => {
+                let (f, trials) = match (args.get(0), args.get(1)) {
+                    (Some(f @ Value::Closure(_, _, _)), Some(Value::Int(t))) => (f, *t as usize),
+                    _ => return Err("balance_test(fn, trials) expects a closure and int".into()),
+                };
+                let (mut wins, mut losses, mut draws, mut score_sum) = (0usize, 0usize, 0usize, 0f64);
+                for _ in 0..trials {
+                    let r = self.call_closure_value(f, vec![])?;
+                    match r {
+                        Value::Dict(d) => {
+                            let win = d.get("win").map(|v| matches!(v, Value::Bool(true))).unwrap_or(false);
+                            let draw = d.get("draw").map(|v| matches!(v, Value::Bool(true))).unwrap_or(false);
+                            let score = d.get("score").and_then(|v| match v { Value::Int(i) => Some(*i as f64), Value::Float(f) => Some(*f), _ => None }).unwrap_or(0.0);
+                            score_sum += score;
+                            if draw { draws += 1; } else if win { wins += 1; } else { losses += 1; }
+                        }
+                        Value::Bool(true) => wins += 1,
+                        Value::Bool(false) => losses += 1,
+                        Value::Int(s) => { score_sum += s as f64; if s > 0 { wins += 1; } else { losses += 1; } }
+                        _ => return Err("balance_test fn must return dict/bool/int".into()),
+                    }
+                }
+                let mut out = im::HashMap::new();
+                out.insert("trials".to_string(), Value::Int(trials as i64));
+                out.insert("wins".to_string(), Value::Int(wins as i64));
+                out.insert("losses".to_string(), Value::Int(losses as i64));
+                out.insert("draws".to_string(), Value::Int(draws as i64));
+                out.insert("win_rate".to_string(), Value::Float(if trials > 0 { wins as f64 / trials as f64 } else { 0.0 }));
+                out.insert("avg_score".to_string(), Value::Float(if trials > 0 { score_sum / trials as f64 } else { 0.0 }));
+                Ok(Some(Value::Dict(out)))
+            }
+            // === std:balance — headless game loop ===
+            "game_loop" => {
+                // game_loop(max_ticks, init_state, update_fn) — update_fn
+                // (state, tick) → new state or null to stop. Returns final state.
+                let (max_ticks, init, f) = match (args.get(0), args.get(1), args.get(2)) {
+                    (Some(Value::Int(m)), Some(init), Some(f @ Value::Closure(_, _, _)))
+                        => (*m as usize, init.clone(), f),
+                    _ => return Err("game_loop(max_ticks, init, fn) expects int, state, closure".into()),
+                };
+                let mut state = init;
+                for tick in 0..max_ticks {
+                    let next = self.call_closure_value(f, vec![state.clone(), Value::Int(tick as i64)])?;
+                    if matches!(next, Value::Null) { return Ok(Some(Value::Dict({
+                        let mut d = im::HashMap::new();
+                        d.insert("stopped".to_string(), Value::Bool(true));
+                        d.insert("ticks".to_string(), Value::Int(tick as i64));
+                        d.insert("state".to_string(), state);
+                        d
+                    }))); }
+                    state = next;
+                }
+                let mut d = im::HashMap::new();
+                d.insert("stopped".to_string(), Value::Bool(false));
+                d.insert("ticks".to_string(), Value::Int(max_ticks as i64));
+                d.insert("state".to_string(), state);
+                Ok(Some(Value::Dict(d)))
+            }
+            // === std:behavior — behavior trees ===
+            // tree: ["seq", a, b] | ["sel", a, b] | ["act", fn] | ["inv", a]
+            "bt_tick" => {
+                let (tree, ctx) = match (args.get(0), args.get(1)) {
+                    (Some(Value::List(t)), Some(ctx)) => (t, ctx.clone()),
+                    _ => return Err("bt_tick(tree, ctx) expects a tree and context".into()),
+                };
+                Ok(Some(Value::Bool(self.bt_tick(tree, &ctx)?)))
             }
             "read_file" => {
                 if args.len() != 1 { return Err("read_file() expects 1 argument".into()); }
