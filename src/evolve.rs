@@ -22,6 +22,12 @@ impl Evolver {
         Evolver { rng_seed: seed, llm: false }
     }
 
+    /// Deterministic evolution: same seed + same garden = same outcomes.
+    /// Lets benchmarks and demos be reproducible.
+    pub fn set_seed(&mut self, seed: u64) {
+        self.rng_seed = if seed == 0 { 0x9E3779B97F4A7C15 } else { seed };
+    }
+
     fn rand(&mut self) -> u64 {
         // xorshift64
         self.rng_seed ^= self.rng_seed << 13;

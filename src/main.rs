@@ -302,6 +302,11 @@ fn main() {
             }
             let mut evolver = evolve::Evolver::new();
             evolver.llm = args.iter().any(|a| a == "--llm");
+            if let Some(pos) = args.iter().position(|a| a == "--seed") {
+                if let Some(n) = args.get(pos + 1).and_then(|s| s.parse::<u64>().ok()) {
+                    evolver.set_seed(n);
+                }
+            }
             let events = evolver.evolve(&mut veldt, cycles);
             for event in &events {
                 eprintln!("{}", event.format());
@@ -418,7 +423,7 @@ fn print_help(topic: Option<&str>) {
         "run" => "veldt run <file.veldt> [-- a b c]  — run a script; args() returns the -- tail\n  veldt run -e \"code\" — inline eval",
         "repl" => "veldt repl — interactive loop\n  :help :garden :quit — commands",
         "agent" => "veldt agent \"task\" [--json] — the Gardener (rule-based coding agent)\n  write/show/test/adopt/improve/suggest/bench/evolve/run — say \"help\" for verbs",
-        "evolve" => "veldt evolve [N] [--llm] — N cycles; --llm needs VELDT_LLM_KEY (+_BASE/_MODEL)",
+        "evolve" => "veldt evolve [N] [--llm] [--seed N] — N cycles; --llm needs VELDT_LLM_KEY (+_BASE/_MODEL)",
         "garden" => "veldt garden — census · veldt lineage <name> · veldt test <name> · veldt adopt <name#N>",
         "builtins" => "len type str int float print eprint input read_stdin args exit\n  abs max min round floor ceil sqrt pow rand date now sleep env\n  fetch post serve match_path read_file write_file ls exists\n  dict get put has keys values items merge delete get_or\n  re_match re_find re_replace re_split re_captures format",
         "strings" => "s.len() s.trim() s.ltrim() s.rtrim() s.to_lower() s.to_upper()\n  s.split(sep) s.replace(a,b) s.contains(x) s.starts_with(p) s.ends_with(p)\n  s.chars() s.repeat(n) s.pad(n[,ch]) s.split_at(i) s[a:b]",
