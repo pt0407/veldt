@@ -3566,6 +3566,11 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                                                 out.push(format!("let {} = {} — {} is bound to a call through {}", name, v, v, w));
                                                 break;
                                             }
+                                            // let a = b where b was let-bound to Var(c) bound to a binop — transitive binop
+                                            if n2 == w && matches!(e2, Expr::BinOp(..)) {
+                                                out.push(format!("let {} = {} — {} is bound to a binop through {}", name, v, v, w));
+                                                break;
+                                            }
                                         }
                                     }
                                 }
