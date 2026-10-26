@@ -3962,7 +3962,7 @@ fn diff_variants(a: &str, b: &str) {
 /// std:telemetry (vision): convert recorded call traces into probes.
 /// Every real call a family has served becomes synthetic evidence —
 /// live production behavior feeds the selection pool.
-fn absorb_traces(only: Option<&str>) {
+fn absorb_traces(only: Option<&str>) -> Vec<(String, u32)> {
     let mut veldt = veldt::Veldt::new();
     if let Err(e) = veldt.load() { eprintln!("Error: {}", e); process::exit(1); }
     let families: Vec<String> = match only {
@@ -3970,8 +3970,10 @@ fn absorb_traces(only: Option<&str>) {
         None => veldt.traces.keys().cloned().collect(),
     };
     let mut added = 0u32;
+    let mut per_family: Vec<(String, u32)> = Vec::new();
     for name in &families {
         let Some(traces) = veldt.traces.get(name) else { continue; };
+        let mut fam_added = 0u32;
         let pool = veldt.probes.entry(name.clone()).or_insert_with(Vec::new);
         for t in traces {
             // dedupe: skip if an identical arg-set probe exists
@@ -3989,10 +3991,22 @@ fn absorb_traces(only: Option<&str>) {
                 scale: 0,
             });
             added += 1;
+            fam_added += 1;
         }
+        if fam_added > 0 { per_family.push((name.clone(), fam_added)); }
     }
     veldt.save().unwrap_or_else(|e| eprintln!("Save error: {}", e));
-    println!("Absorbed {} traces into probes", added);
+    if std::env::args().any(|a| a == "--json") {
+        println!("{}", serde_json::json!({
+            "absorbed": added,
+            "families": per_family.iter().map(|(n, c)| serde_json::json!({
+                "name": n, "probes_added": c
+            })).collect::<Vec<_>>(),
+        }));
+    } else {
+        println!("Absorbed {} traces into probes", added);
+    }
+    per_family
 }
 
 fn test_family(name: &str) {
