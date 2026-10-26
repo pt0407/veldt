@@ -1512,6 +1512,17 @@ fn main() {
             } else {
                 println!("=== The Veldt ===");
                 veldt.print_garden(sick_only, healthy_only);
+                // --watch — re-render on a 2s poll until interrupted
+                if args.iter().any(|a| a == "--watch") {
+                    loop {
+                        std::thread::sleep(std::time::Duration::from_secs(2));
+                        let mut v2 = veldt::Veldt::new();
+                        if v2.load().is_err() { break; }
+                        print!("\x1b[2J\x1b[H");
+                        println!("=== The Veldt ===");
+                        v2.print_garden(sick_only, healthy_only);
+                    }
+                }
             }
         }
         "lineage" => {
