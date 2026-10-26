@@ -4815,7 +4815,9 @@ fn print_family_detail(veldt: &veldt::Veldt, fam: &String, vs: &[veldt::Function
         let min = ages.iter().min().unwrap();
         let max = ages.iter().max().unwrap();
         let avg = ages.iter().sum::<u64>() as f64 / ages.len() as f64;
-        println!("  ages: {} – {} (avg {:.1})", min, max, avg);
+        let mut sorted: Vec<f64> = ages.iter().map(|a| *a as f64).collect();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        println!("  ages: {} – {} (avg {:.1})  {}", min, max, avg, spark(&sorted));
     }
     // usage distribution — total calls + per-variant avg + most-called
     let total_usage = vs.iter().map(|e| e.usage_count).sum::<u64>();
