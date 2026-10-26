@@ -178,7 +178,32 @@ fn main() {
                 eprintln!("Usage: veldt adopt <name#N>");
                 process::exit(1);
             }
-            adopt_variant(&args[2]);
+            if args[2] == "--filter" {
+                // --filter <expr> — adopt the best-fitness variant matching the filter
+                let expr = args.get(3).map(|s| s.as_str()).unwrap_or("");
+                let mut veldt = veldt::Veldt::new();
+                if let Err(e) = veldt.load() { eprintln!("Error: {}", e); process::exit(1); }
+                let or_groups: Vec<Vec<&str>> = expr.split("||")
+                    .map(|g| g.split("&&").map(|s| s.trim()).collect())
+                    .collect();
+                let best = veldt.functions.iter()
+                    .flat_map(|(name, vs)| vs.iter()
+                        .filter(|e| or_groups.iter().any(|g|
+                            g.iter().all(|c| veldt::variant_matches(e, c))))
+                        .map(|e| (name.clone(), e.id, e.fitness)))
+                    .fold(None::<(String, u32, f64)>, |acc, c| {
+                        if acc.map(|a| c.2 > a.2).unwrap_or(true) { Some(c) } else { acc }
+                    });
+                match best {
+                    Some((name, id, fit)) => {
+                        println!("[adopt --filter {} — best: {}#{} fitness {:.2}]", expr, name, id, fit);
+                        adopt_variant(&format!("{}#{}", name, id));
+                    }
+                    None => println!("no variants match '{}'", expr),
+                }
+            } else {
+                adopt_variant(&args[2]);
+            }
         }
         // veldt verify --all [--quarantine] — audit every multi-variant
         // family; --quarantine demotes divergent variants to Dying so
