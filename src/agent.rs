@@ -295,6 +295,9 @@ pub fn respond(task: &str, editor_source: &str, veldt: &mut Veldt) -> AgentRespo
     if has(&["growing", "aging", "past lifespan", "lifecycle", "over the hill", "still young"]) {
         return lifecycle_intent(&words, veldt);
     }
+    if has(&["biggest", "smallest", "largest", "size", "how big", "compact", "bloated"]) {
+        return size_intent(&words, veldt);
+    }
     if has(&["garden", "status", "alive", "what's growing", "what is growing", "what have you", "ecosystem"]) {
         return status_intent(veldt);
     }
@@ -1235,6 +1238,46 @@ fn lifecycle_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
     }
     if rows.len() > 10 {
         text.push_str(&format!("  ... {} more\n", rows.len() - 10));
+    }
+    plain(&text)
+}
+
+/// Size — "biggest fib" / "smallest code" — code-size ranking.
+fn size_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
+    let scoped = find_lineage(words, veldt);
+    let want_big = words.iter().any(|w| matches!(*w, "biggest" | "largest" | "bloated"));
+    let size_of = |e: &FunctionEntry| crate::fmt::format_program(&e.body).len();
+    if let Some(name) = &scoped {
+        let vs = match veldt.functions.get(name) {
+            Some(v) => v,
+            None => return plain(&format!("No lineage called '{}'.", name)),
+        };
+        let mut sorted: Vec<&FunctionEntry> = vs.iter().collect();
+        if want_big {
+            sorted.sort_by_key(|e| std::cmp::Reverse(size_of(e)));
+        } else {
+            sorted.sort_by_key(|e| size_of(e));
+        }
+        let mut text = format!("{} — by code size ({} first)\n",
+            name, if want_big { "largest" } else { "smallest" });
+        for e in sorted.iter().take(5) {
+            text.push_str(&format!("  #{} — {} chars (fit {:.2})\n",
+                e.id, size_of(e), e.fitness));
+        }
+        return plain(&text);
+    }
+    let mut all: Vec<(&String, &FunctionEntry)> = veldt.functions.iter()
+        .flat_map(|(n, vs)| vs.iter().map(move |e| (n, e))).collect();
+    if want_big {
+        all.sort_by_key(|(_, e)| std::cmp::Reverse(size_of(e)));
+    } else {
+        all.sort_by_key(|(_, e)| size_of(e));
+    }
+    let label = if want_big { "Largest" } else { "Smallest" };
+    let mut text = format!("{} variants:\n", label);
+    for (n, e) in all.iter().take(8) {
+        text.push_str(&format!("  {}#{} — {} chars (fit {:.2})\n",
+            n, e.id, size_of(e), e.fitness));
     }
     plain(&text)
 }
