@@ -3504,44 +3504,45 @@ fn print_stats(veldt: &veldt::Veldt) {
     let mut healthy = 0usize;
     let mut sick = 0usize;
     let mut dying = 0usize;
-    // (name, peak, count, avg_age, usage, avg_size, probes, deaths, traces,
-    //  immigrants, sick, healthy, canonical, established, seedling,
-    //  avg_niches, avg_args, avg_lifespan, max_last_used,
-    //  avg_fit_rate, avg_usage_rate, avg_efficiency, avg_niche_score)
-    let mut best: Vec<(String, f64, usize, f64, u64, f64, usize, usize, usize, usize, usize, usize, usize, usize, usize, f64, f64, f64, u64, f64, f64, f64, f64)> = Vec::new();
+    // --sort <field> — compute a per-family sort key; `best` carries
+    // (name, sort_key, peak_fitness, count) for the print.
+    let sort_field = std::env::args().nth(
+        std::env::args().position(|a| a == "--sort").map(|p| p + 1).unwrap_or(usize::MAX))
+        .unwrap_or_default();
+    let mut best: Vec<(String, f64, f64, usize)> = Vec::new();
     for (name, variants) in &veldt.functions {
         let top = variants.iter().map(|e| e.fitness)
             .fold(f64::NEG_INFINITY, f64::max);
         let n = variants.len().max(1) as f64;
-        let avg_age = variants.iter().map(|e| e.age as f64).sum::<f64>() / n;
-        let usage = variants.iter().map(|e| e.usage_count).sum::<u64>();
-        let avg_size = variants.iter()
-            .map(|e| crate::fmt::format_program(&e.body).len() as f64)
-            .sum::<f64>() / n;
-        let probes = veldt.probes.get(name).map(|p| p.len()).unwrap_or(0);
-        let deaths = veldt.obituaries.iter().filter(|o| o.name == *name).count();
-        let traces = veldt.traces.get(name).map(|t| t.len()).unwrap_or(0);
-        let immigrants = variants.iter().filter(|e| e.origin.contains("immigrant")).count();
-        let sick_n = variants.iter().filter(|e| matches!(e.health, Health::Sick(_))).count();
-        let healthy_n = variants.iter().filter(|e| matches!(e.health, Health::Healthy)).count();
-        let canon_n = variants.iter().filter(|e| matches!(e.trust, veldt::Trust::Canonical)).count();
-        let estab_n = variants.iter().filter(|e| matches!(e.trust, veldt::Trust::Established)).count();
-        let seed_n = variants.iter().filter(|e| matches!(e.trust, veldt::Trust::Seedling)).count();
-        let avg_niches = variants.iter().map(|e| e.niche_scores.len() as f64).sum::<f64>() / n;
-        let avg_args = variants.iter().map(|e| e.params.len() as f64).sum::<f64>() / n;
-        let avg_lifespan = variants.iter().map(|e| e.lifespan).sum::<f64>() / n;
-        let max_lu = variants.iter().map(|e| e.last_used).max().unwrap_or(0);
-        let fit_rate = variants.iter().map(|e| e.fitness / (e.age as f64 + 1.0)).sum::<f64>() / n;
-        let usage_rate = variants.iter().map(|e| e.usage_count as f64 / (e.age as f64 + 1.0)).sum::<f64>() / n;
-        let efficiency = variants.iter().map(|e|
-            e.fitness / (crate::fmt::format_program(&e.body).len() as f64 + 1.0)).sum::<f64>() / n;
-        let niche_score = variants.iter().map(|e|
-            e.niche_scores.values().sum::<f64>() / e.niche_scores.len().max(1) as f64).sum::<f64>() / n;
-        best.push((name.clone(), if variants.is_empty() { 0.0 } else { top },
-            variants.len(), avg_age, usage, avg_size, probes, deaths, traces,
-            immigrants, sick_n, healthy_n, canon_n, estab_n, seed_n,
-            avg_niches, avg_args, avg_lifespan, max_lu,
-            fit_rate, usage_rate, efficiency, niche_score));
+        let key = match sort_field.as_str() {
+            "count" => variants.len() as f64,
+            "avg_age" => variants.iter().map(|e| e.age as f64).sum::<f64>() / n,
+            "usage" => variants.iter().map(|e| e.usage_count).sum::<u64>() as f64,
+            "size" => variants.iter().map(|e|
+                crate::fmt::format_program(&e.body).len() as f64).sum::<f64>() / n,
+            "probes" => veldt.probes.get(name).map(|p| p.len()).unwrap_or(0) as f64,
+            "deaths" => veldt.obituaries.iter().filter(|o| o.name == *name).count() as f64,
+            "traces" => veldt.traces.get(name).map(|t| t.len()).unwrap_or(0) as f64,
+            "immigrants" => variants.iter().filter(|e| e.origin.contains("immigrant")).count() as f64,
+            "sick" => variants.iter().filter(|e| matches!(e.health, Health::Sick(_))).count() as f64,
+            "healthy" => variants.iter().filter(|e| matches!(e.health, Health::Healthy)).count() as f64,
+            "canonical" => variants.iter().filter(|e| matches!(e.trust, veldt::Trust::Canonical)).count() as f64,
+            "established" => variants.iter().filter(|e| matches!(e.trust, veldt::Trust::Established)).count() as f64,
+            "seedling" => variants.iter().filter(|e| matches!(e.trust, veldt::Trust::Seedling)).count() as f64,
+            "niches" => variants.iter().map(|e| e.niche_scores.len() as f64).sum::<f64>() / n,
+            "args" => variants.iter().map(|e| e.params.len() as f64).sum::<f64>() / n,
+            "lifespan" => variants.iter().map(|e| e.lifespan).sum::<f64>() / n,
+            "last_used" => variants.iter().map(|e| e.last_used).max().unwrap_or(0) as f64,
+            "fit_rate" => variants.iter().map(|e| e.fitness / (e.age as f64 + 1.0)).sum::<f64>() / n,
+            "usage_rate" => variants.iter().map(|e| e.usage_count as f64 / (e.age as f64 + 1.0)).sum::<f64>() / n,
+            "efficiency" => variants.iter().map(|e|
+                e.fitness / (crate::fmt::format_program(&e.body).len() as f64 + 1.0)).sum::<f64>() / n,
+            "niche_score" => variants.iter().map(|e|
+                e.niche_scores.values().sum::<f64>() / e.niche_scores.len().max(1) as f64).sum::<f64>() / n,
+            "name" => 0.0, // sorted separately below
+            _ => if variants.is_empty() { 0.0 } else { top }, // "fitness" default
+        };
+        best.push((name.clone(), key, if variants.is_empty() { 0.0 } else { top }, variants.len()));
         for e in variants {
             total += 1;
             match e.health {
@@ -3551,35 +3552,10 @@ fn print_stats(veldt: &veldt::Veldt) {
             }
         }
     }
-    // --sort <field> — top-families sort key: fitness (default) | count | name
-    //                  avg_age | usage | size (per-family aggregates)
-    let sort_field = std::env::args().nth(
-        std::env::args().position(|a| a == "--sort").map(|p| p + 1).unwrap_or(usize::MAX))
-        .unwrap_or_default();
-    match sort_field.as_str() {
-        "count" => best.sort_by(|a, b| b.2.cmp(&a.2)),
-        "name" => best.sort_by(|a, b| a.0.cmp(&b.0)),
-        "avg_age" => best.sort_by(|a, b| b.3.partial_cmp(&a.3).unwrap_or(std::cmp::Ordering::Equal)),
-        "usage" => best.sort_by(|a, b| b.4.cmp(&a.4)),
-        "size" => best.sort_by(|a, b| b.5.partial_cmp(&a.5).unwrap_or(std::cmp::Ordering::Equal)),
-        "probes" => best.sort_by(|a, b| b.6.cmp(&a.6)),
-        "deaths" => best.sort_by(|a, b| b.7.cmp(&a.7)),
-        "traces" => best.sort_by(|a, b| b.8.cmp(&a.8)),
-        "immigrants" => best.sort_by(|a, b| b.9.cmp(&a.9)),
-        "sick" => best.sort_by(|a, b| b.10.cmp(&a.10)),
-        "healthy" => best.sort_by(|a, b| b.11.cmp(&a.11)),
-        "canonical" => best.sort_by(|a, b| b.12.cmp(&a.12)),
-        "established" => best.sort_by(|a, b| b.13.cmp(&a.13)),
-        "seedling" => best.sort_by(|a, b| b.14.cmp(&a.14)),
-        "niches" => best.sort_by(|a, b| b.15.partial_cmp(&a.15).unwrap_or(std::cmp::Ordering::Equal)),
-        "args" => best.sort_by(|a, b| b.16.partial_cmp(&a.16).unwrap_or(std::cmp::Ordering::Equal)),
-        "lifespan" => best.sort_by(|a, b| b.17.partial_cmp(&a.17).unwrap_or(std::cmp::Ordering::Equal)),
-        "last_used" => best.sort_by(|a, b| b.18.cmp(&a.18)),
-        "fit_rate" => best.sort_by(|a, b| b.19.partial_cmp(&a.19).unwrap_or(std::cmp::Ordering::Equal)),
-        "usage_rate" => best.sort_by(|a, b| b.20.partial_cmp(&a.20).unwrap_or(std::cmp::Ordering::Equal)),
-        "efficiency" => best.sort_by(|a, b| b.21.partial_cmp(&a.21).unwrap_or(std::cmp::Ordering::Equal)),
-        "niche_score" => best.sort_by(|a, b| b.22.partial_cmp(&a.22).unwrap_or(std::cmp::Ordering::Equal)),
-        _ => best.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)),
+    if sort_field == "name" {
+        best.sort_by(|a, b| a.0.cmp(&b.0));
+    } else {
+        best.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     }
     let probe_count: usize = veldt.probes.values().map(|v| v.len()).sum();
     let (mut seed, mut estab, mut canon) = (0usize, 0usize, 0usize);
@@ -4282,7 +4258,7 @@ fn print_stats(veldt: &veldt::Veldt) {
     }
     if !best.is_empty() {
         println!("top families:");
-        for (name, fit, n) in best.iter().take(10) {
+        for (name, _key, fit, n) in best.iter().take(10) {
             println!("  {:<20} fitness {:>5.2}  ({} variants)", name, fit, n);
         }
     }
