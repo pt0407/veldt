@@ -1280,3 +1280,5 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 - [Devin] lint regression tests: tictactoe bounded (<=15
   warnings, catches FP explosions) + defect checks still
   fire (guards the evolve gate's filter).
+- [Devin] stats --json carries lint_warnings + lint_defects
+  — machine-readable code-health census.
