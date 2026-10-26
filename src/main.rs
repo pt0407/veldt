@@ -3430,6 +3430,9 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
                     out.push(format!("catch variable {} never used — prefix with _", evar));
                 }
                 if b.is_empty() { out.push("empty catch — errors swallowed silently".into()); }
+                if b.len() == 1 && matches!(b[0], Stmt::Print(_)) {
+                    out.push("catch body only prints the error — shallow error handling".into());
+                }
                 if a.is_empty() { out.push("empty try — nothing to guard".into()); }
                 lint_block(a, out); lint_block(b, out);
             }
