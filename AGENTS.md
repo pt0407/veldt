@@ -49,6 +49,12 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] JIT UPDATE 22: Int/Int specialization —
+  Value is now #[repr(C,u8)] (tag byte 0=Int, i64 payload @8).
+  Value-mode binops load the tag inline and do native i64
+  arithmetic for Int/Int, helper-fallback for other types.
+  The honest value-mode win is now real for numeric code mixed
+  with structured values (list indices, accumulators).
 - [Devin/main-side] JIT UPDATE 21: veldt serve --vm — prefer_vm
   on the server session garden so every code-run defaults to the
   fast engine. That's the last surface — CLI + API + session all
