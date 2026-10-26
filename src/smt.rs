@@ -50,7 +50,30 @@ fn body_to_smt(
                 let v = cb.ite(&tv, &ev);
                 last = Some(v);
             }
-            // loops/match/etc — bail to bounded
+            // match scrut { pat => A, ... else => E } —
+            // ite(scrut == pat, A, chain). Patterns are expressions
+            // (the interpreter values_eq's them); no wildcard —
+            // else_arm is the default.
+            Stmt::Match(scrutinee, arms, else_arm) => {
+                let sv = expr_to_smt(scrutinee, env, veldt, fuel)?;
+                let mut val = match else_arm {
+                    Some(eb) => {
+                        let mut ee = env.clone();
+                        body_to_smt(eb, &mut ee, veldt, fuel)?
+                    }
+                    None => Int::from_i64(0).into(),
+                };
+                // build the ite chain inside-out (last arm innermost)
+                for (pat, body) in arms.iter().rev() {
+                    let mut eenv = env.clone();
+                    let pv = expr_to_smt(pat, &mut eenv, veldt, fuel)?;
+                    let av = body_to_smt(body, &mut eenv, veldt, fuel)?;
+                    let c = sv._eq(&pv);
+                    val = c.ite(&av, &val);
+                }
+                last = Some(val);
+            }
+            // loops/etc — bail to bounded
             _ => return None,
         }
     }
