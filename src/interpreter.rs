@@ -2527,6 +2527,79 @@ impl Interpreter {
                 }
                 _ => Err("min_by/max_by(fn) expects a closure".into()),
             },
+            // === additional list ops ===
+            (Value::List(items), "sum") => {
+                let mut total = 0i64;
+                let mut ftotal = 0f64;
+                let mut has_float = false;
+                for v in items {
+                    match v {
+                        Value::Int(i) => { total += i; ftotal += *i as f64; }
+                        Value::Float(f) => { has_float = true; ftotal += f; }
+                        _ => return Err("sum() expects numeric items".into()),
+                    }
+                }
+                Ok(if has_float { Value::Float(ftotal) } else { Value::Int(total) })
+            }
+            (Value::List(items), "product") => {
+                let mut total = 1i64;
+                let mut ftotal = 1f64;
+                let mut has_float = false;
+                for v in items {
+                    match v {
+                        Value::Int(i) => { total *= i; ftotal *= *i as f64; }
+                        Value::Float(f) => { has_float = true; ftotal *= f; }
+                        _ => return Err("product() expects numeric items".into()),
+                    }
+                }
+                Ok(if has_float { Value::Float(ftotal) } else { Value::Int(total) })
+            }
+            (Value::List(items), "first") => Ok(items.head().cloned().unwrap_or(Value::Null)),
+            (Value::List(items), "last") => Ok(items.last().cloned().unwrap_or(Value::Null)),
+            (Value::List(items), "uniq") => {
+                let mut seen = std::collections::HashSet::new();
+                let out: Vec<Value> = items.iter()
+                    .filter(|v| seen.insert(serde_json::to_string(v).unwrap_or_default()))
+                    .cloned().collect();
+                Ok(Value::List(out.into_iter().collect()))
+            }
+            (Value::List(items), m @ ("any" | "all" | "none")) => match args.get(0) {
+                Some(f @ Value::Closure(_, _, _)) => {
+                    let mut found_true = 0usize;
+                    let mut found_false = 0usize;
+                    for v in items {
+                        match self.call_closure_value(f, vec![v.clone()])? {
+                            Value::Bool(true) => found_true += 1,
+                            Value::Bool(false) => found_false += 1,
+                            _ => return Err(format!("{}(fn) must return bool", m)),
+                        }
+                    }
+                    Ok(Value::Bool(match m {
+                        "any" => found_true > 0,
+                        "all" => found_false == 0,
+                        _ => found_true == 0, // none
+                    }))
+                }
+                _ => Err(format!("{}(fn) expects a closure", m)),
+            },
+            (Value::List(items), "partition") => match args.get(0) {
+                Some(f @ Value::Closure(_, _, _)) => {
+                    let mut t = Vec::new();
+                    let mut fl = Vec::new();
+                    for v in items {
+                        match self.call_closure_value(f, vec![v.clone()])? {
+                            Value::Bool(true) => t.push(v.clone()),
+                            Value::Bool(false) => fl.push(v.clone()),
+                            _ => return Err("partition(fn) must return bool".into()),
+                        }
+                    }
+                    Ok(Value::List(im::vector![
+                        Value::List(t.into_iter().collect()),
+                        Value::List(fl.into_iter().collect()),
+                    ]))
+                }
+                _ => Err("partition(fn) expects a closure".into()),
+            },
             // === Phase 1 stdlib: dicts ===
             (Value::Dict(d), "values") =>
                 Ok(Value::List(d.values().cloned().collect())),
