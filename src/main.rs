@@ -562,6 +562,7 @@ fn main() {
                 let mut total = 0usize;
                 let mut flagged = 0usize;
                 let mut repaired = 0usize;
+                let mut defects = 0usize;
                 let mut repaired_ids: Vec<(String, u32)> = Vec::new();
                 for (name, entries) in v.functions.iter_mut() {
                     if let Some(f) = fam { if name != f { continue; } }
@@ -590,6 +591,9 @@ fn main() {
                         if warns.is_empty() { continue; }
                         flagged += 1;
                         total += warns.len();
+                        defects += warns.iter()
+                            .filter(|w| crate::evolve::is_realbug_warning(w))
+                            .count();
                         if json_out {
                             println!("{}", serde_json::json!({
                                 "family": name, "variant": e.id,
@@ -605,7 +609,8 @@ fn main() {
                 }
                 if json_out {
                     println!("{}", serde_json::json!({"summary": {
-                        "warnings": total, "variants_flagged": flagged,
+                        "warnings": total, "defects": defects,
+                        "variants_flagged": flagged,
                         "repaired": repaired}}));
                 }
                 // --verify: re-trial every repaired variant — proves the
