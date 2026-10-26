@@ -49,6 +49,16 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/gardener] FILTER DSL + FIX: `veldt garden --filter <expr>`
+  — composable variant query (`--filter "fitness > 1.5 && age < 100"`,
+  `||` for OR groups). Fields: fitness age usage size args lifespan
+  last_used niches health trust origin calls. Ops: `> < >= <= == != ~`.
+  Consolidates the 155+ garden flags into one query language.
+  Also fixed the recent field renames: `Trace.input`→`args`,
+  `output`→`result`, `timestamp`→`at`; `Probe.input`→`args`;
+  `StructEntry` uses `fields`; `Health::Sick` is now a `String`
+  (was `Vec<(input,got,want)>`); `server.rs` `veldt::Veldt`→`Veldt`.
+  The `--failing` flag now matches against the Sick error string.
 - [Devin/gardener] API SURFACE: `veldt serve` now exposes ~64
   endpoints — the full garden-analytics surface (census, health,
   trust, probes, niches, usage, trend, sources, fitness, bare,
