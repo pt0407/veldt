@@ -566,6 +566,21 @@ fn main() {
                 }
                 println!("=== The Veldt (fitness >= {}) ===", min);
                 filtered.print_garden(sick_only, healthy_only);
+            } else if args.iter().any(|a| a == "--seed") {
+                // seed variants only — the originals
+                let mut filtered = veldt::Veldt::new();
+                filtered.probes = veldt.probes.clone();
+                filtered.obituaries = veldt.obituaries.clone();
+                filtered.run_count = veldt.run_count;
+                filtered.garden_path = veldt.garden_path.clone();
+                for (name, vs) in &veldt.functions {
+                    let keep: Vec<_> = vs.iter()
+                        .filter(|e| e.origin.starts_with("seed"))
+                        .cloned().collect();
+                    if !keep.is_empty() { filtered.functions.insert(name.clone(), keep); }
+                }
+                println!("=== The Veldt (seeds) ===");
+                filtered.print_garden(sick_only, healthy_only);
             } else if args.iter().any(|a| a == "--immigrant") {
                 // immigrant variants only — foreign-garden influence
                 let mut filtered = veldt::Veldt::new();
