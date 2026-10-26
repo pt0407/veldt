@@ -2821,6 +2821,48 @@ impl Interpreter {
                 d2.insert("cells".to_string(), Value::List(rows2));
                 Ok(Some(Value::Dict(d2)))
             }
+            "voronoi" => {
+                // voronoi(c, [[x, y, ch], ...]) — nearest-site partition:
+                // every cell gets the ch of its closest seed point.
+                let (d, seeds) = match (args.get(0), args.get(1)) {
+                    (Some(Value::Dict(d)), Some(Value::List(s))) => (d.clone(), s.clone()),
+                    _ => return Err("voronoi(c, [[x, y, ch], ...]) expects dict + seed list".into()),
+                };
+                let Some(Value::List(rows)) = d.get("cells") else { return Err("canvas: no cells".into()) };
+                let (w, h) = (d.get("w").and_then(|v| if let Value::Int(w) = v { Some(*w as usize) } else { None }),
+                              d.get("h").and_then(|v| if let Value::Int(h) = v { Some(*h as usize) } else { None }));
+                let (Some(w), Some(h)) = (w, h) else { return Err("canvas: missing w/h".into()) };
+                let seed_pts: Vec<(f64, f64, std::sync::Arc<str>)> = seeds.iter().filter_map(|s| {
+                    if let Value::List(p) = s {
+                        if p.len() == 3 {
+                            if let (Value::Int(x), Value::Int(y), Value::Str(ch)) = (&p[0], &p[1], &p[2]) {
+                                return Some((*x as f64, *y as f64, ch.clone()));
+                            }
+                        }
+                    }
+                    None
+                }).collect();
+                let mut rows2 = rows.clone();
+                for yy in 0..h.min(rows2.len()) {
+                    if let Value::List(r) = &rows2[yy] {
+                        let mut nr = r.clone();
+                        for xx in 0..w.min(nr.len()) {
+                            let (px, py) = (xx as f64, yy as f64);
+                            if let Some((_, _, ch)) = seed_pts.iter().min_by(|a, b| {
+                                let da = (a.0 - px).powi(2) + (a.1 - py).powi(2);
+                                let db = (b.0 - px).powi(2) + (b.1 - py).powi(2);
+                                da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+                            }) {
+                                nr[xx] = Value::Str(ch.clone());
+                            }
+                        }
+                        rows2[yy] = Value::List(nr);
+                    }
+                }
+                let mut d2 = d.clone();
+                d2.insert("cells".to_string(), Value::List(rows2));
+                Ok(Some(Value::Dict(d2)))
+            }
             "dist_stats" => {
                 // dist_stats(fn, trials) — mean/stddev/min/max over n samples
                 let (f, trials) = match (args.get(0), args.get(1)) {
