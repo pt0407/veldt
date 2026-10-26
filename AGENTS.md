@@ -1233,3 +1233,6 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 - [Devin] agent 'fix <fam>' extended: no-sick path now runs
   mechanical repairs on healthy variants — 'fix' covers heal
   + clean both senses.
+- [Devin] /api/lint: garden code-health census over HTTP —
+  per-family warnings + defect-class split, worst-first.
+  Completes the API lint surface (/api/check = source level).
