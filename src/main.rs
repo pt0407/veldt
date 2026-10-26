@@ -3296,6 +3296,7 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
                 }
                 if self_cmp(cond) { out.push("condition compares a value to itself".into()); }
                 if bool_cmp(cond) { out.push("condition compares to a bool literal — drop the == true/false".into()); }
+                if taut_cmp(cond) { out.push("if condition compares a value to complementary ranges — always true or always false".into()); }
                 if let Some(e) = b {
                     if *a == *e { out.push("if branches are identical — dead conditional".into()); }
                     if a.is_empty() && !e.is_empty() {
@@ -3317,6 +3318,7 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
                 }
                 if self_cmp(cond) { out.push("loop condition compares a value to itself".into()); }
                 if bool_cmp(cond) { out.push("loop condition compares to a bool literal — drop the == true/false".into()); }
+                if taut_cmp(cond) { out.push("loop condition compares a value to complementary ranges — always true or always false".into()); }
                 // condition var never assigned inside the body — likely infinite
                 if let Expr::Var(v) = cond {
                     if !body.iter().any(|s| stmt_assigns(s, v)) {
@@ -3627,6 +3629,25 @@ fn stmt_assigns(s: &ast::Stmt, name: &str) -> bool {
             || b.iter().any(|s| stmt_assigns(s, name)),
         Stmt::Match(_, arms, els) => arms.iter().any(|(_, b)| b.iter().any(|s| stmt_assigns(s, name)))
             || els.as_ref().map(|v| v.iter().any(|s| stmt_assigns(s, name))).unwrap_or(false),
+        _ => false,
+    }
+}
+
+// complementary comparisons on the same operands — `x>0 || x<0` (true) or `x>0 && x<0` (false)
+fn taut_cmp(e: &ast::Expr) -> bool {
+    use ast::*;
+    fn complementary(a: &BinOp, b: &BinOp) -> bool {
+        matches!((a, b),
+            (BinOp::Gt, BinOp::Lt) | (BinOp::Lt, BinOp::Gt)
+            | (BinOp::Ge, BinOp::Le) | (BinOp::Le, BinOp::Ge))
+    }
+    match e {
+        Expr::BinOp(l, BinOp::Or, r) | Expr::BinOp(l, BinOp::And, r) => {
+            if let (Expr::BinOp(a, op_a, b), Expr::BinOp(c, op_b, d)) = (&**l, &**r) {
+                a == c && b == d && complementary(op_a, op_b)
+            } else { false }
+        }
+        Expr::UnaryOp(_, a) => taut_cmp(a),
         _ => false,
     }
 }
