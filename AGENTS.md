@@ -747,3 +747,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   checks. New: compound assignment (x = x + y → x += y,
   same for -= *= /=). Fires on tictactoe's counter loops
   — real simplification catches.
+- [Devin] Lint batch 17 (HEAD post-c63e5f9): ~47 strict
+  checks. New: catch body that just exits (return/break/
+  continue — try adds no recovery, no logging, no
+  handling).
