@@ -1328,6 +1328,35 @@ impl Interpreter {
                     _ => Err("act closure must return bool".into()),
                 }
             }
+            "cond" => {
+                // ["cond", check_fn, then_node, else_node?]
+                let Some(f @ Value::Closure(_, _, _)) = node.get(1) else {
+                    return Err("cond expects a check closure".into())
+                };
+                let pass = match self.call_closure_value(f, vec![ctx.clone()])? {
+                    Value::Bool(b) => b,
+                    _ => return Err("cond check must return bool".into()),
+                };
+                if pass {
+                    let Some(Value::List(c)) = node.get(2) else { return Err("cond expects a then-node".into()) };
+                    self.bt_tick(c, ctx)
+                } else if let Some(Value::List(c)) = node.get(3) {
+                    self.bt_tick(c, ctx)
+                } else {
+                    Ok(false)
+                }
+            }
+            "rep" => {
+                // ["rep", n, child] — tick child n times, succeed on last
+                let (Some(Value::Int(n)), Some(Value::List(c))) = (node.get(1), node.get(2))
+                    else { return Err("rep expects n and a child".into()) };
+                for _ in 0..*n {
+                    if !self.bt_tick(c, ctx)? { return Ok(false); }
+                }
+                Ok(true)
+            }
+            "succeed" => Ok(true),
+            "fail" => Ok(false),
             other => Err(format!("unknown bt node kind: {}", other)),
         }
     }
@@ -1528,6 +1557,66 @@ impl Interpreter {
                 d.insert("cells".to_string(), Value::List(rows2));
                 Ok(Some(Value::Dict(d)))
             }
+            "canvas_get" => {
+                let (d, x, y) = match (args.get(0), args.get(1), args.get(2)) {
+                    (Some(Value::Dict(d)), Some(Value::Int(x)), Some(Value::Int(y)))
+                        => (d, *x as usize, *y as usize),
+                    _ => return Err("canvas_get(c, x, y) expects dict, x, y".into()),
+                };
+                let Some(Value::List(rows)) = d.get("cells") else { return Err("canvas: no cells".into()) };
+                if y >= rows.len() { return Ok(Some(Value::Null)); }
+                let Value::List(r) = &rows[y] else { return Ok(Some(Value::Null)) };
+                if x >= r.len() { return Ok(Some(Value::Null)); }
+                Ok(Some(r[x].clone()))
+            }
+            "canvas_fill" => {
+                let (c, x0, y0, w, h, ch) = match (args.get(0), args.get(1), args.get(2), args.get(3), args.get(4), args.get(5)) {
+                    (Some(Value::Dict(d)), Some(Value::Int(x0)), Some(Value::Int(y0)),
+                     Some(Value::Int(w)), Some(Value::Int(h)), Some(Value::Str(ch)))
+                        => (d.clone(), *x0 as usize, *y0 as usize, *w as usize, *h as usize, ch.clone()),
+                    _ => return Err("canvas_fill(c, x, y, w, h, ch) expects dict + 4 ints + str".into()),
+                };
+                let Some(Value::List(rows)) = c.get("cells") else { return Err("canvas: no cells".into()) };
+                let mut rows2 = rows.clone();
+                for yy in y0..(y0 + h).min(rows2.len()) {
+                    if let Value::List(r) = &rows2[yy] {
+                        let mut nr = r.clone();
+                        for xx in x0..(x0 + w).min(nr.len()) { nr[xx] = Value::Str(ch.clone()); }
+                        rows2[yy] = Value::List(nr);
+                    }
+                }
+                let mut d = c.clone();
+                d.insert("cells".to_string(), Value::List(rows2));
+                Ok(Some(Value::Dict(d)))
+            }
+            "canvas_line" => {
+                let (c, mut x, mut y, x2, y2, ch) = match (args.get(0), args.get(1), args.get(2), args.get(3), args.get(4), args.get(5)) {
+                    (Some(Value::Dict(d)), Some(Value::Int(a)), Some(Value::Int(b)),
+                     Some(Value::Int(c2)), Some(Value::Int(d2)), Some(Value::Str(ch)))
+                        => (d.clone(), *a, *b, *c2, *d2, ch.clone()),
+                    _ => return Err("canvas_line(c, x1, y1, x2, y2, ch) expects dict + 4 ints + str".into()),
+                };
+                let Some(Value::List(rows)) = c.get("cells") else { return Err("canvas: no cells".into()) };
+                let mut rows2 = rows.clone();
+                let (dx, dy) = (x2 - x, y2 - y);
+                let steps = dx.abs().max(dy.abs()).max(1);
+                for i in 0..=steps {
+                    let px = x + dx * i / steps;
+                    let py = y + dy * i / steps;
+                    if py >= 0 && (py as usize) < rows2.len() {
+                        if let Value::List(r) = &rows2[py as usize] {
+                            if px >= 0 && (px as usize) < r.len() {
+                                let mut nr = r.clone();
+                                nr[px as usize] = Value::Str(ch.clone());
+                                rows2[py as usize] = Value::List(nr);
+                            }
+                        }
+                    }
+                }
+                let mut d = c.clone();
+                d.insert("cells".to_string(), Value::List(rows2));
+                Ok(Some(Value::Dict(d)))
+            }
             "canvas_render" => {
                 let Some(Value::Dict(d)) = args.get(0) else { return Err("canvas_render(c) expects a canvas".into()) };
                 let Some(Value::List(rows)) = d.get("cells") else { return Err("canvas: no cells".into()) };
@@ -1588,6 +1677,33 @@ impl Interpreter {
                 out.insert("win_rate".to_string(), Value::Float(if trials > 0 { wins as f64 / trials as f64 } else { 0.0 }));
                 out.insert("avg_score".to_string(), Value::Float(if trials > 0 { score_sum / trials as f64 } else { 0.0 }));
                 Ok(Some(Value::Dict(out)))
+            }
+            // === std:balance — headless game loop ===
+            "game_loop" => {
+                // game_loop(max_ticks, init_state, update_fn) — update_fn
+                // (state, tick) → new state or null to stop. Returns final state.
+                let (max_ticks, init, f) = match (args.get(0), args.get(1), args.get(2)) {
+                    (Some(Value::Int(m)), Some(init), Some(f @ Value::Closure(_, _, _)))
+                        => (*m as usize, init.clone(), f),
+                    _ => return Err("game_loop(max_ticks, init, fn) expects int, state, closure".into()),
+                };
+                let mut state = init;
+                for tick in 0..max_ticks {
+                    let next = self.call_closure_value(f, vec![state.clone(), Value::Int(tick as i64)])?;
+                    if matches!(next, Value::Null) { return Ok(Some(Value::Dict({
+                        let mut d = im::HashMap::new();
+                        d.insert("stopped".to_string(), Value::Bool(true));
+                        d.insert("ticks".to_string(), Value::Int(tick as i64));
+                        d.insert("state".to_string(), state);
+                        d
+                    }))); }
+                    state = next;
+                }
+                let mut d = im::HashMap::new();
+                d.insert("stopped".to_string(), Value::Bool(false));
+                d.insert("ticks".to_string(), Value::Int(max_ticks as i64));
+                d.insert("state".to_string(), state);
+                Ok(Some(Value::Dict(d)))
             }
             // === std:behavior — behavior trees ===
             // tree: ["seq", a, b] | ["sel", a, b] | ["act", fn] | ["inv", a]
