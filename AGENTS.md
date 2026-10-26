@@ -1277,3 +1277,6 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 - [Devin] check --garden --watch: re-lints variants on
   garden mtime — all read-only garden views now have a
   live --watch mode (stats/test/fuzz/bench/check-garden).
+- [Devin] lint regression tests: tictactoe bounded (<=15
+  warnings, catches FP explosions) + defect checks still
+  fire (guards the evolve gate's filter).
