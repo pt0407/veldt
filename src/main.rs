@@ -151,6 +151,24 @@ fn main() {
                 for name in &names {
                     test_family(name);
                 }
+            } else if let Some(expr) = args.iter().position(|a| a == "--filter")
+                .and_then(|p| args.get(p + 1)) {
+                // --filter <expr> — test only families with matching variants
+                let mut veldt = veldt::Veldt::new();
+                if let Err(e) = veldt.load() { eprintln!("Error: {}", e); process::exit(1); }
+                let or_groups: Vec<Vec<&str>> = expr.split("||")
+                    .map(|g| g.split("&&").map(|s| s.trim()).collect())
+                    .collect();
+                let names: Vec<String> = veldt.functions.iter()
+                    .filter(|(_, vs)| vs.iter().any(|e|
+                        or_groups.iter().any(|g|
+                            g.iter().all(|c| veldt::variant_matches(e, c)))))
+                    .map(|(n, _)| n.clone())
+                    .collect();
+                println!("[test --filter {} — {} families]", expr, names.len());
+                for name in &names {
+                    test_family(name);
+                }
             } else {
                 test_family(&args[2]);
             }
