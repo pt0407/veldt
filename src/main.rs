@@ -526,6 +526,8 @@ fn main() {
                 eprintln!("Error loading veldt: {}", e);
                 process::exit(1);
             }
+            let dry = args.iter().any(|a| a == "--dry");
+            if dry { eprintln!("[EVOLVE] dry run — changes not persisted"); }
             let mut evolver = evolve::Evolver::new();
             evolver.llm = args.iter().any(|a| a == "--llm");
             if let Some(pos) = args.iter().position(|a| a == "--seed") {
@@ -567,7 +569,11 @@ fn main() {
                     }
                 }
             }
-            veldt.save().unwrap_or_else(|e| eprintln!("Save error: {}", e));
+            if dry {
+                eprintln!("[EVOLVE] dry run complete — garden unchanged");
+            } else {
+                veldt.save().unwrap_or_else(|e| eprintln!("Save error: {}", e));
+            }
         }
         "visual" => {
             let mut veldt = veldt::Veldt::new();
