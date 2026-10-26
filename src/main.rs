@@ -2445,7 +2445,8 @@ fn print_stats(veldt: &veldt::Veldt) {
     if !niches.is_empty() {
         let line: Vec<String> = niches.iter().take(8)
             .map(|(n, c)| format!("{}:{}", n, c)).collect();
-        println!("probe niches: {}", line.join(" "));
+        let counts: Vec<f64> = niches.iter().take(8).map(|(_, c)| *c as f64).collect();
+        println!("probe niches: {}  {}", line.join(" "), spark(&counts));
     }
     // avg variant age — turnover: young garden = active evolution
     let ages: Vec<u64> = veldt.functions.values()
