@@ -373,6 +373,20 @@ fn main() {
                 }));
             } else if obituaries {
                 veldt.print_obituaries();
+            } else if args.iter().any(|a| a == "--usage") {
+                // --usage — only variants that actually get called
+                let mut filtered = veldt::Veldt::new();
+                filtered.probes = veldt.probes.clone();
+                filtered.obituaries = veldt.obituaries.clone();
+                filtered.run_count = veldt.run_count;
+                filtered.garden_path = veldt.garden_path.clone();
+                for (name, vs) in &veldt.functions {
+                    let keep: Vec<_> = vs.iter().filter(|e| e.usage_count > 0)
+                        .cloned().collect();
+                    if !keep.is_empty() { filtered.functions.insert(name.clone(), keep); }
+                }
+                println!("=== The Veldt (used variants) ===");
+                filtered.print_garden(sick_only, healthy_only);
             } else if let Some(fam) = args.iter().position(|a| a == "--family")
                 .and_then(|p| args.get(p + 1)) {
                 // --family <name> — flat census of one lineage
@@ -1011,6 +1025,25 @@ fn print_stats(veldt: &veldt::Veldt) {
         let (lo, hi) = (*ages.iter().min().unwrap_or(&0), *ages.iter().max().unwrap_or(&0));
         println!("death age: avg {} ({}..{}) over {} deaths",
             avg, lo, hi, ages.len());
+    }
+    // healing attempts — how often variants tried to heal before dying
+    if !veldt.obituaries.is_empty() {
+        let attempts: Vec<usize> = veldt.obituaries.iter()
+            .map(|o| o.healing_attempts.len()).collect();
+        let avg = attempts.iter().sum::<usize>() / attempts.len().max(1);
+        let max = attempts.iter().max().unwrap_or(&0);
+        let healed_once = attempts.iter().filter(|a| **a > 0).count();
+        println!("healing: {} of {} deaths tried (avg {} attempts, max {})",
+            healed_once, attempts.len(), avg, max);
+    }
+    // avg usage per variant — selection pressure intensity
+    let used: Vec<u64> = veldt.functions.values()
+        .flat_map(|vs| vs.iter().map(|e| e.usage_count)).collect();
+    if !used.is_empty() {
+        let avg = used.iter().sum::<u64>() / used.len() as u64;
+        let called = used.iter().filter(|u| **u > 0).count();
+        println!("usage rate: avg {} calls/variant ({} of {} called)",
+            avg, called, used.len());
     }
     // fitness trend — peak per run, is the garden improving?
     if veldt.fitness_history.len() >= 2 {
