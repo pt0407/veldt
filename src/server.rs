@@ -41,6 +41,7 @@ pub async fn start_server(port: u16) {
         .route("/api/adopt", post(adopt_variant))
         .route("/api/verify", post(verify_family))
         .route("/api/quarantine", post(quarantine_family))
+        .route("/api/compare", post(compare_engines))
         .route("/api/run", post(run_program))
         .route("/api/evolve", post(evolve))
         .route("/api/clear", post(clear_veldt))
@@ -125,6 +126,30 @@ async fn quarantine_family(
         }
     }
     Json(serde_json::json!({"quarantined": quarantined}))
+}
+
+#[derive(Deserialize)]
+struct CompareRequest { source: String }
+
+async fn compare_engines(
+    Json(req): Json<CompareRequest>,
+) -> Json<serde_json::Value> {
+    // run the source on both engines, report honest times
+    let tmp = std::env::temp_dir().join("veldt_cmp.veldt");
+    std::fs::write(&tmp, &req.source).unwrap_or(());
+    let tw = std::time::Instant::now();
+    let tw_out = std::process::Command::new(std::env::current_exe().unwrap())
+        .arg("run").arg(&tmp).output();
+    let tw_ms = tw.elapsed().as_millis();
+    let vm = std::time::Instant::now();
+    let vm_out = std::process::Command::new(std::env::current_exe().unwrap())
+        .arg("run").arg("--vm").arg(&tmp).output();
+    let vm_ms = vm.elapsed().as_millis();
+    Json(serde_json::json!({
+        "tw_ms": tw_ms, "vm_ms": vm_ms,
+        "tw_out": tw_out.map(|o| String::from_utf8_lossy(&o.stdout).to_string()).unwrap_or_default(),
+        "vm_out": vm_out.map(|o| String::from_utf8_lossy(&o.stdout).to_string()).unwrap_or_default(),
+    }))
 }
 
 #[derive(Deserialize)]
