@@ -770,6 +770,31 @@ fn print_stats(veldt: &veldt::Veldt) {
         seed, estab, canon);
     println!("probes: {} across {} families | deaths: {} | runs: {}",
         probe_count, veldt.probes.len(), veldt.obituaries.len(), veldt.run_count);
+    // builtin usage — which builtins living variants call (mutation targeting)
+    const BUILTINS: &[&str] = &[
+        "canvas", "grid", "ui_", "bt_", "balance", "astar", "bfs", "los", "fov",
+        "rand", "roll", "dice", "choice", "weighted", "noise", "fbm", "perlin",
+        "poisson", "voronoi", "delaunay", "wfc", "maze", "flood", "neighbor",
+        "lerp", "clamp", "dist", "aabb", "smoothstep", "bezier", "point_in_poly",
+        "convex", "ease", "bounce", "line_points", "turn", "fsm", "book", "svc",
+        "robot", "edge", "game_loop", "dist_stats",
+    ];
+    let mut use_count: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for vs in veldt.functions.values() {
+        for e in vs {
+            let src = crate::fmt::format_program(&e.body);
+            for b in BUILTINS {
+                if src.contains(b) { *use_count.entry(b).or_default() += 1; }
+            }
+        }
+    }
+    let mut top: Vec<_> = use_count.into_iter().collect();
+    top.sort_by(|a, b| b.1.cmp(&a.1));
+    if !top.is_empty() {
+        let line: Vec<String> = top.iter().take(12)
+            .map(|(b, c)| format!("{}×{}", b, c)).collect();
+        println!("builtin usage (living variants): {}", line.join(" "));
+    }
     // coverage line — which families carry probe mass vs bare lineages
     let bare: Vec<&String> = veldt.functions.keys()
         .filter(|n| veldt.probes.get(*n).map(|p| p.is_empty()).unwrap_or(true))
