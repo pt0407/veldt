@@ -3342,6 +3342,15 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                 if !name.starts_with('_') && bound.iter().any(|(_, b)| *b == name) {
                     out.push(format!("let {} shadows an outer let", name));
                 }
+                // duplicate let — same expression bound twice in this block
+                for (j, s) in stmts.iter().enumerate().take(i) {
+                    if let Stmt::Let(prev, pe) = s {
+                        if !prev.starts_with('_') && prev != name && pe == e {
+                            out.push(format!("let {} = <same expr as {}> — reuse {}", name, prev, prev));
+                            break;
+                        }
+                    }
+                }
                 bound.push((i, name));
                 if let Expr::Var(v) = e {
                     if v == name { out.push(format!("let {} = {} — self-assignment, likely a typo", name, name)); }
