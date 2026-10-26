@@ -3319,6 +3319,7 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
                     out.push(format!("catch variable {} never used — prefix with _", evar));
                 }
                 if b.is_empty() { out.push("empty catch — errors swallowed silently".into()); }
+                if a.is_empty() { out.push("empty try — nothing to guard".into()); }
                 lint_block(a, out); lint_block(b, out);
             }
             Stmt::Match(scrut, arms, els) => {
@@ -3337,7 +3338,12 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
                 for (_, body) in arms { lint_block(body, out); }
                 if let Some(e) = els { lint_block(e, out); }
             }
-            Stmt::Return(_) => returned = true,
+            Stmt::Return(_) => {
+                if i == stmts.len() - 1 && returned {
+                    out.push("redundant return at end of block".into());
+                }
+                returned = true;
+            }
             _ => {}
         }
     }
