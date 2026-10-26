@@ -567,3 +567,8 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   empty catch handler, match on literal scrutinee. Agent
   gained verify ("verify fib" → do the variants agree on
   sampled inputs? calls verify_family_find_divergent).
+- [Devin] check --strict lint batch 4 + agent trend/verify
+  (HEAD post-4457500): lint — for-var shadowing outer let.
+  Agent — verify ("verify fib" → verify_family_find_divergent),
+  trend ("fitness trend" → in-chat sparkline + verdict; spark()
+  is now pub). ~37 intents, ~20 lint checks.
