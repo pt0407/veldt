@@ -32,13 +32,27 @@ print(call_best("double", 21))   # picks the current champion
 `call_best` dispatches by fitness — today that's the scan; after
 evolution finds a leaner strain, the same call switches to it.
 
-## 4. Watch it live in the IDE
+## 4. Keep it clean
+
+```bash
+veldt check game.veldt --strict     # ~91 checks on your source
+veldt check --garden                # lint every variant in the garden
+veldt check --garden --fix          # repair dead code mechanically
+veldt stats --lint                  # garden warning census
+```
+
+Warnings are advisory until they aren't: evolution rejects mutants
+that introduce defect-class warnings (arity mismatches, unbound
+reads, unreachable code), `adopt --lint` refuses to promote them,
+and `tend` heals sick variants on demand.
+
+## 5. Watch it live in the IDE
 
 `veldt serve` → Studio: editor, Gardener agent ("plant a function that
 checks primes", "tend the garden", "evolve with ai"), lineage tree,
 variant diffs, garden census. Or `veldt visual` for the garden view.
 
-## 5. Travel
+## 6. Travel
 
 ```bash
 veldt registry                 # host the pool
