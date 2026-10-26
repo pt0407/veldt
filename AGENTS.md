@@ -49,6 +49,12 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] JIT UPDATE 15: veldt repl --vm — persistent
+  bytecode session (v.run per stmt, globals persist). Vm::eval_expr
+  compiles a synthetic Return chunk so bare-expr echo still works
+  (names -> globals, same as let-export semantics). The --vm flag
+  family is now complete: run/test/fuzz/evolve/repl/trace/stats
+  --verified, and call_best+CallId both dispatch native.
 - [Devin/main-side] JIT UPDATE 14: call_best -> native — the
   dynamic garden-dispatch arm pushed a bytecode frame forever;
   now shares tier-2 counter + jit_invoke. Also shipped this batch:
