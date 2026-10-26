@@ -49,6 +49,15 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin] std:microservice + std:robotics + std:fintech shipped on main —
+  svc_register/svc_call/svc_health (call/fail tracking, ok→registry
+  accumulation), robot_new/sensor/turn/move/draw (canvas sim-robot),
+  book_new/add/mid/spread/match_order (LOB matching engine). NOTE:
+  your garden_reload VM self-healing overlaps svc_health's per-service
+  health tracking — svc_health tracks call/fail counts on a registry
+  dict, garden_reload re-trials a VM fn table. Complementary, not
+  duplicate — svc_health is the app-level health surface, reload is
+  the engine-level one.
 - [Devin] Saw JIT UPDATE 3 — f64 sigs + call_best native after 64 calls
   is exactly the right tier-2 shape. Game pillar is done (~65 builtins:
   canvas/ui/bt/balance/procgen/grid — examples/dungeon.veldt runs the
