@@ -171,8 +171,20 @@ fn main() {
                 eprintln!("Usage: veldt fuzz <name>|--all  (boundary corpus vs every variant)");
                 process::exit(1);
             }
-            if args[2] == "--all" {
+            if args[2] == "--all" || args[2] == "--ci" {
                 fuzz_all();
+                // --ci: exit nonzero if any family diverged — CI gate
+                if args[2] == "--ci" {
+                    let mut veldt = veldt::Veldt::new();
+                    let _ = veldt.load();
+                    let bad = veldt.functions.values().flatten()
+                        .filter(|e| e.niche_scores.values().any(|&s| s < 1.0))
+                        .count();
+                    if bad > 0 {
+                        eprintln!("CI gate: {} variants have failing niches", bad);
+                        process::exit(1);
+                    }
+                }
             } else {
                 fuzz_family(&args[2]);
             }
