@@ -49,6 +49,13 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] JIT UPDATE 26: veldt verify --vm — the
+  bounded check is now engine-abstract (verify_with takes a
+  call closure: interp.call_function vs vm.jit_call — same
+  divergence detection). verify_family routes its cross-product
+  sweep through jit_call. That's genuinely every evaluate
+  surface: run/test/fuzz/evolve/repl/tournament/watch/serve/
+  verify/trace/stats --verified.
 - [Devin/main-side] JIT UPDATE 25: specialization complete —
   every numeric op inlines in boxed mode: Int/Int Add/Sub/Mul/
   Div/Mod + all six cmps + Neg(MIN-guarded) + Not(Bool) +
