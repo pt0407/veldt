@@ -3093,6 +3093,24 @@ impl Interpreter {
                     .collect();
                 Ok(Some(Value::List(out.into_iter().collect())))
             }
+            "rand_sign" => {
+                let mut x = self.rng_state;
+                x ^= x << 13; x ^= x >> 7; x ^= x << 17;
+                self.rng_state = x;
+                Ok(Some(Value::Int(if x % 2 == 0 { 1 } else { -1 })))
+            }
+            "rand_permute" => {
+                let Some(Value::Int(n)) = args.get(0) else { return Err("rand_permute(n) expects an int".into()) };
+                let mut out: Vec<Value> = (0..*n).map(Value::Int).collect();
+                for i in (1..out.len()).rev() {
+                    let mut x = self.rng_state;
+                    x ^= x << 13; x ^= x >> 7; x ^= x << 17;
+                    self.rng_state = x;
+                    let j = (x % (i + 1) as u64) as usize;
+                    out.swap(i, j);
+                }
+                Ok(Some(Value::List(out.into_iter().collect())))
+            }
             "dist_stats" => {
                 // dist_stats(fn, trials) — mean/stddev/min/max over n samples
                 let (f, trials) = match (args.get(0), args.get(1)) {
