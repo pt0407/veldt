@@ -162,6 +162,13 @@ fn main() {
                 fuzz_family(&args[2]);
             }
         }
+        "diff" => {
+            if args.len() < 4 {
+                eprintln!("Usage: veldt diff <name#a> <name#b>");
+                process::exit(1);
+            }
+            diff_variants(&args[2], &args[3]);
+        }
         "absorb" => {
             absorb_traces(args.get(2).map(|s| s.as_str()));
         }
@@ -1102,6 +1109,39 @@ fn fuzz_family(name: &str) {
         veldt.save().unwrap_or_else(|e| eprintln!("Save error: {}", e));
     }
     println!("{} boundary cases, {} divergent", cases, divergences);
+}
+
+/// Show two variants' bodies side by side — lines present in only one
+/// get a -/+ marker, shared lines a space. The IDE's diff, in the CLI.
+fn diff_variants(a: &str, b: &str) {
+    let parse = |s: &str| -> Option<(String, u32)> {
+        let (n, i) = s.split_once('#')?;
+        Some((n.to_string(), i.parse().ok()?))
+    };
+    let (an, aid) = parse(a).unwrap_or_else(|| { eprintln!("bad ref {} — use name#id", a); process::exit(1); });
+    let (bn, bid) = parse(b).unwrap_or_else(|| { eprintln!("bad ref {} — use name#id", b); process::exit(1); });
+    if an != bn { eprintln!("diff works inside one lineage"); process::exit(1); }
+    let mut veldt = veldt::Veldt::new();
+    if let Err(e) = veldt.load() { eprintln!("Error: {}", e); process::exit(1); }
+    let Some(vs) = veldt.functions.get(&an) else {
+        eprintln!("No variants of '{}'", an); process::exit(1);
+    };
+    let ea = vs.iter().find(|e| e.id == aid).unwrap_or_else(|| { eprintln!("no {}#{}", an, aid); process::exit(1); });
+    let eb = vs.iter().find(|e| e.id == bid).unwrap_or_else(|| { eprintln!("no {}#{}", bn, bid); process::exit(1); });
+    let sa = crate::fmt::format_program(&ea.body);
+    let sb = crate::fmt::format_program(&eb.body);
+    let la: std::collections::HashSet<&str> = sa.lines().map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
+    let lb: std::collections::HashSet<&str> = sb.lines().map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
+    println!("--- {}#{} (fitness {:.2})", an, aid, ea.fitness);
+    for l in sa.lines() {
+        let t = l.trim();
+        println!("{}{}", if t.is_empty() { " " } else if lb.contains(t) { " " } else { "-" }, l);
+    }
+    println!("+++ {}#{} (fitness {:.2})", bn, bid, eb.fitness);
+    for l in sb.lines() {
+        let t = l.trim();
+        println!("{}{}", if t.is_empty() { " " } else if la.contains(t) { " " } else { "+" }, l);
+    }
 }
 
 /// std:telemetry (vision): convert recorded call traces into probes.
