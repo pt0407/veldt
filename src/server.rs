@@ -39,6 +39,10 @@ pub async fn start_server(port: u16) {
         .route("/api/game", post(game_step))
         .route("/api/call", post(call_fn))
         .route("/api/adopt", post(adopt_variant))
+        .route("/api/verify", post(verify_family))
+        .route("/api/quarantine", post(quarantine_family))
+        .route("/api/compare", post(compare_engines))
+        .route("/api/lineage", get(lineage_family))
         .route("/api/run", post(run_program))
         .route("/api/evolve", post(evolve))
         .route("/api/clear", post(clear_veldt))
@@ -91,6 +95,83 @@ async fn adopt_variant(
     } else {
         Json(serde_json::json!({"ok": false, "error": format!("{}#{} not found", req.name, req.id)}))
     }
+}
+
+#[derive(Deserialize)]
+struct VerifyRequest { name: String }
+
+async fn verify_family(
+    Json(req): Json<VerifyRequest>,
+) -> Json<serde_json::Value> {
+    let divergent = crate::verify_family_find_divergent(&req.name);
+    Json(serde_json::json!({"verified": divergent.is_none(), "divergent": divergent}))
+}
+
+async fn quarantine_family(
+    Json(req): Json<VerifyRequest>,
+) -> Json<serde_json::Value> {
+    let divergent = crate::verify_family_find_divergent(&req.name);
+    let mut quarantined: Vec<u32> = Vec::new();
+    if let Some(id) = divergent {
+        let mut veldt = veldt::Veldt::new();
+        if veldt.load().is_ok() {
+            if let Some(vs) = veldt.functions.get_mut(&req.name) {
+                for e in vs.iter_mut() {
+                    if e.id == id {
+                        e.health = crate::veldt::Health::Dying;
+                        quarantined.push(id);
+                    }
+                }
+            }
+            veldt.save().unwrap_or_else(|e| eprintln!("Save error: {}", e));
+        }
+    }
+    Json(serde_json::json!({"quarantined": quarantined}))
+}
+
+#[derive(Deserialize)]
+struct CompareRequest { source: String }
+
+async fn compare_engines(
+    Json(req): Json<CompareRequest>,
+) -> Json<serde_json::Value> {
+    // run the source on both engines, report honest times
+    let tmp = std::env::temp_dir().join("veldt_cmp.veldt");
+    std::fs::write(&tmp, &req.source).unwrap_or(());
+    let tw = std::time::Instant::now();
+    let tw_out = std::process::Command::new(std::env::current_exe().unwrap())
+        .arg("run").arg(&tmp).output();
+    let tw_ms = tw.elapsed().as_millis();
+    let vm = std::time::Instant::now();
+    let vm_out = std::process::Command::new(std::env::current_exe().unwrap())
+        .arg("run").arg("--vm").arg(&tmp).output();
+    let vm_ms = vm.elapsed().as_millis();
+    Json(serde_json::json!({
+        "tw_ms": tw_ms, "vm_ms": vm_ms,
+        "tw_out": tw_out.map(|o| String::from_utf8_lossy(&o.stdout).to_string()).unwrap_or_default(),
+        "vm_out": vm_out.map(|o| String::from_utf8_lossy(&o.stdout).to_string()).unwrap_or_default(),
+    }))
+}
+
+#[derive(Deserialize)]
+struct LineageRequest { name: String }
+
+async fn lineage_family(
+    axum::extract::Query(req): axum::extract::Query<LineageRequest>,
+) -> Json<serde_json::Value> {
+    let mut veldt = veldt::Veldt::new();
+    if veldt.load().is_err() {
+        return Json(serde_json::json!({"error": "garden load failed"}));
+    }
+    let variants: Vec<serde_json::Value> = veldt.functions.get(&req.name)
+        .map(|vs| vs.iter().map(|e| serde_json::json!({
+            "id": e.id, "health": format!("{:?}", e.health),
+            "fitness": e.fitness, "age": e.age, "lifespan": e.lifespan,
+            "usage": e.usage_count, "trust": format!("{:?}", e.trust),
+            "origin": e.origin,
+        })).collect())
+        .unwrap_or_default();
+    Json(serde_json::json!({"name": req.name, "variants": variants}))
 }
 
 #[derive(Deserialize)]
