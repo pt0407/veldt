@@ -995,30 +995,53 @@ impl Vm {
                             self.jit_engine = crate::jit::JitEngine::new();
                         }
                         if let Some(e) = self.jit_engine.as_mut() {
-                            if let Some(p) = e.compile_fn(&name, &self.fns) {
-                                *chosen.jit.borrow_mut() =
-                                    Some(crate::jit::JitFn { code_ptr: p });
-                            }
+                            *chosen.jit.borrow_mut() =
+                                e.compile_fn(&name, &self.fns);
                         }
                     }
                     if let Some(j) = chosen.jit.borrow().as_ref() {
                         if args.len() <= 4
-                            && args.iter().all(|a| matches!(a, Value::Int(_))) {
-                            let av: Vec<i64> = args.iter().map(|a|
-                                if let Value::Int(n) = a { *n } else { 0 }
-                            ).collect();
+                            && args.iter().all(|a|
+                                matches!(a, Value::Int(_) | Value::Float(_))) {
                             let p = j.code_ptr;
-                            let r = unsafe {
-                                match av.as_slice() {
-                                    [] => std::mem::transmute::<_, crate::jit::NativeFn0>(p)(),
-                                    [a] => std::mem::transmute::<_, crate::jit::NativeFn1>(p)(*a),
-                                    [a,b] => std::mem::transmute::<_, crate::jit::NativeFn2>(p)(*a,*b),
-                                    [a,b,c] => std::mem::transmute::<_, crate::jit::NativeFn3>(p)(*a,*b,*c),
-                                    [a,b,c,d] => std::mem::transmute::<_, crate::jit::NativeFn4>(p)(*a,*b,*c,*d),
-                                    _ => -1,
-                                }
-                            };
-                            stack.push(Value::Int(r));
+                            if j.is_float {
+                                let af: Vec<f64> = args.iter().map(|a| match a {
+                                    Value::Int(n) => *n as f64,
+                                    Value::Float(f) => *f,
+                                    _ => 0.0,
+                                }).collect();
+                                let r = unsafe {
+                                    match af.as_slice() {
+                                        [] => std::mem::transmute::<_, crate::jit::NativeF0>(p)(),
+                                        [a] => std::mem::transmute::<_, crate::jit::NativeF1>(p)(*a),
+                                        [a,b] => std::mem::transmute::<_, crate::jit::NativeF2>(p)(*a,*b),
+                                        [a,b,c] => std::mem::transmute::<_, crate::jit::NativeF3>(p)(*a,*b,*c),
+                                        [a,b,c,d] => std::mem::transmute::<_, crate::jit::NativeF4>(p)(*a,*b,*c,*d),
+                                        _ => -1.0,
+                                    }
+                                };
+                                stack.push(Value::Float(r));
+                            } else if args.iter()
+                                .all(|a| matches!(a, Value::Int(_))) {
+                                let av: Vec<i64> = args.iter().map(|a|
+                                    if let Value::Int(n) = a { *n } else { 0 }
+                                ).collect();
+                                let r = unsafe {
+                                    match av.as_slice() {
+                                        [] => std::mem::transmute::<_, crate::jit::NativeFn0>(p)(),
+                                        [a] => std::mem::transmute::<_, crate::jit::NativeFn1>(p)(*a),
+                                        [a,b] => std::mem::transmute::<_, crate::jit::NativeFn2>(p)(*a,*b),
+                                        [a,b,c] => std::mem::transmute::<_, crate::jit::NativeFn3>(p)(*a,*b,*c),
+                                        [a,b,c,d] => std::mem::transmute::<_, crate::jit::NativeFn4>(p)(*a,*b,*c,*d),
+                                        _ => -1,
+                                    }
+                                };
+                                stack.push(Value::Int(r));
+                            } else {
+                                // float jit got non-numeric... falls through
+                                // (args checked above so unreachable)
+                                stack.push(Value::Null);
+                            }
                             return Ok(());
                         }
                     }
