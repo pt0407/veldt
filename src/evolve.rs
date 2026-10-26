@@ -289,6 +289,7 @@ impl Evolver {
 
         // Build an interpreter with the veldt snapshot
         let mut interp = crate::interpreter::Interpreter::with_step_limit(10000);
+        interp.caps = crate::interpreter::Caps::sandboxed();
         veldt.load_into_interpreter(&mut interp);
 
         let mut probes = Vec::new();

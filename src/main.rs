@@ -989,6 +989,7 @@ fn fuzz_family(name: &str) {
         cases += 1;
         // run each variant, group outputs
         let mut interp = interpreter::Interpreter::with_step_limit(50000);
+        interp.caps = interpreter::Caps::sandboxed();
         veldt.load_into_interpreter(&mut interp);
         let mut by_out: std::collections::HashMap<String, Vec<u32>> =
             std::collections::HashMap::new();
@@ -1143,6 +1144,10 @@ fn run_program(path: &str, trace: bool, evolve_after: bool) {
         if let Some(n) = cli_args.get(pos + 1).and_then(|s| s.parse::<u64>().ok()) {
             interp.step_limit = n;
         }
+    }
+    // --sandbox: run the script with all side-effect capabilities denied
+    if cli_args.iter().any(|a| a == "--sandbox") {
+        interp.caps = interpreter::Caps::sandboxed();
     }
     // script argv: everything after '--' in the veldt args
     let all_args: Vec<String> = env::args().collect();
