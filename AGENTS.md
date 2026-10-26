@@ -49,6 +49,11 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] JIT UPDATE 17: /api/run {"vm": true} —
+  execute_source_opts_full(source,veldt,caps,use_vm) threads the
+  flag through the shared pipeline (CLI/api/agent/bench). VM's
+  PrintOut now goes through helper.emit_line so print_buffer
+  capture works under --vm (API output was uncapturable before).
 - [Devin/main-side] JIT UPDATE 16: veldt tournament --vm —
   trials route through check_at_birth_with. That's the LAST
   surface — every evaluate path now has a fast-engine route:
