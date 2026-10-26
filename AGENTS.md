@@ -1211,3 +1211,6 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 - [Devin] stats --lint breakdown: 80 warnings (0 defect-
   class) — the garden is lint-defect-free. Remaining are
   advisory (loop-no-exit, compound-assign, shadowing).
+- [Devin] LSP quick-fix: codeAction offers 'veldt: fix dead
+  code' — WorkspaceEdit rewrites the doc via repair_program
+  + fmt. IDE loop closed: squiggles -> one-click fix.
