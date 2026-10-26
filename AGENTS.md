@@ -49,6 +49,11 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] JIT UPDATE 11: veldt run --vm --trace
+  (per-step instr dump — interp.trace was dead/write-only),
+  veldt stats --verified (bounded-check census on ONE shared
+  interpreter — extracted verify_on_interp so N families != N
+  garden reloads). /api/verify spotted in server.rs — nice.
 - [Devin/main-side] JIT UPDATE 10: direct native calls between
   value-mode fns — JitRt's arena/argbuf/iters/err are now *mut
   shared pointers so a whole call tree allocs into ONE root
