@@ -3332,6 +3332,13 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
                 if let Expr::List(items) = iter {
                     if items.is_empty() { out.push("for over an empty list — dead loop".into()); }
                 }
+                if let Expr::Call(f, _, args) = iter {
+                    if f == "range" && args.len() == 2 {
+                        if let (Expr::Int(a), Expr::Int(b)) = (&args[0], &args[1]) {
+                            if a >= b { out.push("for over a descending range — iterates zero times".into()); }
+                        }
+                    }
+                }
                 if !name.starts_with('_') && bound.iter().any(|(_, b)| *b == name) {
                     out.push(format!("for variable {} shadows an outer let", name));
                 }
