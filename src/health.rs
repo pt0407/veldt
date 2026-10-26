@@ -501,7 +501,17 @@ impl HealthChecker {
                 if let Some(b) = b { c |= Self::repair_dead_tail(b); }
                 c
             }
-            Stmt::While(_, b) | Stmt::For(_, _, b) => Self::repair_dead_tail(b),
+            Stmt::While(_, b) | Stmt::For(_, _, b) => {
+                let mut c = Self::repair_dead_tail(b);
+                // trailing `continue` in a loop body is dead — control
+                // loops anyway (only safe here: a continue inside an
+                // `if` can skip statements, so bodies must be loops)
+                while matches!(b.last(), Some(Stmt::Continue)) {
+                    b.pop();
+                    c = true;
+                }
+                c
+            }
             Stmt::Try(a, _, c) =>
                 Self::repair_dead_tail(a) | Self::repair_dead_tail(c),
             Stmt::Match(_, arms, els) => {
