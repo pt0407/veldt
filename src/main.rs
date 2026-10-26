@@ -403,6 +403,40 @@ fn main() {
                 fuzz_family(&args[2], args.iter().any(|a| a == "--json"));
             }
         }
+        "deps" | "imports" => {
+            if args.len() < 3 {
+                eprintln!("Usage: veldt deps <file.veldt>  (list a program's imports)");
+                process::exit(1);
+            }
+            let source = std::fs::read_to_string(&args[2])
+                .unwrap_or_else(|e| { eprintln!("Error reading {}: {}", args[2], e); process::exit(1); });
+            let mut lx = lexer::Lexer::new(&source);
+            match lx.tokenize() {
+                Err(e) => { eprintln!("Lex error: {}", e); process::exit(1); }
+                Ok(toks) => {
+                    let mut p = parser::Parser::new_with_lines(toks, lx.token_lines.clone());
+                    match p.parse_program() {
+                        Err(e) => { eprintln!("Parse error: {}", e); process::exit(1); }
+                        Ok(stmts) => {
+                            let deps: Vec<serde_json::Value> = stmts.iter()
+                                .filter_map(|s| {
+                                    if let ast::Stmt::Import(path, alias) = s {
+                                        Some(serde_json::json!({"path": path, "alias": alias}))
+                                    } else { None }
+                                }).collect();
+                            if args.iter().any(|a| a == "--json") {
+                                println!("{}", serde_json::json!({"file": args[2], "deps": deps}));
+                            } else {
+                                if deps.is_empty() { println!("{} — no imports", args[2]); }
+                                for d in deps {
+                                    println!("  {} → {}", d["path"], d["alias"]);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
         "check" => {
             if args.len() < 3 {
                 eprintln!("Usage: veldt check <file.veldt>");
