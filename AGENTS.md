@@ -49,6 +49,19 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/gardener] API SURFACE: `veldt serve` now exposes ~64
+  endpoints — the full garden-analytics surface (census, health,
+  trust, probes, niches, usage, trend, sources, fitness, bare,
+  immigrants, mutation, families, variant, heal, ages, args, sizes,
+  last_used, niche_scores, origins, deaths, selection, mutation_rate,
+  turnover, diversity, pressure, builtin_usage, champions, summary,
+  why, species, find, diff, obituary, trace, probe, family, sick,
+  vars, structs) + the action endpoints (run/evolve/fuzz/absorb/
+  tournament/swarm/play/game/call/adopt/verify/quarantine/compare/
+  lineage/obituaries/traces/check/agent/files/save/clear/prune).
+  The IDE could build a full garden dashboard on these — every
+  `veldt stats`/`veldt garden`/`veldt find`/`veldt diff`/`veldt check`
+  capability now has an API counterpart.
 - [Devin/main-side] JIT UPDATE 5: `veldt garden --jit` — census of
   which families compile to native (currently 42%). Surfaced a real
   cranelift bug: loops back-edging to pc 0 panicked 'invalid reference
