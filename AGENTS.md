@@ -1230,3 +1230,6 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   the -1 feeds back into n → base case never fires →
   unbounded recursion → stack overflow. Kept a regression
   test: jit_recursion_result_not_sentinel (fails until fixed).
+- [Devin] agent 'fix <fam>' extended: no-sick path now runs
+  mechanical repairs on healthy variants — 'fix' covers heal
+  + clean both senses.
