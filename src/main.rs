@@ -134,6 +134,13 @@ fn main() {
                 import_garden(&url);
             }
         }
+        "tournament" => {
+            if args.len() < 3 {
+                eprintln!("Usage: veldt tournament <url> [name]  (pull, trial, crown winners, push back)");
+                process::exit(1);
+            }
+            tournament(&args[2], args.get(3).map(|s| s.as_str()));
+        }
         "search" => {
             if args.len() < 4 {
                 eprintln!("Usage: veldt search <url> <name>  (find families in a registry)");
@@ -849,6 +856,55 @@ fn fmt_file(path: &str, write: bool) {
     } else {
         print!("{}", out);
     }
+}
+
+/// Fitness tournament across gardens (Phase 10): pull a pool's
+/// families into the local garden, re-trial every variant, crown the
+/// fittest per family (losers marked sick so natural decay follows),
+/// then push the judged garden back — the pool accumulates the
+/// "world's fittest" strains.
+fn tournament(url: &str, only: Option<&str>) {
+    let base = url.trim_end_matches('/');
+    merge_garden(&format!("{}/api/garden", base));
+
+    let mut veldt = veldt::Veldt::new();
+    if let Err(e) = veldt.load() { eprintln!("Error: {}", e); process::exit(1); }
+    let families: Vec<String> = match only {
+        Some(n) => vec![n.to_string()],
+        None => veldt.functions.keys().cloned().collect(),
+    };
+    let mut crowned = 0u32;
+    for name in &families {
+        let ids: Vec<u32> = veldt.functions.get(name)
+            .map(|vs| vs.iter().map(|e| e.id).collect()).unwrap_or_default();
+        if ids.len() < 2 { continue; }
+        // re-trial each variant, then crown the fittest
+        for id in &ids {
+            let mut e = veldt.functions[name].iter().find(|e| e.id == *id).cloned().unwrap();
+            health::HealthChecker::check_at_birth(&mut e, &veldt);
+            if let Some(vs) = veldt.functions.get_mut(name) {
+                for v in vs.iter_mut() { if v.id == *id { *v = e.clone(); break; } }
+            }
+        }
+        let best_id = veldt.get_fittest_variant(name).map(|e| e.id);
+        if let Some(vs) = veldt.functions.get_mut(name) {
+            for v in vs.iter_mut() {
+                v.health = if Some(v.id) == best_id {
+                    crowned += 1;
+                    veldt::Health::Healthy
+                } else {
+                    veldt::Health::Sick("lost tournament".into())
+                };
+            }
+        }
+        if let Some(b) = best_id {
+            println!("  {}: champion {}#{} — fitness {:.2}", name, name, b,
+                veldt.functions[name].iter().find(|e| e.id == b).map(|e| e.fitness).unwrap_or(0.0));
+        }
+    }
+    veldt.save().unwrap_or_else(|e| eprintln!("Save error: {}", e));
+    println!("{} champions crowned; pushing winners back to {}", crowned, base);
+    push_garden(base);
 }
 
 fn test_family(name: &str) {
