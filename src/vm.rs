@@ -41,6 +41,8 @@ enum Instr {
     ForNext(u32, u32),       // var slot, jump target
     CaptureEnv,              // top of stack: Closure proto -> captured env
     CallVar(u32, u32),       // slot holding Closure, argc
+    GetField(u32),           // name-table idx — obj.field
+    SliceGet,                // obj lo hi -> obj[lo:hi] (null bounds = open)
     MethodCallVar(u32, u32, u32), // receiver slot, method name idx, argc
     PrintOut,
     Return,
@@ -193,6 +195,44 @@ impl Compiler {
                 let t = *start as u32;
                 self.emit(Instr::Jump(t));
             }
+            Stmt::Match(scrut, arms, els) => {
+                // scrutinee into a scratch slot, then a comparison chain
+                let tmpn = format!("__m{}", self.next_slot);
+                let sl = self.slot(&tmpn);
+                self.compile_expr(scrut)?;
+                self.emit(Instr::Store(sl));
+                let mut end_jumps = Vec::new();
+                for (pat, body) in arms {
+                    self.emit(Instr::Load(sl));
+                    self.compile_expr(pat)?;
+                    self.emit(Instr::Eq);
+                    let jf = self.emit(Instr::JumpIfFalse(u32::MAX));
+                    for st in body { self.compile_stmt(st)?; }
+                    end_jumps.push(self.emit(Instr::Jump(u32::MAX)));
+                    let nxt = self.code.len();
+                    self.patch(jf, nxt);
+                }
+                if let Some(b) = els {
+                    for st in b { self.compile_stmt(st)?; }
+                }
+                let end = self.code.len();
+                for j in end_jumps { self.patch(j, end); }
+            }
+            Stmt::LetDestructure(names, e) => {
+                // let [a,b] = expr -> eval once into scratch, then index out
+                let tmpn = format!("__d{}", self.next_slot);
+                let sl = self.slot(&tmpn);
+                self.compile_expr(e)?;
+                self.emit(Instr::Store(sl));
+                for (i, n) in names.iter().enumerate() {
+                    self.emit(Instr::Load(sl));
+                    let k = self.konst(Value::Int(i as i64));
+                    self.emit(Instr::Const(k));
+                    self.emit(Instr::IndexGet);
+                    let ts = self.slot(n);
+                    self.emit(Instr::Store(ts));
+                }
+            }
             Stmt::IndexAssign(obj, idx, val) => {
                 // Var receiver: write goes back through the env so the
                 // persistent structure's new head replaces the var.
@@ -312,6 +352,37 @@ impl Compiler {
             Expr::Index(o, i) => {
                 self.compile_expr(o)?; self.compile_expr(i)?;
                 self.emit(Instr::IndexGet);
+            }
+            Expr::Slice(o, lo, hi) => {
+                self.compile_expr(o)?;
+                match lo { Some(x) => self.compile_expr(x)?,
+                           None => { let k = self.konst(Value::Null); self.emit(Instr::Const(k)); } }
+                match hi { Some(x) => self.compile_expr(x)?,
+                           None => { let k = self.konst(Value::Null); self.emit(Instr::Const(k)); } }
+                self.emit(Instr::SliceGet);
+            }
+            Expr::FieldAccess(o, name) => {
+                self.compile_expr(o)?;
+                let ni = self.name_idx(name);
+                self.emit(Instr::GetField(ni));
+            }
+            Expr::SafeGet(o, name, args) => {
+                // obj?.field / obj?.m(args) — null propagates the Null
+                self.compile_expr(o)?;
+                let jn = self.emit(Instr::PeekJumpIfNull(u32::MAX));
+                match args {
+                    Some(a) => {
+                        for x in a { self.compile_expr(x)?; }
+                        let ni = self.name_idx(name);
+                        self.emit(Instr::MethodCall(ni, a.len() as u32));
+                    }
+                    None => {
+                        let ni = self.name_idx(name);
+                        self.emit(Instr::GetField(ni));
+                    }
+                }
+                let end = self.code.len();
+                self.patch(jn, end);
             }
             Expr::Lambda(params, body) => {
                 // Closure proto in const pool; CaptureEnv fills its env
@@ -774,6 +845,25 @@ impl Vm {
                         _ => return Err("variable is not callable".into()),
                     }
                 }
+                Instr::GetField(ni) => {
+                    let obj = stack.pop().unwrap();
+                    let name = &code.names[ni as usize];
+                    let v = match &obj {
+                        Value::Struct(_, f) => f.get(name).cloned()
+                            .unwrap_or(Value::Null),
+                        Value::Dict(d) => d.get(name).cloned()
+                            .unwrap_or(Value::Null),
+                        _ => return Err(format!(
+                            "field access '{}' on {}", name, obj_tag(&obj))),
+                    };
+                    stack.push(v);
+                }
+                Instr::SliceGet => {
+                    let hi = stack.pop().unwrap();
+                    let lo = stack.pop().unwrap();
+                    let obj = stack.pop().unwrap();
+                    stack.push(slice_get(&obj, &lo, &hi)?);
+                }
                 Instr::PrintOut => {
                     let v = stack.pop().unwrap();
                     println!("{}", v);
@@ -900,6 +990,45 @@ fn index_set(obj: &Value, idx: &Value, val: &Value) -> Result<Value, String> {
             Ok(Value::Dict(d2))
         }
         _ => Err("VM subset: index-assign supports lists and dicts".into()),
+    }
+}
+
+fn slice_get(obj: &Value, lo: &Value, hi: &Value) -> Result<Value, String> {
+    match obj {
+        Value::List(l) => {
+            let len = l.len() as i64;
+            let a = match lo {
+                Value::Null => 0,
+                Value::Int(i) => if *i < 0 { len + i } else { *i },
+                _ => return Err("slice bound must be int".into()),
+            }.clamp(0, len);
+            let b = match hi {
+                Value::Null => len,
+                Value::Int(i) => if *i < 0 { len + i } else { *i },
+                _ => return Err("slice bound must be int".into()),
+            }.clamp(0, len);
+            Ok(Value::List(
+                l.iter().skip(a as usize).take((b - a).max(0) as usize)
+                    .cloned().collect()))
+        }
+        Value::Str(s) => {
+            let chars: Vec<char> = s.chars().collect();
+            let len = chars.len() as i64;
+            let a = match lo {
+                Value::Null => 0,
+                Value::Int(i) => if *i < 0 { len + i } else { *i },
+                _ => return Err("slice bound must be int".into()),
+            }.clamp(0, len);
+            let b = match hi {
+                Value::Null => len,
+                Value::Int(i) => if *i < 0 { len + i } else { *i },
+                _ => return Err("slice bound must be int".into()),
+            }.clamp(0, len);
+            Ok(Value::Str(
+                chars[a as usize..b.max(a) as usize]
+                    .iter().collect::<String>().into()))
+        }
+        _ => Err("slice requires list or string".into()),
     }
 }
 
