@@ -355,6 +355,31 @@ fn main() {
                 }));
             } else if obituaries {
                 veldt.print_obituaries();
+            } else if args.iter().any(|a| a == "--games") {
+                // --games — only families whose variants call game builtins
+                const GAME_BUILTINS: &[&str] = &[
+                    "canvas", "grid_", "ui_", "bt_", "balance", "astar", "bfs",
+                    "los", "fov", "rand", "roll", "dice", "choice", "weighted",
+                    "noise", "fbm", "perlin", "poisson", "voronoi", "delaunay",
+                    "wfc", "maze", "flood", "neighbor", "lerp", "clamp", "dist",
+                    "aabb", "smoothstep", "bezier", "point_in_poly", "convex",
+                    "ease", "bounce", "line_points", "turn", "fsm", "book",
+                    "svc_", "robot", "edge", "game_loop", "dist_stats",
+                ];
+                let mut filtered = veldt::Veldt::new();
+                filtered.probes = veldt.probes.clone();
+                filtered.obituaries = veldt.obituaries.clone();
+                filtered.run_count = veldt.run_count;
+                filtered.garden_path = veldt.garden_path.clone();
+                for (name, vs) in &veldt.functions {
+                    let keep: Vec<_> = vs.iter().filter(|e| {
+                        let src = crate::fmt::format_program(&e.body);
+                        GAME_BUILTINS.iter().any(|b| src.contains(b))
+                    }).cloned().collect();
+                    if !keep.is_empty() { filtered.functions.insert(name.clone(), keep); }
+                }
+                println!("=== The Veldt (game families) ===");
+                filtered.print_garden(sick_only, healthy_only);
             } else if let Some(min) = args.iter().position(|a| a == "--fit")
                 .and_then(|p| args.get(p + 1)).and_then(|s| s.parse::<f64>().ok()) {
                 // --fit <min> — only variants at or above a fitness threshold
