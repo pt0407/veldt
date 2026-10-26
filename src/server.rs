@@ -34,6 +34,7 @@ pub async fn start_server(port: u16) {
         .route("/api/stats", get(stats))
         .route("/api/check", post(check_source))
         .route("/api/tournament", post(tournament))
+        .route("/api/swarm", post(swarm))
         .route("/api/call", post(call_fn))
         .route("/api/adopt", post(adopt_variant))
         .route("/api/run", post(run_program))
@@ -107,6 +108,18 @@ async fn call_fn(
         Ok(v) => Json(serde_json::json!({"ok": true, "result": serde_json::to_value(&v).unwrap_or(serde_json::Value::Null)})),
         Err(e) => Json(serde_json::json!({"ok": false, "error": e})),
     }
+}
+
+#[derive(Deserialize)]
+struct SwarmRequest { url: String }
+
+async fn swarm(
+    Json(req): Json<SwarmRequest>,
+) -> Json<serde_json::Value> {
+    let url = req.url.trim_end_matches('/').to_string();
+    crate::merge_garden(&format!("{}/api/garden", url));
+    crate::push_garden(&url);
+    Json(serde_json::json!({ "ok": true, "peer": url }))
 }
 
 #[derive(Deserialize)]
