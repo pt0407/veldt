@@ -986,6 +986,14 @@ fn print_stats(veldt: &veldt::Veldt) {
             .map(|(c, n)| format!("{}:{}", c, n)).collect();
         println!("death causes: {}", line.join(" "));
     }
+    // avg death age — how old variants are when they die
+    if !veldt.obituaries.is_empty() {
+        let ages: Vec<u64> = veldt.obituaries.iter().map(|o| o.age).collect();
+        let avg = ages.iter().sum::<u64>() / ages.len() as u64;
+        let (lo, hi) = (*ages.iter().min().unwrap_or(&0), *ages.iter().max().unwrap_or(&0));
+        println!("death age: avg {} ({}..{}) over {} deaths",
+            avg, lo, hi, ages.len());
+    }
     // fitness trend — peak per run, is the garden improving?
     if veldt.fitness_history.len() >= 2 {
         let trend: Vec<String> = veldt.fitness_history.iter()
