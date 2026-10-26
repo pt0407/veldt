@@ -415,8 +415,22 @@ fn main() {
                 let mut v = vm::Vm::new();
                 v.load_garden(&veldt).ok();
                 let mut engine = crate::jit::JitEngine::new().unwrap();
-                println!("JIT coverage across {} families", veldt.functions.len());
+                let verify = args.iter().any(|a| a == "--verify");
+                println!("JIT coverage across {} families{}", veldt.functions.len(),
+                         if verify { " (+ bounded verify)" } else { "" });
                 let mut native = 0; let mut cold = 0;
+                if verify {
+                    for name in veldt.functions.keys() {
+                        let j = engine.compile_fn(name, &v.fns).is_some();
+                        let status = if j { "native" } else { "bytecode" };
+                        let ok = verify_family_find_divergent(name).is_none();
+                        println!("  {}: {} {}", name, status,
+                                 if ok { "+ verified" } else { "+ DIVERGENT" });
+                        if j { native += 1 } else { cold += 1 }
+                    }
+                    println!("{} native, {} bytecode", native, cold);
+                    return;
+                }
                 let why = args.iter().any(|a| a == "--why");
                 for (name, _) in &veldt.functions {
                     match engine.compile_fn(name, &v.fns) {
