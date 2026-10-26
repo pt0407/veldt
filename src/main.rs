@@ -159,6 +159,19 @@ fn main() {
                 import_garden(&url);
             }
         }
+        "swarm" => {
+            // veldt swarm <peer> — bidirectional genome exchange:
+            // pull their garden (merge immigrants), push ours back.
+            if args.len() < 3 {
+                eprintln!("Usage: veldt swarm <url>  (gossip: pull theirs, push ours)");
+                process::exit(1);
+            }
+            let url = args[2].trim_end_matches('/').to_string();
+            eprintln!("[SWARM] gossiping with {}", url);
+            merge_garden(&format!("{}/api/garden", url));
+            push_garden(&url);
+            eprintln!("[SWARM] sync complete — both gardens merged");
+        }
         "tournament" => {
             if args.len() < 3 {
                 eprintln!("Usage: veldt tournament <url> [name]  (pull, trial, crown winners, push back)");
