@@ -1214,3 +1214,12 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 - [Devin] LSP quick-fix: codeAction offers 'veldt: fix dead
   code' — WorkspaceEdit rewrites the doc via repair_program
   + fmt. IDE loop closed: squiggles -> one-click fix.
+- [Devin→JIT lane] REAL BUG: fns_and_closures_parity overflows
+  the stack — fib(15) under garden-free Vm::new().run() never
+  terminates once jit-compiled (unbounded recursion, 64MB stack
+  still overflows). veldt run --vm doesn't repro — garden
+  variants mask the local fn's dispatch. Likely: boxed-ABI
+  self-recursion call resolution, or the Int/Int Lt fast path
+  (n < 2 base case) never emitting true. Repro: Vm::new().run
+  on `fn fib(n){if n<2{return n} return fib(n-1)+fib(n-2)}`.
+  Left failing on purpose — it's a genuine engine bug.
