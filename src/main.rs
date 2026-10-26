@@ -3298,6 +3298,7 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
                 if self_cmp(cond) { out.push("condition compares a value to itself".into()); }
                 if bool_cmp(cond) { out.push("condition compares to a bool literal — drop the == true/false".into()); }
                 if taut_cmp(cond) { out.push("if condition compares a value to complementary ranges — always true or always false".into()); }
+                if polar_cmp(cond) { out.push("if condition tests x and !x — contradiction or tautology".into()); }
                 if let Some(e) = b {
                     if *a == *e { out.push("if branches are identical — dead conditional".into()); }
                     if a.is_empty() && !e.is_empty() {
@@ -3320,6 +3321,7 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
                 if self_cmp(cond) { out.push("loop condition compares a value to itself".into()); }
                 if bool_cmp(cond) { out.push("loop condition compares to a bool literal — drop the == true/false".into()); }
                 if taut_cmp(cond) { out.push("loop condition compares a value to complementary ranges — always true or always false".into()); }
+                if polar_cmp(cond) { out.push("loop condition tests x and !x — contradiction or tautology".into()); }
                 // condition var never assigned inside the body — likely infinite
                 if let Expr::Var(v) = cond {
                     if !body.iter().any(|s| stmt_assigns(s, v)) {
@@ -3637,6 +3639,24 @@ fn stmt_assigns(s: &ast::Stmt, name: &str) -> bool {
             || b.iter().any(|s| stmt_assigns(s, name)),
         Stmt::Match(_, arms, els) => arms.iter().any(|(_, b)| b.iter().any(|s| stmt_assigns(s, name)))
             || els.as_ref().map(|v| v.iter().any(|s| stmt_assigns(s, name))).unwrap_or(false),
+        _ => false,
+    }
+}
+
+// x && !x (always false) or x || !x (always true) — same operand, opposite polarity
+fn polar_cmp(e: &ast::Expr) -> bool {
+    use ast::*;
+    match e {
+        Expr::BinOp(l, BinOp::And, r) | Expr::BinOp(l, BinOp::Or, r) => {
+            if let Expr::UnaryOp(UnaryOp::Not, i) = &**r {
+                return **l == **i;
+            }
+            if let Expr::UnaryOp(UnaryOp::Not, i) = &**l {
+                return **r == **i;
+            }
+            false
+        }
+        Expr::UnaryOp(_, a) => polar_cmp(a),
         _ => false,
     }
 }
