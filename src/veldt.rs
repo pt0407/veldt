@@ -799,6 +799,7 @@ pub fn variant_matches_in(e: &FunctionEntry, family: &str, clause: &str) -> bool
         "trial_score" => Some(e.trial_score),
         "efficiency" => Some(e.efficiency),
         "parents" => Some(e.parents.len() as f64),
+        "healing" => Some(e.healing_attempts.len() as f64),
         _ => None,
     };
     if let (Some(fv), Some(v)) = (field_num, num_val) {
@@ -898,6 +899,7 @@ pub fn sort_variants(vs: &mut Vec<FunctionEntry>, field: &str) {
             "trial_score" => b.trial_score.partial_cmp(&a.trial_score),
             "efficiency" => b.efficiency.partial_cmp(&a.efficiency),
             "parents" => b.parents.len().cmp(&a.parents.len()),
+            "healing" => b.healing_attempts.len().cmp(&a.healing_attempts.len()),
             "origin" => a.origin.cmp(&b.origin),
             "health" => {
                 let h = |e: &FunctionEntry| match &e.health {
