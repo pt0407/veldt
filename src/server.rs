@@ -1424,6 +1424,11 @@ async fn family_detail(
         Some(v) => v,
         None => return Json(serde_json::json!({"error": format!("{} not found", req.name)})),
     };
+    let sorted_dist = |f: fn(&crate::veldt::FunctionEntry) -> f64| {
+        let mut v: Vec<f64> = vs.iter().map(f).collect();
+        v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        v
+    };
     let variants: Vec<serde_json::Value> = vs.iter().map(|e| serde_json::json!({
         "id": e.id, "fitness": e.fitness, "health": format!("{:?}", e.health),
         "age": e.age, "usage": e.usage_count, "trust": format!("{:?}", e.trust),
@@ -1510,6 +1515,11 @@ async fn family_detail(
         "healed": healed, "healed_healthy": healed_ok,
         "immigrants": immigrants, "llm_bred": llm_bred,
         "fit_rate_avg": fit_rate_avg, "death_causes": death_causes,
+        "fitness_dist": sorted_dist(|e| e.fitness),
+        "age_dist": sorted_dist(|e| e.age as f64),
+        "usage_dist": sorted_dist(|e| e.usage_count as f64),
+        "size_dist": sorted_dist(|e| crate::fmt::format_program(&e.body).len() as f64),
+        "eff_dist": sorted_dist(|e| e.efficiency),
     }))
 }
 
