@@ -1012,6 +1012,16 @@ fn print_stats(veldt: &veldt::Veldt) {
         println!("death age: avg {} ({}..{}) over {} deaths",
             avg, lo, hi, ages.len());
     }
+    // healing attempts — how often variants tried to heal before dying
+    if !veldt.obituaries.is_empty() {
+        let attempts: Vec<usize> = veldt.obituaries.iter()
+            .map(|o| o.healing_attempts.len()).collect();
+        let avg = attempts.iter().sum::<usize>() / attempts.len().max(1);
+        let max = attempts.iter().max().unwrap_or(&0);
+        let healed_once = attempts.iter().filter(|a| **a > 0).count();
+        println!("healing: {} of {} deaths tried (avg {} attempts, max {})",
+            healed_once, attempts.len(), avg, max);
+    }
     // fitness trend — peak per run, is the garden improving?
     if veldt.fitness_history.len() >= 2 {
         let trend: Vec<String> = veldt.fitness_history.iter()
