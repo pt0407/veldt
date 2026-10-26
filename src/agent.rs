@@ -265,6 +265,9 @@ pub fn respond(task: &str, editor_source: &str, veldt: &mut Veldt) -> AgentRespo
     if has(&["most used", "hot", "hottest", "busiest", "workload", "usage"]) {
         return usage_intent(&words, veldt);
     }
+    if has(&["fastest", "most efficient", "efficient", "speed", "performant"]) {
+        return efficiency_intent(&words, veldt);
+    }
     if has(&["garden", "status", "alive", "what's growing", "what is growing", "what have you", "ecosystem"]) {
         return status_intent(veldt);
     }
@@ -853,6 +856,35 @@ fn usage_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
     let mut text = String::from("Hottest variants:\n");
     for (n, e) in all.iter().take(8) {
         text.push_str(&format!("  {}#{} — {} calls\n", n, e.id, e.usage_count));
+    }
+    plain(&text)
+}
+
+/// Efficiency — the speed leaders (variants by efficiency = fitness/size).
+fn efficiency_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
+    if let Some(name) = find_lineage(words, veldt) {
+        let vs = match veldt.functions.get(&name) {
+            Some(v) => v,
+            None => return plain(&format!("No lineage called '{}'.", name)),
+        };
+        let mut sorted: Vec<&FunctionEntry> = vs.iter().collect();
+        sorted.sort_by(|a, b| b.efficiency.partial_cmp(&a.efficiency)
+            .unwrap_or(std::cmp::Ordering::Equal));
+        let mut text = format!("{} — efficiency ranking\n", name);
+        for e in sorted.iter().take(5) {
+            text.push_str(&format!("  #{} — {:.4} eff (fit {:.2})\n",
+                e.id, e.efficiency, e.fitness));
+        }
+        return plain(&text);
+    }
+    let mut all: Vec<(&String, &FunctionEntry)> = veldt.functions.iter()
+        .flat_map(|(n, vs)| vs.iter().map(move |e| (n, e))).collect();
+    all.sort_by(|a, b| b.1.efficiency.partial_cmp(&a.1.efficiency)
+        .unwrap_or(std::cmp::Ordering::Equal));
+    let mut text = String::from("Most efficient variants:\n");
+    for (n, e) in all.iter().take(8) {
+        text.push_str(&format!("  {}#{} — {:.4} eff (fit {:.2})\n",
+            n, e.id, e.efficiency, e.fitness));
     }
     plain(&text)
 }
