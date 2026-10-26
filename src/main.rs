@@ -119,7 +119,11 @@ fn main() {
                 eprintln!("Usage: veldt import <file>");
                 process::exit(1);
             }
-            import_garden(&args[2]);
+            if args.iter().any(|a| a == "--merge") {
+                merge_garden_json(&read_garden_json(&args[2]));
+            } else {
+                import_garden(&args[2]);
+            }
         }
         "registry" => {
             let port: u16 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(7878);
@@ -726,6 +730,13 @@ fn merge_garden(url: &str) {
     let remote: serde_json::Value = match serde_json::from_str(&body) {
         Ok(v) => v, Err(e) => { eprintln!("Bad pool json: {}", e); process::exit(1); }
     };
+    let added = merge_garden_json(&remote);
+    println!("Merged {} immigrant variants from {}", added, url);
+}
+
+/// Merge remote garden JSON into the local garden — shared by
+/// `pull --merge` and `import --merge`. Returns immigrants added.
+fn merge_garden_json(remote: &serde_json::Value) -> usize {
     let mut veldt = veldt::Veldt::new();
     if let Err(e) = veldt.load() { eprintln!("Error: {}", e); process::exit(1); }
     let mut added = 0;
@@ -745,7 +756,7 @@ fn merge_garden(url: &str) {
         }
     }
     if let Err(e) = veldt.save() { eprintln!("Save failed: {}", e); process::exit(1); }
-    println!("Merged {} immigrant variants from {}", added, url);
+    added
 }
 
 fn search_registry(url: &str, needle: &str) {
@@ -1303,6 +1314,26 @@ fn import_garden(path: &str) {
         Ok(_) => println!("Garden imported from {}", path),
         Err(e) => eprintln!("Import failed: {}", e),
     }
+}
+
+/// Read a garden JSON from a file path or URL.
+fn read_garden_json(path: &str) -> serde_json::Value {
+    let body = if path.starts_with("http://") || path.starts_with("https://") {
+        let client = reqwest::blocking::Client::builder()
+            .user_agent("Veldt/0.3").timeout(std::time::Duration::from_secs(30))
+            .build().expect("http client");
+        client.get(path).send().and_then(|r| r.error_for_status())
+            .and_then(|r| r.text()).unwrap_or_else(|e| {
+                eprintln!("Fetch failed: {}", e); process::exit(1);
+            })
+    } else {
+        std::fs::read_to_string(path).unwrap_or_else(|e| {
+            eprintln!("Read failed: {}", e); process::exit(1);
+        })
+    };
+    serde_json::from_str(&body).unwrap_or_else(|e| {
+        eprintln!("Bad garden json in {}: {}", path, e); process::exit(1);
+    })
 }
 
 fn run_program(path: &str, trace: bool, evolve_after: bool) {
