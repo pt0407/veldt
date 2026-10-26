@@ -3471,7 +3471,19 @@ fn arity_block(stmts: &[ast::Stmt],
     use ast::*;
     for s in stmts {
         match s {
-            Stmt::Let(_, e) | Stmt::Assign(_, e) | Stmt::Print(e)
+            Stmt::Let(n, e) => {
+                // let add = ... where `add` is a defined fn — calls
+                // to add(...) inside now hit the var, not the fn
+                if fns.contains_key(n) {
+                    let msg = format!("let {} shadows fn {} — calls will hit the var", n, n);
+                    out.push(match ctx {
+                        Some(f) => format!("{}: {}", f, msg),
+                        None => msg,
+                    });
+                }
+                arity_expr(e, fns, ctx, out);
+            }
+            Stmt::Assign(_, e) | Stmt::Print(e)
             | Stmt::ExprStmt(e) | Stmt::LetDestructure(_, e) => {
                 arity_expr(e, fns, ctx, out);
             }
@@ -3510,8 +3522,20 @@ fn arity_block(stmts: &[ast::Stmt],
                 }
                 if let Some(b) = els { arity_block(b, fns, ctx, out); }
             }
-            Stmt::FnDef(n, _, b) => arity_block(b, fns, Some(n), out),
-            Stmt::Grow(GrowItem::Fn(n, _, b, tests)) => {
+            Stmt::FnDef(n, params, b) => {
+                for p in params {
+                    if fns.contains_key(&p.name) {
+                        out.push(format!("{}: param {} shadows fn {}", n, p.name, p.name));
+                    }
+                }
+                arity_block(b, fns, Some(n), out);
+            }
+            Stmt::Grow(GrowItem::Fn(n, params, b, tests)) => {
+                for p in params {
+                    if fns.contains_key(&p.name) {
+                        out.push(format!("{}: param {} shadows fn {}", n, p.name, p.name));
+                    }
+                }
                 arity_block(b, fns, Some(n), out);
                 for t in tests {
                     arity_expr(&t.call, fns, Some(n), out);
@@ -3939,6 +3963,8 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                 if matches!(scrut, Expr::Int(_) | Expr::Str(_) | Expr::Bool(_) | Expr::Null) {
                     out.push("match on a literal — deterministic, use if or remove".into());
                 }
+                // (duplicate arm patterns are caught by the later
+                //  exhaustive-scan pass — don't double-report)
                 // match on a let-bound literal — constant propagation
                 if let Expr::Var(v) = scrut {
                     for (_, s) in stmts.iter().enumerate().take(i) {
