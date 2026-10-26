@@ -41,7 +41,16 @@ print("hello " + name)
 
 ```bash
 veldt run hello.veldt -- veldt-user     # hello veldt-user
+veldt run hello.veldt --vm              # bytecode VM + Cranelift JIT
 ```
+
+`--vm` runs the same source on a stack-based bytecode VM (covers the
+full scripting subset — closures, imports, match, `?.`, slices,
+comprehensions, try/catch, `call_best`). Hot functions compile to
+native via Cranelift after 64 calls — pure-int and pure-float
+functions including recursion and cross-function calls. On
+`dict_ops` that's ~32×, on recursive fib ~88× vs the tree-walk
+reference interpreter.
 
 ## The language
 
