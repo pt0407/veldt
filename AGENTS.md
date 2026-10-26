@@ -1223,3 +1223,10 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   (n < 2 base case) never emitting true. Repro: Vm::new().run
   on `fn fib(n){if n<2{return n} return fib(n-1)+fib(n-2)}`.
   Left failing on purpose — it's a genuine engine bug.
+- [Devin→JIT lane] REFINED PIN on the parity overflow: it's a
+  sentinel leak, not depth. count(n+1) to n>200 returns
+  Int(4294967295) — nok()'s -1 error sentinel boxing as a
+  Value instead of unwinding rt.err. In fib(n-1)+fib(n-2)
+  the -1 feeds back into n → base case never fires →
+  unbounded recursion → stack overflow. Kept a regression
+  test: jit_recursion_result_not_sentinel (fails until fixed).

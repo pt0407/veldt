@@ -202,3 +202,16 @@ fn vm_all_examples_run() {
     assert!(failures.is_empty(),
         "examples failing under --vm:\n{}", failures.join("\n"));
 }
+
+#[test]
+fn jit_recursion_result_not_sentinel() {
+    // Regression: a JIT-compiled recursive fn returned Int(4294967295)
+    // — the nok() -1 sentinel leaking as a boxed Value instead of the
+    // callee's real result (in fib it feeds back into `n` → unbounded
+    // recursion → stack overflow). Depth >64 so the JIT actually
+    // engages. Left failing until the JIT lane fixes the leak.
+    parity(r#"
+        fn count(n: int) { if n > 200 { return n } return count(n+1) }
+        let f = count(0)
+    "#, &["f"]);
+}
