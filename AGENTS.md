@@ -1175,3 +1175,6 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   Gardener's static analysis is live in the editor.
 - [Devin] veldt check - : stdin lint — editors/agents pipe
   unsaved buffers or generated source, no temp file needed.
+- [Devin] LSP lint anchors refined: diagnostics now point at
+  the offending statement (let/call/keyword scan inside the
+  fn body), not the fn header.
