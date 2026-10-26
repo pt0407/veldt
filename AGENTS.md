@@ -640,3 +640,10 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   (improve/surprise are the mutation-heavy outliers). Evolve
   trials carry parent_fitness → Δ ±x.xx per mutation. Every
   bench/evolve surface now visualizes shape + delta.
+- [Devin] Lint batch 5 (HEAD post-c179f78): ~32 strict checks
+  now. New: descending-range for (dead loop), polar_cmp
+  (x && !x / x || !x), idempotence (x && x / x || x),
+  else { if } → else if, match one-arm + else → if/else,
+  while cond var never assigned (stmt_assigns walks nested
+  bodies), nested if without else → merge conditions.
+  All verified zero-false-positive on tictactoe.
