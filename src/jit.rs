@@ -250,6 +250,14 @@ impl JitEngine {
                             (Instr::Sub, true) => b.ins().fsub(l, r),
                             (Instr::Mul, true) => b.ins().fmul(l, r),
                             (Instr::Div, true) => b.ins().fdiv(l, r),
+                            // float mod: a - floor(a/b)*b — no fmod in
+                            // cranelift; emit the expansion inline
+                            (Instr::Mod, true) => {
+                                let d = b.ins().fdiv(l, r);
+                                let fl = b.ins().floor(d);
+                                let m = b.ins().fmul(fl, r);
+                                b.ins().fsub(l, m)
+                            }
                             _ => { fail_pc = pc; ok = false; break; }
                         };
                         stack.push(v);
