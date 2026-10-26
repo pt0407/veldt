@@ -566,6 +566,21 @@ fn main() {
                 }
                 println!("=== The Veldt (fitness >= {}) ===", min);
                 filtered.print_garden(sick_only, healthy_only);
+            } else if let Some(min_f) = args.iter().position(|a| a == "--fit_count")
+                .and_then(|p| args.get(p + 1)).and_then(|s| s.parse::<f64>().ok()) {
+                // --fit_count <min> — families with at least 1 variant above fitness min
+                let mut filtered = veldt::Veldt::new();
+                filtered.probes = veldt.probes.clone();
+                filtered.obituaries = veldt.obituaries.clone();
+                filtered.run_count = veldt.run_count;
+                filtered.garden_path = veldt.garden_path.clone();
+                for (name, vs) in &veldt.functions {
+                    if vs.iter().any(|e| e.fitness >= min_f) {
+                        filtered.functions.insert(name.clone(), vs.clone());
+                    }
+                }
+                println!("=== The Veldt (families with fitness >= {}) ===", min_f);
+                filtered.print_garden(sick_only, healthy_only);
             } else if args.iter().any(|a| a == "--risky_count") {
                 // --risky_count — families with at least 1 risky variant
                 let mut filtered = veldt::Veldt::new();
