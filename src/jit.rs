@@ -95,6 +95,9 @@ impl JitEngine {
         jb.symbol("veldt_rt_insertdyn", veldt_rt_insertdyn as *const u8);
         jb.symbol("veldt_rt_fieldset", veldt_rt_fieldset as *const u8);
         jb.symbol("veldt_rt_take_err", veldt_rt_take_err as *const u8);
+        jb.symbol("veldt_rt_nullbox", veldt_rt_nullbox as *const u8);
+        jb.symbol("veldt_rt_capture", veldt_rt_capture as *const u8);
+        jb.symbol("veldt_rt_callvar", veldt_rt_callvar as *const u8);
         let mut module = JITModule::new(jb);
         let rt = RtIds::declare(&mut module);
         Some(JitEngine {
@@ -720,6 +723,7 @@ impl JitEngine {
                     argp, (i * 8) as i32);
                 b.def_var(vars[i], p);
             }
+
             let mut block_for: HashMap<usize, cranelift_codegen::ir::Block> =
                 HashMap::new();
             if leaders.contains(&0) && chunk.code.len() > 1 {
@@ -746,6 +750,17 @@ impl JitEngine {
                 }};
             }
             let rt = self.rt;
+            for i in arity..nslots {
+                // null-init so unset slots always hold a valid box —
+                // CaptureEnv enumerates all slots unconditionally
+                let rtv0 = b.use_var(rt_v);
+                let fr = self.module
+                    .declare_func_in_func(rt.nullbox, b.func);
+                let c = b.ins().call(fr, &[rtv0]);
+                if let Some(&n) = b.inst_results(c).first() {
+                    b.def_var(vars[i], n);
+                }
+            }
             // after a fallible helper call inside try{}: on null, take
             // the pending error into the err slot and jump to catch
             macro_rules! catch_check {
@@ -1126,6 +1141,33 @@ impl JitEngine {
                             fail_pc = pc; ok = false; break; };
                         ecall!(rt.print, rtv, v);
                     }
+                    Instr::CaptureEnv => {
+                        let Some(proto) = stack.pop() else {
+                            fail_pc = pc; ok = false; break; };
+                        for i in 0..nslots {
+                            let sv = b.use_var(vars[i]);
+                            ecall!(rt.pusharg, rtv, sv);
+                        }
+                        let n = b.ins().iconst(types::I64, nslots as i64);
+                        let v = ecall!(rt.capture, rtv, proto, n)
+                            .unwrap_or_else(|| b.ins().iconst(types::I64, 0));
+                        catch_check!(v);
+                        stack.push(v);
+                    }
+                    Instr::CallVar(sl, argc) => {
+                        for _ in 0..argc {
+                            let Some(v) = stack.pop() else {
+                                fail_pc = pc; ok = false; break; };
+                            ecall!(rt.pusharg, rtv, v);
+                        }
+                        if !ok { break; }
+                        let sp = b.use_var(vars[sl as usize]);
+                        let c = b.ins().iconst(types::I64, argc as i64);
+                        let v = ecall!(rt.callvar, rtv, sp, c)
+                            .unwrap_or_else(|| b.ins().iconst(types::I64, 0));
+                        catch_check!(v);
+                        stack.push(v);
+                    }
                     Instr::TryPush(cpc, esl) => {
                         try_ct.push((cpc, esl));
                     }
@@ -1185,6 +1227,8 @@ pub struct JitRt {
     pub vm: *mut crate::vm::Vm,
     pub consts: *const Value,
     pub names: *const String,
+    pub slot_names: *const String,
+    pub n_slot_names: usize,
     pub arena: Vec<*mut Value>,
     pub argbuf: Vec<*mut Value>,
     pub iters: Vec<(Vec<Value>, usize)>,
@@ -1488,6 +1532,43 @@ pub unsafe extern "C" fn veldt_rt_insertdyn(rt: *mut JitRt, sp: *mut Value,
     }
 }
 #[no_mangle]
+pub unsafe extern "C" fn veldt_rt_capture(rt: *mut JitRt,
+    proto: *mut Value, nslots: i64) -> *mut Value {
+    if proto.is_null() { return std::ptr::null_mut(); }
+    let Value::Closure(params, body, _) = &*proto else {
+        return rfail(rt, "CaptureEnv on non-closure".into());
+    };
+    let (params, body) = (params.clone(), body.clone());
+    // argbuf tail holds every slot's box — zip with slot_names
+    let slots = take_args(rt, nslots);
+    let mut env = std::collections::HashMap::new();
+    for (i, v) in slots.iter().enumerate() {
+        if i >= (*rt).n_slot_names { break; }
+        let name = (*(*rt).slot_names.add(i)).clone();
+        if !name.is_empty() { env.insert(name, v.clone()); }
+    }
+    mk(rt, Value::Closure(params, body,
+        std::rc::Rc::new(std::cell::RefCell::new(env))))
+}
+#[no_mangle]
+pub unsafe extern "C" fn veldt_rt_callvar(rt: *mut JitRt,
+    sp: *mut Value, argc: i64) -> *mut Value {
+    if sp.is_null() { return std::ptr::null_mut(); }
+    let args = take_args(rt, argc);
+    match &*sp {
+        Value::Closure(..) => match
+            (*(*rt).vm).helper.call_closure_pub(&*sp, args) {
+            Ok(v) => mk(rt, v),
+            Err(e) => rfail(rt, e),
+        },
+        _ => rfail(rt, "variable is not callable".into()),
+    }
+}
+#[no_mangle]
+pub unsafe extern "C" fn veldt_rt_nullbox(rt: *mut JitRt) -> *mut Value {
+    mk(rt, Value::Null)
+}
+#[no_mangle]
 pub unsafe extern "C" fn veldt_rt_take_err(rt: *mut JitRt) -> *mut Value {
     let e = (*rt).err.take().unwrap_or_else(|| "error".into());
     mk(rt, Value::Str(e.into()))
@@ -1514,7 +1595,8 @@ struct RtIds {
     getfield: FuncId, makestruct: FuncId, tostr: FuncId, print: FuncId,
     gget: FuncId, gset: FuncId, iternew: FuncId, iternext: FuncId,
     iterpop: FuncId, append: FuncId, insert: FuncId, insertdyn: FuncId,
-    fieldset: FuncId, take_err: FuncId,
+    fieldset: FuncId, take_err: FuncId, nullbox: FuncId,
+    capture: FuncId, callvar: FuncId,
 }
 
 impl RtIds {
@@ -1562,6 +1644,9 @@ impl RtIds {
             insertdyn: d(m, "veldt_rt_insertdyn", 4, true),
             fieldset: d(m, "veldt_rt_fieldset", 4, true),
             take_err: d(m, "veldt_rt_take_err", 1, true),
+            nullbox: d(m, "veldt_rt_nullbox", 1, true),
+            capture: d(m, "veldt_rt_capture", 3, true),
+            callvar: d(m, "veldt_rt_callvar", 3, true),
         }
     }
 }
