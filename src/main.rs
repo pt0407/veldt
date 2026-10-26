@@ -1527,6 +1527,21 @@ fn print_stats(veldt: &veldt::Veldt) {
             .map(|(n, c)| format!("{}:{}", n, c)).collect();
         println!("probes/niche: {}", line.join(" "));
     }
+    // avg healing per family — per-lineage healing effort
+    let mut fam_heal: std::collections::HashMap<String, (usize, usize)> =
+        std::collections::HashMap::new();
+    for o in &veldt.obituaries {
+        let ent = fam_heal.entry(o.name.clone()).or_default();
+        ent.0 += o.healing_attempts.len(); ent.1 += 1;
+    }
+    let mut fam_heal_list: Vec<(String, f64)> = fam_heal.into_iter()
+        .map(|(n, (h, c))| (n, h as f64 / c.max(1) as f64)).collect();
+    fam_heal_list.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    if !fam_heal_list.is_empty() {
+        let line: Vec<String> = fam_heal_list.iter().take(8)
+            .map(|(n, a)| format!("{}:{:.1}", n, a)).collect();
+        println!("healing/family: {}", line.join(" "));
+    }
     // fitness trend — peak per run, is the garden improving?
     if veldt.fitness_history.len() >= 2 {
         let trend: Vec<String> = veldt.fitness_history.iter()
