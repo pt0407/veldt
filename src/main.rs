@@ -3487,6 +3487,11 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                                 out.push(format!("let {} = {} — {} is bound to a call, could inline", name, v, v));
                                 break;
                             }
+                            // let a = b where b was let-bound to a list/struct — the let copies a container
+                            if n == v && matches!(pe, Expr::List(_) | Expr::StructLit(..)) {
+                                out.push(format!("let {} = {} — {} is bound to a container, could reuse", name, v, v));
+                                break;
+                            }
                         }
                     }
                 }
