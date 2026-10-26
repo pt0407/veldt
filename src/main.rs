@@ -566,6 +566,21 @@ fn main() {
                 }
                 println!("=== The Veldt (fitness >= {}) ===", min);
                 filtered.print_garden(sick_only, healthy_only);
+            } else if let Some(min_p) = args.iter().position(|a| a == "--min_probes")
+                .and_then(|p| args.get(p + 1)).and_then(|s| s.parse::<usize>().ok()) {
+                // --min_probes <n> — families with at least n probes
+                let mut filtered = veldt::Veldt::new();
+                filtered.probes = veldt.probes.clone();
+                filtered.obituaries = veldt.obituaries.clone();
+                filtered.run_count = veldt.run_count;
+                filtered.garden_path = veldt.garden_path.clone();
+                for (name, vs) in &veldt.functions {
+                    if veldt.probes.get(name).map(|p| p.len()).unwrap_or(0) >= min_p {
+                        filtered.functions.insert(name.clone(), vs.clone());
+                    }
+                }
+                println!("=== The Veldt (probes >= {}) ===", min_p);
+                filtered.print_garden(sick_only, healthy_only);
             } else if args.iter().any(|a| a == "--multi") {
                 // multi-variant families — the lineages with rivals
                 let mut filtered = veldt::Veldt::new();
