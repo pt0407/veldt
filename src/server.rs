@@ -226,17 +226,17 @@ async fn stats(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
         "seedling": seed, "established": estab, "canonical": canon,
         "probes": v.probes.values().map(|p| p.len()).sum::<usize>(),
         "deaths": v.obituaries.len(), "runs": v.run_count,
-        "builtin_usage": use_count.iter().map(|(b, c)| serde_json::json!({b: c})).collect::<Vec<_>>(),
+        "builtin_usage": use_count.iter().map(|(b, c)| serde_json::json!({*b: c})).collect::<Vec<_>>(),
         "fitness_by_source": fit_by_source.iter().map(|(s, fits)| serde_json::json!({
-            s: fits.iter().sum::<f64>() / fits.len().max(1) as f64,
+            s.as_str(): fits.iter().sum::<f64>() / fits.len().max(1) as f64,
         })).collect::<Vec<_>>(),
         "mutation_success": mut_rate.iter().map(|(s, (h, t))| serde_json::json!({
-            s: h as f64 / (*t).max(1) as f64,
+            s.as_str(): *h as f64 / (*t).max(1) as f64,
         })).collect::<Vec<_>>(),
         "avg_niche_scores": niche_sum.iter().map(|(n, (s, c))| serde_json::json!({
-            n: s / (*c).max(1) as f64,
+            n.as_str(): *s / (*c).max(1) as f64,
         })).collect::<Vec<_>>(),
-        "probe_coverage": v.probes.iter().map(|(n, p)| serde_json::json!({n: p.len()})).collect::<Vec<_>>(),
+        "probe_coverage": v.probes.iter().map(|(n, p)| serde_json::json!({n.as_str(): p.len()})).collect::<Vec<_>>(),
     }))
 }
 

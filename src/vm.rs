@@ -235,6 +235,10 @@ impl Compiler {
                 for j in end_jumps { self.patch(j, end); }
             }
             Stmt::Try(body, err_var, handler) => {
+                // err_var scopes to the catch body only — save any prior
+                // binding so a later name like e() resolves to a builtin
+                // rather than the leftover error slot.
+                let prior = self.slots.get(err_var).copied();
                 let es = self.slot(err_var);
                 let tp = self.emit(Instr::TryPush(u32::MAX, es));
                 for st in body { self.compile_stmt(st)?; }
@@ -243,6 +247,10 @@ impl Compiler {
                 let catch = self.code.len();
                 self.patch(tp, catch);
                 for st in handler { self.compile_stmt(st)?; }
+                match prior {
+                    Some(s) => { self.slots.insert(err_var.clone(), s); }
+                    None => { self.slots.remove(err_var); }
+                }
                 let end = self.code.len();
                 self.patch(jend, end);
             }
