@@ -1465,6 +1465,32 @@ async fn family_detail(
         .unwrap_or(std::cmp::Ordering::Equal));
     let weak = vs.iter().min_by(|a, b| a.fitness.partial_cmp(&b.fitness)
         .unwrap_or(std::cmp::Ordering::Equal));
+    // lifecycle / workload / diversity / pressure / proven-risky — CLI parity
+    let growing = vs.iter().filter(|e| (e.age as f64) < e.lifespan).count();
+    let overworked = vs.iter().filter(|e| e.usage_count as f64 > e.lifespan).count();
+    let unique_origins: std::collections::HashSet<_> = vs.iter().map(|e| e.origin.as_str()).collect();
+    let unique_niches: std::collections::HashSet<_> = vs.iter()
+        .flat_map(|e| e.niche_scores.keys().map(|s| s.as_str())).collect();
+    let mean_fit = avg;
+    let fit_std = if vs.len() > 1 {
+        (vs.iter().map(|e| (e.fitness - mean_fit).powi(2)).sum::<f64>() / vs.len() as f64).sqrt()
+    } else { 0.0 };
+    let proven = vs.iter().filter(|e| matches!(e.health, crate::veldt::Health::Healthy)
+        && matches!(e.trust, crate::veldt::Trust::Established | crate::veldt::Trust::Canonical)).count();
+    let risky = vs.iter().filter(|e| matches!(e.health, crate::veldt::Health::Sick(_))
+        && matches!(e.trust, crate::veldt::Trust::Seedling)).count();
+    let healed = vs.iter().filter(|e| !e.healing_attempts.is_empty()).count();
+    let healed_ok = vs.iter().filter(|e| !e.healing_attempts.is_empty()
+        && matches!(e.health, crate::veldt::Health::Healthy)).count();
+    let immigrants = vs.iter().filter(|e| e.origin.contains("immigrant")).count();
+    let llm_bred = vs.iter().filter(|e| e.origin.contains("llm")).count();
+    let fit_rate_avg = vs.iter().map(|e| e.fitness / (e.age as f64 + 1.0)).sum::<f64>()
+        / vs.len().max(1) as f64;
+    let death_causes: std::collections::HashMap<String, usize> = veldt.obituaries.iter()
+        .filter(|o| o.name == req.name)
+        .fold(std::collections::HashMap::new(), |mut m, o| {
+            *m.entry(o.cause_of_death.clone()).or_insert(0) += 1; m
+        });
     Json(serde_json::json!({
         "name": req.name, "variants": variants,
         "probes": veldt.probes.get(&req.name).map(|p| p.len()).unwrap_or(0),
@@ -1476,6 +1502,14 @@ async fn family_detail(
         "min_age": min_age, "max_age": max_age, "avg_age": avg_age,
         "champion": champ.map(|e| serde_json::json!({"id": e.id, "fitness": e.fitness})),
         "weakest": weak.map(|e| serde_json::json!({"id": e.id, "fitness": e.fitness})),
+        "growing": growing, "aging": vs.len() - growing,
+        "overworked": overworked, "underused": vs.len() - overworked,
+        "unique_origins": unique_origins.len(), "unique_niches": unique_niches.len(),
+        "fitness_stddev": fit_std, "rivals": vs.len().saturating_sub(1),
+        "proven": proven, "risky": risky,
+        "healed": healed, "healed_healthy": healed_ok,
+        "immigrants": immigrants, "llm_bred": llm_bred,
+        "fit_rate_avg": fit_rate_avg, "death_causes": death_causes,
     }))
 }
 
