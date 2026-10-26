@@ -2856,7 +2856,7 @@ fn print_usage() {
     println!("  veldt clear                  Clear the entire veldt");
     println!("  veldt evolve [N]             Run N evolution cycles (garden self-grows)");
     println!("  veldt agent \"task\"          Ask the Gardener (rule-based coding agent)");
-    println!("  veldt bench                  Benchmark the Gardener's species + intents");
+    println!("  veldt bench                  Benchmark the Gardener's species + intents (--json --save F --compare F --filter EXPR)");
     println!("  veldt repl                   Interactive REPL (:help for commands)");
     println!("  veldt run -e \"code\"          Inline eval; \"-- a b\" sets args()");
     println!("  veldt studio [port]          Start Veldt Studio IDE (default port 7777)
