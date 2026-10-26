@@ -739,6 +739,22 @@ fn print_stats(veldt: &veldt::Veldt) {
         println!("bare lineages (no probes — zero selection pressure): {}",
             bare.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", "));
     }
+    // mutation-source histogram — which operators produce living variants
+    let mut sources: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for vs in veldt.functions.values() {
+        for e in vs {
+            let src = e.origin.split(" of ").next().unwrap_or("?").to_string();
+            // crossovers carry parents in the name — collapse to the op
+            let src = if src.starts_with("crossover") { "crossover".to_string() } else { src };
+            *sources.entry(src).or_default() += 1;
+        }
+    }
+    if !sources.is_empty() {
+        let mut ranked: Vec<_> = sources.into_iter().collect();
+        ranked.sort_by(|a, b| b.1.cmp(&a.1));
+        println!("mutation sources: {}", ranked.iter()
+            .map(|(s, n)| format!("{}×{}", s, n)).collect::<Vec<_>>().join("  "));
+    }
     if !best.is_empty() {
         println!("top families:");
         for (name, fit, n) in best.iter().take(10) {
