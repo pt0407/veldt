@@ -2738,6 +2738,33 @@ impl Interpreter {
                 d2.insert("cells".to_string(), Value::List(rows2));
                 Ok(Some(Value::Dict(d2)))
             }
+            "perlin" => {
+                // perlin(x, y) — proper 2D Perlin gradient noise in [-1,1].
+                // Gradient vectors on a hash-seeded lattice, quintic fade.
+                let (x, y) = (num_at(args, 0)?, num_at(args, 1)?);
+                let hash = |ix: i64, iy: i64| -> usize {
+                    let mut n = ix.wrapping_mul(374761393).wrapping_add(iy.wrapping_mul(668265263));
+                    n = (n ^ (n >> 13)).wrapping_mul(1274126177);
+                    ((n ^ (n >> 16)) as u64 & 0xff) as usize
+                };
+                let grad = |h: usize, dx: f64, dy: f64| -> f64 {
+                    match h & 7 {
+                        0 => dx + dy, 1 => -dx + dy, 2 => dx - dy, 3 => -dx - dy,
+                        4 => dx, 5 => -dx, 6 => dy, _ => -dy,
+                    }
+                };
+                let fade = |t: f64| t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
+                let lerp = |a: f64, b: f64, t: f64| a + t * (b - a);
+                let (ix, iy) = (x.floor() as i64, y.floor() as i64);
+                let (fx, fy) = (x - x.floor(), y - y.floor());
+                let (u, v) = (fade(fx), fade(fy));
+                let n00 = grad(hash(ix, iy), fx, fy);
+                let n10 = grad(hash(ix + 1, iy), fx - 1.0, fy);
+                let n01 = grad(hash(ix, iy + 1), fx, fy - 1.0);
+                let n11 = grad(hash(ix + 1, iy + 1), fx - 1.0, fy - 1.0);
+                let v = lerp(lerp(n00, n10, u), lerp(n01, n11, u), v);
+                Ok(Some(Value::Float(v)))
+            }
             "dist_stats" => {
                 // dist_stats(fn, trials) — mean/stddev/min/max over n samples
                 let (f, trials) = match (args.get(0), args.get(1)) {
