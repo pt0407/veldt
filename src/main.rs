@@ -538,6 +538,19 @@ fn main() {
                 if hits.is_empty() {
                     println!("No families matching '{}'", args[2]);
                 }
+                // --sort <field> — order find results: fitness (default) | count | name
+                let sort_field = args.iter().position(|a| a == "--sort")
+                    .and_then(|p| args.get(p + 1)).map(|s| s.as_str()).unwrap_or("");
+                let mut hits = hits;
+                match sort_field {
+                    "count" => hits.sort_by(|a, b| b.1.len().cmp(&a.1.len())),
+                    "name" => hits.sort_by(|a, b| a.0.cmp(b.0)),
+                    _ => hits.sort_by(|a, b| {
+                        let at = a.1.iter().map(|e| e.fitness).fold(f64::NEG_INFINITY, f64::max);
+                        let bt = b.1.iter().map(|e| e.fitness).fold(f64::NEG_INFINITY, f64::max);
+                        bt.partial_cmp(&at).unwrap_or(std::cmp::Ordering::Equal)
+                    }),
+                }
                 for (name, vs) in hits {
                     let top = vs.iter().map(|e| e.fitness).fold(f64::NEG_INFINITY, f64::max);
                     println!("{} — {} variants, peak fitness {:.2}", name, vs.len(), top);
