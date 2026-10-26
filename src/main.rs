@@ -3296,6 +3296,9 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
                     if a.is_empty() && !e.is_empty() {
                         out.push("if with empty then + non-empty else — negate the condition".into());
                     }
+                    if e.len() == 1 && matches!(e[0], Stmt::If(_, _, _)) {
+                        out.push("else { if ... } — flatten to else if".into());
+                    }
                     lint_block(e, out);
                 }
                 lint_block(a, out);
