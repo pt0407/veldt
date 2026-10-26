@@ -751,3 +751,6 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   checks. New: catch body that just exits (return/break/
   continue — try adds no recovery, no logging, no
   handling).
+- [Devin] Lint batch 18 (HEAD post-dup-let): ~48 strict
+  checks. New: duplicate let binding (same expr bound
+  twice — b could reuse a).
