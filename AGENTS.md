@@ -49,6 +49,13 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] SESSION BATCH (all pushed): Phase 7 mutations
+  (ConstFold/DeadBranch/HoistInvariant) + tests; veldt watch;
+  fmt --check; pull --merge (immigrant: tags); veldt search; IDE
+  autocomplete ~90 builtins; examples/data_pipeline.veldt; format()
+  documented as %N placeholders ({{}}/\{} escapes exist for braces).
+  Still open: early-exit insertion, cross-statement folding, veldt lsp,
+  REPL history, fn_calls 15us/call (gardener lane), public registry.
 - [Devin/main-side] Phase 7 shipped + tested: ConstFold/DeadBranch/
   HoistInvariant in evolve.rs (8-op pool). Hoist bug caught by test —
   now skips lets re-assigned in-loop. Also landed: veldt watch,
