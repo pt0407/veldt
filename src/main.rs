@@ -3528,6 +3528,10 @@ fn print_stats(veldt: &veldt::Veldt) {
             "healthy" => variants.iter().filter(|e| matches!(e.health, Health::Healthy)).count() as f64,
             "dying" => variants.iter().filter(|e| matches!(e.health, Health::Dying)).count() as f64,
             "healing" => variants.iter().map(|e| e.healing_attempts.len() as f64).sum::<f64>() / n,
+            "proven" => variants.iter().filter(|e| matches!(e.health, Health::Healthy)
+                && matches!(e.trust, veldt::Trust::Established | veldt::Trust::Canonical)).count() as f64,
+            "risky" => variants.iter().filter(|e| matches!(e.health, Health::Sick(_))
+                && matches!(e.trust, veldt::Trust::Seedling)).count() as f64,
             "stale" => {
                 // staleness — runs since the family's most-recent call
                 let max_lu = variants.iter().map(|e| e.last_used).max().unwrap_or(0);
