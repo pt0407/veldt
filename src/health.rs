@@ -102,6 +102,7 @@ impl HealthChecker {
                   structs: &std::collections::HashMap<String, crate::veldt::StructEntry>,
                   probes: &[crate::veldt::Probe]) -> std::collections::HashMap<String, f64> {
         let mut interp = Interpreter::with_step_limit(10000);
+        interp.caps = crate::interpreter::Caps::sandboxed();
         Self::load_snapshot_into_interp(functions, variables, structs, &mut interp);
         let variant = crate::interpreter::FunctionVariant {
             id: entry.id,
@@ -141,6 +142,7 @@ impl HealthChecker {
                     structs: &std::collections::HashMap<String, crate::veldt::StructEntry>,
                     traces: &[crate::veldt::Trace]) -> f64 {
         let mut interp = Interpreter::with_step_limit(10000);
+        interp.caps = crate::interpreter::Caps::sandboxed();
         Self::load_snapshot_into_interp(functions, variables, structs, &mut interp);
         let variant = crate::interpreter::FunctionVariant {
             id: entry.id,
@@ -180,6 +182,7 @@ impl HealthChecker {
                           structs: &std::collections::HashMap<String, crate::veldt::StructEntry>,
                           big_probes: &[&crate::veldt::Probe]) -> f64 {
         let mut interp = Interpreter::with_step_limit(200000);
+        interp.caps = crate::interpreter::Caps::sandboxed();
         Self::load_snapshot_into_interp(functions, variables, structs, &mut interp);
         // add this variant
         interp.functions.entry(entry.name.clone()).or_insert_with(Vec::new)
@@ -258,6 +261,7 @@ impl HealthChecker {
                         structs: &std::collections::HashMap<String, crate::veldt::StructEntry>,
                         start: Instant) -> TrialResult {
         let mut interp = Interpreter::with_step_limit(10000);
+        interp.caps = crate::interpreter::Caps::sandboxed();
         Self::load_snapshot_into_interp(functions, variables, structs, &mut interp);
 
         // Load the function being tested
@@ -324,6 +328,7 @@ impl HealthChecker {
                          structs: &std::collections::HashMap<String, crate::veldt::StructEntry>,
                          start: Instant) -> TrialResult {
         let mut interp = Interpreter::with_step_limit(10000);
+        interp.caps = crate::interpreter::Caps::sandboxed();
         Self::load_snapshot_into_interp(functions, variables, structs, &mut interp);
 
         let variant = crate::interpreter::FunctionVariant {

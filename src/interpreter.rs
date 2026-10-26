@@ -91,6 +91,8 @@ pub struct Interpreter {
     pub argv: Vec<String>,
     pub call_stack: Vec<(String, usize)>,
     pub importing: Vec<String>,
+    // std:sandbox — capability set; denied builtins error before dispatch
+    pub caps: Caps,
 }
 
 #[derive(Clone)]
@@ -103,6 +105,44 @@ pub struct FunctionVariant {
 pub enum FlowControl {
     Normal,
     Return(Option<Value>),
+}
+
+/// std:sandbox — capability set for the interpreter. Untrusted code
+/// (LLM mutants, immigrants, trials) runs with side-effects denied.
+#[derive(Clone, Debug)]
+pub struct Caps {
+    pub fs_read: bool,
+    pub fs_write: bool,
+    pub net: bool,
+    pub spawn: bool,
+    pub env: bool,
+    pub exit: bool,
+}
+
+impl Caps {
+    pub fn allow_all() -> Self {
+        Caps { fs_read: true, fs_write: true, net: true, spawn: true, env: true, exit: true }
+    }
+    /// Stage 0: everything off — pure compute only.
+    pub fn sandboxed() -> Self {
+        Caps { fs_read: false, fs_write: false, net: false, spawn: false, env: false, exit: false }
+    }
+    /// Is this builtin blocked under the current caps?
+    pub fn denied(&self, name: &str) -> bool {
+        match name {
+            "read_file" | "read_dir" | "exists" | "ls" => !self.fs_read,
+            "write_file" | "append_file" | "mkdir" | "rm" | "mv" | "cp" => !self.fs_write,
+            "fetch" | "post" | "serve" | "import" => !self.net,
+            "spawn" | "join" | "pmap" | "task" => !self.spawn,
+            "env" | "args" | "read_stdin" | "input" | "readline" => !self.env,
+            "exit" | "exec" | "system" | "shell" => !self.exit,
+            _ => false,
+        }
+    }
+}
+
+impl Default for Caps {
+    fn default() -> Self { Caps::allow_all() }
 }
 
 impl Interpreter {
@@ -130,6 +170,7 @@ impl Interpreter {
             argv: Vec::new(),
             call_stack: Vec::new(),
             importing: Vec::new(),
+            caps: Caps::allow_all(),
         }
     }
 
@@ -1263,6 +1304,27 @@ impl Interpreter {
     }
 
     pub(crate) fn try_builtin(&mut self, name: &str, args: &[Value]) -> Result<Option<Value>, String> {
+        // std:sandbox gate — denied capabilities error before dispatch
+        if self.caps.denied(name) {
+            return Err(format!("sandbox: '{}' requires a denied capability", name));
+        }
+        // sandbox_run(name, args_list): eval a function with all caps off —
+        // Veldt-side Stage-0 isolation (spawn-free, same interpreter).
+        if name == "sandbox_run" {
+            let fname = match args.first() {
+                Some(Value::Str(s)) => s.to_string(),
+                _ => return Err("sandbox_run() expects (name, args_list)".into()),
+            };
+            let fargs: Vec<Value> = match args.get(1) {
+                Some(Value::List(l)) => l.iter().cloned().collect(),
+                _ => Vec::new(),
+            };
+            let saved = std::mem::replace(&mut self.caps, Caps::sandboxed());
+            let r = self.call_function(&fname, None, fargs);
+            self.caps = saved;
+            return r.map(Some);
+        }
+
         match name {
             "range" => {
                 if args.len() != 1 {

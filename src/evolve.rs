@@ -289,6 +289,7 @@ impl Evolver {
 
         // Build an interpreter with the veldt snapshot
         let mut interp = crate::interpreter::Interpreter::with_step_limit(10000);
+        interp.caps = crate::interpreter::Caps::sandboxed();
         veldt.load_into_interpreter(&mut interp);
 
         let mut probes = Vec::new();
@@ -331,7 +332,7 @@ impl Evolver {
 
     /// Coarse input signature — defines niches. Variants that specialise on
     /// particular input shapes can survive as niche champions.
-    fn niche_signature(args: &[crate::interpreter::Value]) -> String {
+    pub(crate) fn niche_signature(args: &[crate::interpreter::Value]) -> String {
         use crate::interpreter::Value;
         args.iter().map(|v| match v {
             Value::Int(n) => {
