@@ -778,3 +778,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 - [Devin] Lint batch 24 (HEAD post-sentinel-let): ~54 strict
   checks. New: let x = false / let x = 0 never assigned —
   a flag/counter that's read but never updates.
+- [Devin] Lint batch 25 (HEAD post-5c0fde7): ~55 strict
+  checks. The bare-expression check is now pure-expr only
+  — Var/Lit/BinOp/UnOp/Index bodies flagged, Call/
+  MethodCall bodies excluded (side-effecting).
