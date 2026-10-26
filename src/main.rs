@@ -3347,6 +3347,9 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
                     out.push("match on a literal — deterministic, use if or remove".into());
                 }
                 if arms.is_empty() { out.push("match with no arms — dead statement".into()); }
+                if arms.len() == 1 && els.is_some() {
+                    out.push("match with one arm + else — use if/else instead".into());
+                }
                 // _ arm before a non-_ arm — the later arm is unreachable
                 let wild = arms.iter().position(|(p, _)|
                     matches!(p, Expr::Var(v) if v == "_"));
