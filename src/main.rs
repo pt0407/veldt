@@ -180,7 +180,28 @@ fn main() {
             }
             let sick_only = args.iter().any(|a| a == "--sick");
             let obituaries = args.iter().any(|a| a == "--obituaries");
-            if obituaries {
+            if args.iter().any(|a| a == "--json") {
+                // machine-readable census — registry/tooling consumers
+                let fams: Vec<serde_json::Value> = veldt.functions.iter().map(|(name, vs)| {
+                    serde_json::json!({
+                        "name": name,
+                        "variants": vs.iter().map(|e| serde_json::json!({
+                            "id": e.id,
+                            "health": format!("{:?}", e.health),
+                            "fitness": e.fitness,
+                            "trust": format!("{:?}", e.trust),
+                            "niche_scores": e.niche_scores,
+                            "origin": e.origin,
+                        })).collect::<Vec<_>>(),
+                        "probes": veldt.probes.get(name).map(|p| p.len()).unwrap_or(0),
+                    })
+                }).collect();
+                println!("{}", serde_json::json!({
+                    "families": fams,
+                    "deaths": veldt.obituaries.len(),
+                    "runs": veldt.run_count,
+                }));
+            } else if obituaries {
                 veldt.print_obituaries();
             } else {
                 println!("=== The Veldt ===");
