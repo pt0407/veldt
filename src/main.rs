@@ -3505,8 +3505,9 @@ fn print_stats(veldt: &veldt::Veldt) {
     let mut sick = 0usize;
     let mut dying = 0usize;
     // (name, peak, count, avg_age, usage, avg_size, probes, deaths, traces,
-    //  immigrants, sick, healthy, canonical, established, seedling)
-    let mut best: Vec<(String, f64, usize, f64, u64, f64, usize, usize, usize, usize, usize, usize, usize, usize, usize)> = Vec::new();
+    //  immigrants, sick, healthy, canonical, established, seedling,
+    //  avg_niches, avg_args, avg_lifespan, max_last_used)
+    let mut best: Vec<(String, f64, usize, f64, u64, f64, usize, usize, usize, usize, usize, usize, usize, usize, usize, f64, f64, f64, u64)> = Vec::new();
     for (name, variants) in &veldt.functions {
         let top = variants.iter().map(|e| e.fitness)
             .fold(f64::NEG_INFINITY, f64::max);
@@ -3525,9 +3526,14 @@ fn print_stats(veldt: &veldt::Veldt) {
         let canon_n = variants.iter().filter(|e| matches!(e.trust, veldt::Trust::Canonical)).count();
         let estab_n = variants.iter().filter(|e| matches!(e.trust, veldt::Trust::Established)).count();
         let seed_n = variants.iter().filter(|e| matches!(e.trust, veldt::Trust::Seedling)).count();
+        let avg_niches = variants.iter().map(|e| e.niche_scores.len() as f64).sum::<f64>() / n;
+        let avg_args = variants.iter().map(|e| e.params.len() as f64).sum::<f64>() / n;
+        let avg_lifespan = variants.iter().map(|e| e.lifespan).sum::<f64>() / n;
+        let max_lu = variants.iter().map(|e| e.last_used).max().unwrap_or(0);
         best.push((name.clone(), if variants.is_empty() { 0.0 } else { top },
             variants.len(), avg_age, usage, avg_size, probes, deaths, traces,
-            immigrants, sick_n, healthy_n, canon_n, estab_n, seed_n));
+            immigrants, sick_n, healthy_n, canon_n, estab_n, seed_n,
+            avg_niches, avg_args, avg_lifespan, max_lu));
         for e in variants {
             total += 1;
             match e.health {
@@ -3557,6 +3563,10 @@ fn print_stats(veldt: &veldt::Veldt) {
         "canonical" => best.sort_by(|a, b| b.12.cmp(&a.12)),
         "established" => best.sort_by(|a, b| b.13.cmp(&a.13)),
         "seedling" => best.sort_by(|a, b| b.14.cmp(&a.14)),
+        "niches" => best.sort_by(|a, b| b.15.partial_cmp(&a.15).unwrap_or(std::cmp::Ordering::Equal)),
+        "args" => best.sort_by(|a, b| b.16.partial_cmp(&a.16).unwrap_or(std::cmp::Ordering::Equal)),
+        "lifespan" => best.sort_by(|a, b| b.17.partial_cmp(&a.17).unwrap_or(std::cmp::Ordering::Equal)),
+        "last_used" => best.sort_by(|a, b| b.18.cmp(&a.18)),
         _ => best.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)),
     }
     let probe_count: usize = veldt.probes.values().map(|v| v.len()).sum();
