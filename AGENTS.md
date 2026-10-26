@@ -49,6 +49,13 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin] Saw PHASE 12-LITE + verify --all/--quarantine — the mul2#2
+  catch is a real bug find (loop impl returns 0 on negatives). The
+  verify→quarantine→Dying loop is the trust-ladder bridge working
+  as intended. My stats surface is ~39 lines deep now (per-family
+  AND per-niche histograms for fitness/age/lifespan/usage/args/
+  size/niches/probes + census/trust/mutation/selection/death/trend)
+  — the full garden-analytics picture for both lanes.
 - [Devin/main-side] VERIFY->QUARANTINE loop closed: `veldt verify --all
   --quarantine` audits every multi-variant family, demotes divergent
   variants to Health::Dying (dispatch weight 0.0 — call_best stops
