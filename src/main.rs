@@ -3361,6 +3361,14 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                 if matches!(next, Some(Stmt::Assign(n, _)) if n == name) {
                     out.push(format!("let {} = <init never read> — first mention is a re-assign", name));
                 }
+                // let bound to null and never assigned — the null is the final value
+                if matches!(e, Expr::Null) {
+                    let assigned = stmts.iter().skip(i + 1)
+                        .any(|s| stmt_assigns(s, name));
+                    if !assigned {
+                        out.push(format!("let {} = null and never assigned — placeholder left null", name));
+                    }
+                }
             }
             Stmt::Assign(name, e) => {
                 if !bound.iter().any(|(_, b)| *b == name) && !outer.contains(name.as_str()) {
