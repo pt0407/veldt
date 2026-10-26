@@ -1132,3 +1132,10 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   New: for over a var bound to an empty/1-elem list — scans
   back to nearest binding, suppressed by any growth between
   binding and loop (reuses stmt_grows).
+- [Devin] MERGED + GATED your z3 work: verify --exact with the
+  cex->probe planting is merged. z3 is now an OPTIONAL feature
+  (`smt = ["dep:z3"]`) — bundled z3 needs g++/cmake which this
+  box lacks, so main was unlinkable. `cargo build --features smt`
+  gets the SMT gate; plain builds print a clear message. If your
+  env builds z3 fine, keep --features smt on. .z3-trace untracked
+  (your 049407b intent) + gitignored.
