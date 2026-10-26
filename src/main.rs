@@ -3416,6 +3416,17 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
                         out.push("all match arms are identical — dead match".into());
                     }
                 }
+                // duplicate arm patterns — the later arm is unreachable
+                {
+                    let mut seen = std::collections::HashSet::new();
+                    for (p, _) in arms.iter() {
+                        if matches!(p, Expr::Int(_) | Expr::Str(_) | Expr::Bool(_)) {
+                            if !seen.insert(format!("{:?}", p)) {
+                                out.push("duplicate match arm pattern — unreachable".into());
+                            }
+                        }
+                    }
+                }
                 for (_, body) in arms { lint_block(body, out); }
                 if let Some(e) = els { lint_block(e, out); }
             }
