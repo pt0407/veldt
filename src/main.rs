@@ -954,6 +954,15 @@ fn print_stats(veldt: &veldt::Veldt) {
             avg, min, max,
             ages.iter().filter(|a| **a < 20).count() * 100 / ages.len());
     }
+    // trace volume — production evidence per family
+    let mut trace_count: Vec<(&String, usize)> = veldt.traces.iter()
+        .map(|(n, t)| (n, t.len())).collect();
+    trace_count.sort_by(|a, b| b.1.cmp(&a.1));
+    if !trace_count.is_empty() {
+        let line: Vec<String> = trace_count.iter().take(8)
+            .map(|(n, c)| format!("{}:{}", n, c)).collect();
+        println!("call traces: {}", line.join(" "));
+    }
     // fitness trend — peak per run, is the garden improving?
     if veldt.fitness_history.len() >= 2 {
         let trend: Vec<String> = veldt.fitness_history.iter()
