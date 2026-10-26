@@ -94,6 +94,7 @@ struct Compiler {
     names: Vec<String>,
     slot_names: Vec<String>,   // slot idx -> name, for closure capture
     known_fns: HashSet<String>, // for `alias::method` resolution
+    global_mode: bool,      // module top-level: let/assign -> globals
     // loop stack: (start_pc, [pending break patch positions])
     loops: Vec<(usize, Vec<usize>)>,
     // var name -> local slot (allocated lazily; env Vec grows to fit)
@@ -288,10 +289,15 @@ impl Compiler {
             Expr::Bool(b) => { let k = self.konst(Value::Bool(*b)); self.emit(Instr::Const(k)); },
             Expr::Null => { let k = self.konst(Value::Null); self.emit(Instr::Const(k)); },
             Expr::Var(n) => {
-                match self.slots.get(n) {
-                    Some(&sl) => self.emit(Instr::Load(sl)),
-                    None => { let i = self.name_idx(n); self.emit(Instr::LoadG(i)) }
-                };
+                if self.global_mode {
+                    let i = self.name_idx(n);
+                    self.emit(Instr::LoadG(i));
+                } else {
+                    match self.slots.get(n) {
+                        Some(&sl) => self.emit(Instr::Load(sl)),
+                        None => { let i = self.name_idx(n); self.emit(Instr::LoadG(i)) }
+                    };
+                }
             }
             Expr::List(items) => {
                 for it in items { self.compile_expr(it)?; }
@@ -607,6 +613,35 @@ impl Vm {
                 self.import_module(p2, a2.as_deref())?;
             }
         }
+        // module side-effect stmts: bare imports run them into globals
+        if alias.is_none() {
+            let top: Vec<Stmt> = stmts.iter()
+                .filter(|st| !matches!(st, Stmt::FnDef(..)
+                    | Stmt::Grow(..) | Stmt::Import(..)))
+                .cloned().collect();
+            if !top.is_empty() {
+                // global mode: a compiler with no prebound slots —
+                // let/assign emit StoreG so results land in globals
+                let mut gc = Compiler {
+                    code: Vec::new(), consts: Vec::new(),
+                    names: Vec::new(), slot_names: Vec::new(),
+                    known_fns: self.fns.keys().cloned().collect(),
+                    global_mode: true,
+                    loops: Vec::new(), slots: HashMap::new(),
+                    next_slot: 0,
+                };
+                for st in &top { gc.compile_stmt(st)
+                    .map_err(|e| format!("import '{}': {}", path, e))?; }
+                gc.emit(Instr::Halt);
+                let chunk = std::rc::Rc::new(Chunk {
+                    code: gc.code, consts: gc.consts,
+                    names: gc.names, slot_names: gc.slot_names,
+                });
+                let mut args = Vec::new();
+                self.exec(chunk, &mut args)
+                    .map_err(|e| format!("import '{}' exec: {}", path, e))?;
+            }
+        }
         for st in &stmts {
             if let Stmt::FnDef(name, params, body) = st {
                 let pnames: Vec<String> =
@@ -648,6 +683,7 @@ impl Vm {
             code: Vec::new(), consts: Vec::new(), names: Vec::new(),
             slot_names: Vec::new(),
             known_fns: self.fns.keys().cloned().collect(),
+            global_mode: false,
             loops: Vec::new(), slots: HashMap::new(), next_slot: 0,
         };
         // params occupy slots 0..n — the frame binds args by position
