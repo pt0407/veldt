@@ -2527,6 +2527,100 @@ impl Interpreter {
                 d2.insert("cells".to_string(), Value::List(rows2));
                 Ok(Some(Value::Dict(d2)))
             }
+            "ui_bar" => {
+                // ui_bar(c, x, y, w, cur, max, fill_ch?) — [|||||   ] gauge
+                let (d, x0, y0, w, cur, max, ch) = match (args.get(0), args.get(1), args.get(2), args.get(3), args.get(4), args.get(5), args.get(6)) {
+                    (Some(Value::Dict(d)), Some(Value::Int(x)), Some(Value::Int(y)),
+                     Some(Value::Int(w)), Some(Value::Int(cur)), Some(Value::Int(max)), c)
+                        => (d.clone(), *x as usize, *y as usize, *w as usize, *cur, *max,
+                            if let Some(Value::Str(s)) = c { s.clone() } else { "|".into() }),
+                    _ => return Err("ui_bar(c, x, y, w, cur, max, ch?) expects dict + 4 ints + str".into()),
+                };
+                let Some(Value::List(rows)) = d.get("cells") else { return Err("canvas: no cells".into()) };
+                let mut rows2 = rows.clone();
+                let filled = if max > 0 { ((cur.max(0) as f64 / max.max(1) as f64) * w as f64) as usize } else { 0 };
+                if y0 < rows2.len() {
+                    if let Value::List(r) = &rows2[y0] {
+                        let mut nr = r.clone();
+                        for i in 0..w {
+                            if x0 + i < nr.len() {
+                                nr[x0 + i] = Value::Str(if i < filled { ch.clone() } else { " ".into() });
+                            }
+                        }
+                        rows2[y0] = Value::List(nr);
+                    }
+                }
+                let mut d2 = d.clone();
+                d2.insert("cells".to_string(), Value::List(rows2));
+                Ok(Some(Value::Dict(d2)))
+            }
+            "canvas_ellipse" => {
+                // canvas_ellipse(c, cx, cy, rx, ry, ch) — parametric ellipse
+                let (d, cx, cy, rx, ry, ch) = match (args.get(0), args.get(1), args.get(2), args.get(3), args.get(4), args.get(5)) {
+                    (Some(Value::Dict(d)), Some(Value::Int(cx)), Some(Value::Int(cy)),
+                     Some(Value::Int(rx)), Some(Value::Int(ry)), Some(Value::Str(ch)))
+                        => (d.clone(), *cx, *cy, *rx as f64, *ry as f64, ch.clone()),
+                    _ => return Err("canvas_ellipse(c, cx, cy, rx, ry, ch) expects dict + 4 ints + str".into()),
+                };
+                let Some(Value::List(rows)) = d.get("cells") else { return Err("canvas: no cells".into()) };
+                let mut rows2 = rows.clone();
+                let (w, h) = (rows.get(0).and_then(|r| if let Value::List(r) = r { Some(r.len()) } else { None }), rows.len());
+                let Some(w) = w else { return Err("canvas: missing w".into()) };
+                for t in 0..360 {
+                    let rad = (t as f64).to_radians();
+                    let (px, py) = ((cx as f64 + rx * rad.cos()) as i64, (cy as f64 + ry * rad.sin()) as i64);
+                    if px >= 0 && py >= 0 && (px as usize) < w && (py as usize) < h {
+                        if let Value::List(r) = &rows2[py as usize] {
+                            let mut nr = r.clone();
+                            nr[px as usize] = Value::Str(ch.clone());
+                            rows2[py as usize] = Value::List(nr);
+                        }
+                    }
+                }
+                let mut d2 = d.clone();
+                d2.insert("cells".to_string(), Value::List(rows2));
+                Ok(Some(Value::Dict(d2)))
+            }
+            "canvas_triangle" => {
+                // canvas_triangle(c, x1,y1, x2,y2, x3,y3, ch) — three edges
+                let mut d = match args.get(0) { Some(Value::Dict(d)) => d.clone(), _ => return Err("canvas_triangle expects a canvas".into()) };
+                for &(a, b) in &[(1usize, 3usize), (3usize, 5usize), (5usize, 1usize)] {
+                    let (x1, y1, x2, y2) = match (args.get(a), args.get(a + 1), args.get(b), args.get(b + 1)) {
+                        (Some(Value::Int(a1)), Some(Value::Int(b1)), Some(Value::Int(c1)), Some(Value::Int(d1)))
+                            => (*a1, *b1, *c1, *d1),
+                        _ => return Err("canvas_triangle expects 6 int coords".into()),
+                    };
+                    let Some(Value::Str(ch)) = args.get(7) else { return Err("canvas_triangle expects a char".into()) };
+                    // reuse the line logic inline
+                    if let Some(Value::List(rows)) = d.get("cells") {
+                        let mut rows2 = rows.clone();
+                        let (dx, dy) = ((x2 - x1).abs(), (y2 - y1).abs());
+                        let (sx, sy) = (if x1 < x2 { 1 } else { -1 }, if y1 < y2 { 1 } else { -1 });
+                        let (mut x, mut y, mut err) = (x1, y1, dx - dy);
+                        loop {
+                            if x >= 0 && y >= 0 && (x as usize) < rows2.get(0).and_then(|r| if let Value::List(r) = r { Some(r.len()) } else { None }).unwrap_or(0) && (y as usize) < rows2.len() {
+                                if let Value::List(r) = &rows2[y as usize] {
+                                    let mut nr = r.clone();
+                                    nr[x as usize] = Value::Str(ch.clone());
+                                    rows2[y as usize] = Value::List(nr);
+                                }
+                            }
+                            if x == x2 && y == y2 { break; }
+                            let e2 = 2 * err;
+                            if e2 > -dy { err -= dy; x += sx; }
+                            if e2 < dx { err += dx; y += sy; }
+                        }
+                        d.insert("cells".to_string(), Value::List(rows2));
+                    }
+                }
+                Ok(Some(Value::Dict(d)))
+            }
+            "rand_bool" => {
+                let mut x = self.rng_state;
+                x ^= x << 13; x ^= x >> 7; x ^= x << 17;
+                self.rng_state = x;
+                Ok(Some(Value::Bool(x % 2 == 0)))
+            }
             "dist_stats" => {
                 // dist_stats(fn, trials) — mean/stddev/min/max over n samples
                 let (f, trials) = match (args.get(0), args.get(1)) {
