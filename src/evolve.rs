@@ -18,6 +18,9 @@ pub struct Evolver {
     /// Sort the candidate pool by a variant field before selection
     /// — the garden --sort DSL applied to the breeding order.
     pub sort: Option<String>,
+    /// Self-maintaining cycles — heal sick variants and run the
+    /// mechanical dead-code repairs across the garden each cycle.
+    pub tend: bool,
 }
 
 impl Evolver {
@@ -26,7 +29,7 @@ impl Evolver {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_nanos() as u64)
             .unwrap_or(42);
-        Evolver { rng_seed: seed, llm: false, filter: None, sort: None, use_vm: false }
+        Evolver { rng_seed: seed, llm: false, filter: None, sort: None, use_vm: false, tend: false }
     }
 
     /// Deterministic evolution: same seed + same garden = same outcomes.
@@ -64,6 +67,12 @@ impl Evolver {
 
         for cycle in 1..=cycles {
             events.push(EvolutionEvent::CycleStart(cycle));
+            if self.tend {
+                let (healed, repaired) = self.tend_garden(veldt);
+                if healed + repaired > 0 {
+                    events.push(EvolutionEvent::Tended { healed, repaired });
+                }
+            }
             let pre = veldt.functions.values().flatten()
                 .map(|e| e.fitness).fold(f64::NEG_INFINITY, f64::max);
 
@@ -1157,6 +1166,7 @@ pub enum EvolutionEvent {
     ProbeGenerated { name: String, niche: String },
     CloneRejected { name: String },
     LintRejected { name: String, warnings: Vec<String> },
+    Tended { healed: usize, repaired: usize },
     Mutate { name: String, parent_id: u32, new_id: u32, desc: String },
     Trial { name: String, id: u32, healthy: bool, score: f64, fitness: f64, parent_fitness: f64 },
     Death { name: String, id: u32, cause: String },
@@ -1177,6 +1187,10 @@ impl EvolutionEvent {
             Self::LintRejected { name, warnings } => {
                 format!("  [LINT]   {} — child introduces real-bug warnings, not born ({})",
                         name, warnings.join("; "))
+            }
+            Self::Tended { healed, repaired } => {
+                format!("  [TEND]   garden tended — {} healed, {} dead-code repairs",
+                        healed, repaired)
             }
             Self::Mutate { name, parent_id, new_id, desc } => {
                 format!("  [MUTATE] {}#{} → {}#{} ({})", name, parent_id, name, new_id, desc)
@@ -1355,6 +1369,39 @@ fn mutation_name(m: Mutation) -> &'static str {
         Mutation::ConstProp => "constant propagation",
         Mutation::HoistInvariant => "loop-invariant hoisting",
         Mutation::EarlyExit => "early-exit fusion",
+    }
+}
+
+impl Evolver {
+    /// The --tend pass: heal every sick variant (healer-merge +
+    /// mechanical repair first), then run the dead-code repairs on
+    /// all bodies. Returns (healed, repaired) counts.
+    fn tend_garden(&self, veldt: &mut Veldt) -> (usize, usize) {
+        let snapshot: Vec<(String, u32, bool)> = veldt.functions.iter()
+            .flat_map(|(n, vs)| vs.iter()
+                .map(|e| (n.clone(), e.id, matches!(e.health, Health::Sick(_)))))
+            .collect();
+        let (mut healed, mut repaired) = (0usize, 0usize);
+        for (name, id, was_sick) in snapshot {
+            let mut entry = veldt.functions[&name].iter()
+                .find(|e| e.id == id).cloned().unwrap();
+            let mut changed = false;
+            if was_sick && HealthChecker::heal(&mut entry, veldt) {
+                healed += 1;
+                changed = true;
+            }
+            let mut c = HealthChecker::repair_dead_tail(&mut entry.body);
+            c |= HealthChecker::repair_dead_lets(&mut entry.body);
+            if c { repaired += 1; changed = true; }
+            if changed {
+                if let Some(vs) = veldt.functions.get_mut(&name) {
+                    for e in vs.iter_mut() {
+                        if e.id == id { *e = entry.clone(); break; }
+                    }
+                }
+            }
+        }
+        (healed, repaired)
     }
 }
 

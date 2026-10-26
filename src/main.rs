@@ -2400,6 +2400,7 @@ fn main() {
             let mut evolver = evolve::Evolver::new();
             evolver.llm = args.iter().any(|a| a == "--llm");
             evolver.use_vm = args.iter().any(|a| a == "--vm");
+            evolver.tend = args.iter().any(|a| a == "--tend");
             evolver.filter = args.iter().position(|a| a == "--filter")
                 .and_then(|p| args.get(p + 1)).cloned();
             evolver.sort = args.iter().position(|a| a == "--sort")
