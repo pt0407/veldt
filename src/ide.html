@@ -830,8 +830,10 @@ function renderGarden() {
     if (v.trust === 'Canonical') canon++; else if (v.trust === 'Established') estab++; else seed++;
   }));
   if (seed + estab + canon > 0) {
+    const probes = (gardenData.probes || []).reduce((a, p) => a + (p.count || 0), 0);
     html += `<div style="font-size:11px;opacity:.75;padding:4px 0;border-bottom:1px solid #333;margin-bottom:6px">` +
-      `trust ladder: <b style="color:#8ef">${seed}</b> seedling → <b style="color:#fd0">${estab}</b> established → <b style="color:#6f4">${canon}</b> canonical</div>`;
+      `trust ladder: <b style="color:#8ef">${seed}</b> seedling → <b style="color:#fd0">${estab}</b> established → <b style="color:#6f4">${canon}</b> canonical` +
+      ` &nbsp;·&nbsp; ${seed + estab + canon} variants · ${probes} probes</div>`;
   }
 
   // Functions — rendered as lineage trees using parent edges
