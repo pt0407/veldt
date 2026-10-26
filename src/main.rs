@@ -3833,6 +3833,11 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                                     out.push(format!("match pattern {} is bound to a container — inline it", v));
                                     break;
                                 }
+                                // Var pattern bound to a binop — the pattern is a computed expr
+                                if n == v && matches!(pe, Expr::BinOp(..)) {
+                                    out.push(format!("match pattern {} is bound to a computed expr — inline it", v));
+                                    break;
+                                }
                             }
                         }
                     }
