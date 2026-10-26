@@ -974,6 +974,18 @@ fn print_stats(veldt: &veldt::Veldt) {
             .map(|(n, u)| format!("{}:{}", n, u)).collect();
         println!("usage: {}", line.join(" "));
     }
+    // death causes — why variants die
+    let mut causes: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for o in &veldt.obituaries {
+        *causes.entry(o.cause_of_death.clone()).or_default() += 1;
+    }
+    let mut cause_list: Vec<(String, usize)> = causes.into_iter().collect();
+    cause_list.sort_by(|a, b| b.1.cmp(&a.1));
+    if !cause_list.is_empty() {
+        let line: Vec<String> = cause_list.iter().take(6)
+            .map(|(c, n)| format!("{}:{}", c, n)).collect();
+        println!("death causes: {}", line.join(" "));
+    }
     // fitness trend — peak per run, is the garden improving?
     if veldt.fitness_history.len() >= 2 {
         let trend: Vec<String> = veldt.fitness_history.iter()
