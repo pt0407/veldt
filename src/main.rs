@@ -3382,6 +3382,15 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                     if outer.contains(v.as_str()) && v != name {
                         out.push(format!("let {} = {} — copies a binding, could reuse", name, v));
                     }
+                    // let a = b where b was let-bound to a literal — alias for a constant
+                    for (_, s) in stmts.iter().enumerate().take(i) {
+                        if let Stmt::Let(n, pe) = s {
+                            if n == v && matches!(pe, Expr::Int(_) | Expr::Str(_) | Expr::Bool(_) | Expr::Null) {
+                                out.push(format!("let {} = {} — {} is a constant alias", name, v, v));
+                                break;
+                            }
+                        }
+                    }
                 }
             }
             Stmt::Assign(name, e) => {
