@@ -10,4 +10,5 @@ pub mod lexer;
 pub mod parser;
 pub mod veldt;
 pub mod vm;
+#[cfg(feature = "smt")]
 pub mod smt;

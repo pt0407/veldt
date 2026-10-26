@@ -1,6 +1,7 @@
 // Veldt CLI — main entry point
 
 mod jit;
+#[cfg(feature = "smt")]
 mod smt;
 mod agent;
 mod ast;
@@ -5417,19 +5418,27 @@ fn verify_family(name: &str, args: &[String]) {
     // counterexample. Falls back to the bounded sweep when a variant
     // uses ops we don't encode (strings, floats, loops, match).
     if args.iter().any(|a| a == "--exact") {
-        match smt::verify_exact(name) {
-            Ok(Some((id, cex))) => {
-                println!("{}#{}: PROVABLY DIVERGENT — counterexample: {}",
-                         name, id, cex.join(", "));
+        #[cfg(feature = "smt")]
+        {
+            match smt::verify_exact(name) {
+                Ok(Some((id, cex))) => {
+                    println!("{}#{}: PROVABLY DIVERGENT — counterexample: {}",
+                             name, id, cex.join(", "));
+                }
+                Ok(None) => {
+                    println!("{}: PROVABLY EQUIVALENT — all variants agree", name);
+                }
+                Err(why) => {
+                    println!("{}: bails to bounded ({})", name, why);
+                }
             }
-            Ok(None) => {
-                println!("{}: PROVABLY EQUIVALENT — all variants agree", name);
-            }
-            Err(why) => {
-                println!("{}: bails to bounded ({})", name, why);
-            }
+            return;
         }
-        return;
+        #[cfg(not(feature = "smt"))]
+        {
+            eprintln!("{}: --exact requires the smt feature (cargo build --features smt — needs a C++ toolchain + cmake for bundled z3)", name);
+            return;
+        }
     }
     let bound: i64 = args.iter().position(|a| a == "--domain")
         .and_then(|i| args.get(i + 1))
