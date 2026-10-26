@@ -2220,6 +2220,14 @@ fn print_stats(veldt: &veldt::Veldt) {
                         println!("    {}#{} — {} attempt(s)", e.name, e.id, e.healing_attempts.len());
                     }
                 }
+                // staleness — last_used distribution (recency profile)
+                let lus: Vec<u64> = vs.iter().map(|e| e.last_used).collect();
+                if !lus.is_empty() {
+                    let min = lus.iter().min().unwrap();
+                    let max = lus.iter().max().unwrap();
+                    let stale = veldt.run_count.saturating_sub(*max);
+                    println!("  last_used: {} – {} ({} runs stale)", min, max, stale);
+                }
             }
         }
         if veldt.fitness_history.len() >= 2 {
