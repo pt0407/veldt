@@ -534,10 +534,24 @@ fn main() {
                 let fix = args.iter().any(|a| a == "--fix");
                 let verify = args.iter().any(|a| a == "--verify");
                 let bugs_only = args.iter().any(|a| a == "--bugs");
+                let watch = args.iter().any(|a| a == "--watch");
+                let mut last_mtime = None;
+                loop {
                 let mut v = veldt::Veldt::new();
                 if v.load().is_err() {
                     eprintln!("no garden found (nothing to lint)");
                     process::exit(1);
+                }
+                if watch {
+                    let gp = v.garden_path.join("veldt.json");
+                    let mtime = std::fs::metadata(&gp)
+                        .and_then(|m| m.modified()).ok();
+                    if last_mtime == mtime {
+                        std::thread::sleep(std::time::Duration::from_secs(2));
+                        continue;
+                    }
+                    last_mtime = mtime;
+                    print!("\x1b[2J\x1b[H");
                 }
                 let mut total = 0usize;
                 let mut flagged = 0usize;
@@ -614,6 +628,9 @@ fn main() {
                     }
                     println!("garden lint — {} warnings across {} variant(s)",
                              total, flagged);
+                }
+                if !watch { break; }
+                std::thread::sleep(std::time::Duration::from_secs(2));
                 }
                 return;
             }
