@@ -799,3 +799,8 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   ~59 strict checks. New: match else that just exits —
   the else arm adds no handling. stats --family niche
   coverage shows a per-niche avg-score sparkline.
+- [Devin] Breakdown sparks complete (HEAD post-0cebd0a):
+  turnover/diversity/population/lifecycle/workload show
+  2-4 value spark splits; sick errors dedupes unique
+  errors + shows a per-error-count sparkline. Every
+  count/breakdown in stats --family now has a shape.
