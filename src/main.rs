@@ -2229,8 +2229,17 @@ fn print_stats(veldt: &veldt::Veldt) {
             .map(|(n, vs)| (n, vs.iter().map(|e| e.fitness)
                 .fold(f64::NEG_INFINITY, f64::max))).collect();
         fam.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        for (n, f) in fam.iter().take(5) {
-            println!("  {} peak {:.2}", n, f);
+        let top_n = std::env::args().skip_while(|a| a != "--top" && a != "--detail")
+            .nth(1).and_then(|s| s.parse::<usize>().ok()).unwrap_or(5);
+        println!("  {:<16} {:>4} {:>4} {:>6} {:>6} {:>6}", "family", "vars", "hlth", "peak", "probe", "death");
+        for (n, _) in fam.iter().take(top_n) {
+            if let Some(vs) = veldt.functions.get(*n) {
+                let hlth = vs.iter().filter(|e| matches!(e.health, Health::Healthy)).count();
+                let peak = vs.iter().map(|e| e.fitness).fold(f64::NEG_INFINITY, f64::max);
+                let probes = veldt.probes.get(*n).map(|p| p.len()).unwrap_or(0);
+                let deaths = veldt.obituaries.iter().filter(|o| o.name == **n).count();
+                println!("  {:<16} {:>4} {:>4} {:>6.2} {:>6} {:>6}", n, vs.len(), hlth, peak, probes, deaths);
+            }
         }
         // --family --top — variant leaderboard within the scoped family
         // (--sort <field> picks the leaderboard's sort key; default fitness)
