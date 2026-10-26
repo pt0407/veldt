@@ -3395,6 +3395,13 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
                         out.push("match arm after a _ pattern — unreachable".into());
                     }
                 }
+                // all arms identical — dead match, could be a single statement
+                if arms.len() > 1 && els.is_none() {
+                    let first = &arms[0].1;
+                    if arms.iter().all(|(_, b)| b == first) {
+                        out.push("all match arms are identical — dead match".into());
+                    }
+                }
                 for (_, body) in arms { lint_block(body, out); }
                 if let Some(e) = els { lint_block(e, out); }
             }
