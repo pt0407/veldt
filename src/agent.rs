@@ -241,6 +241,11 @@ pub fn respond(task: &str, editor_source: &str, veldt: &mut Veldt) -> AgentRespo
         let (report, _) = bench_report(veldt);
         return plain(&report);
     }
+    if has(&["stats", "stat", "how is", "how's", "doing", "health of", "tell me about", "about"]) {
+        if find_lineage(&words, veldt).is_some() {
+            return family_intent(&words, veldt);
+        }
+    }
     if has(&["garden", "status", "alive", "what's growing", "what is growing", "what have you", "ecosystem"]) {
         return status_intent(veldt);
     }
@@ -574,6 +579,52 @@ fn find_lineage<'a>(words: &[&'a str], veldt: &Veldt) -> Option<String> {
         }
     }
     None
+}
+
+/// Per-family drill-down — the dashboard summary for one lineage.
+fn family_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
+    let name = match find_lineage(words, veldt) {
+        Some(n) => n,
+        None => return plain("Which family? e.g. \"stats fib\" or \"how is fib doing\"."),
+    };
+    let vs = match veldt.functions.get(&name) {
+        Some(v) if !v.is_empty() => v,
+        _ => return plain(&format!("No lineage called '{}' lives in the garden.", name)),
+    };
+    let healthy = vs.iter().filter(|e| matches!(e.health, Health::Healthy)).count();
+    let sick = vs.iter().filter(|e| matches!(e.health, Health::Sick(_))).count();
+    let dying = vs.len() - healthy - sick;
+    let canon = vs.iter().filter(|e| matches!(e.trust, crate::veldt::Trust::Canonical)).count();
+    let estab = vs.iter().filter(|e| matches!(e.trust, crate::veldt::Trust::Established)).count();
+    let peak = vs.iter().map(|e| e.fitness).fold(f64::NEG_INFINITY, f64::max);
+    let avg = vs.iter().map(|e| e.fitness).sum::<f64>() / vs.len() as f64;
+    let probes = veldt.probes.get(&name).map(|p| p.len()).unwrap_or(0);
+    let deaths = veldt.obituaries.iter().filter(|o| o.name == name).count();
+    let traces = veldt.traces.get(&name).map(|t| t.len()).unwrap_or(0);
+    let mut niches: Vec<&String> = vs.iter()
+        .flat_map(|e| e.niche_scores.keys()).collect();
+    niches.sort(); niches.dedup();
+    let mut origins: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for e in vs.iter() {
+        *origins.entry(e.origin.split(' ').next().unwrap_or("seed")).or_insert(0) += 1;
+    }
+    let champ = veldt.get_fittest_variant(&name).map(|e| e.id).unwrap_or(0);
+    let weak = vs.iter().min_by(|a, b| a.fitness.partial_cmp(&b.fitness)
+        .unwrap_or(std::cmp::Ordering::Equal)).map(|e| e.id).unwrap_or(0);
+    let mut text = format!("{} — {} variants ({} healthy, {} sick, {} dying)\n",
+        name, vs.len(), healthy, sick, dying);
+    text.push_str(&format!("  fitness: peak {:.2} avg {:.2} | champion #{} weakest #{}\n",
+        peak, avg, champ, weak));
+    text.push_str(&format!("  trust: {} canonical, {} established, {} seedling\n",
+        canon, estab, vs.len() - canon - estab));
+    text.push_str(&format!("  {} probes, {} traces, {} deaths\n", probes, traces, deaths));
+    if !niches.is_empty() {
+        text.push_str(&format!("  niches: {}\n", niches.iter().map(|n| n.as_str())
+            .collect::<Vec<_>>().join(", ")));
+    }
+    text.push_str(&format!("  origins: {}", origins.iter()
+        .map(|(o, c)| format!("{}×{}", o, c)).collect::<Vec<_>>().join(", ")));
+    plain(&text)
 }
 
 /// Parse a bare word that looks like a function name (optionally name#N).
