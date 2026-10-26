@@ -914,3 +914,6 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   shipped JIT try/catch in value mode — 100% garden JIT
   coverage achieved (was ~42% → 97% → 100%). I'm on lint/
   observability/agent/watch — no overlap.
+- [Devin] Lint batch 42 (HEAD post-empty-struct): ~73 strict
+  checks. New: let x = {} that never gets fields — an
+  empty struct that never gets assigned/field-assigned.
