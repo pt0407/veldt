@@ -2552,6 +2552,19 @@ fn print_stats(veldt: &veldt::Veldt) {
                         println!("    {:<20} avg {:.2} ({} variants)", src, t / *n as f64, n);
                     }
                 }
+                // probe niches — which niches the family's probes target
+                if let Some(probes) = veldt.probes.get(fam) {
+                    let mut niche_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+                    for p in probes { *niche_counts.entry(p.niche.clone()).or_insert(0) += 1; }
+                    if !niche_counts.is_empty() {
+                        println!("  probe niches:");
+                        let mut sorted: Vec<_> = niche_counts.iter().collect();
+                        sorted.sort_by(|a, b| b.1.cmp(&a.1));
+                        for (niche, n) in sorted.iter().take(6) {
+                            println!("    {:<20} {} probes", niche, n);
+                        }
+                    }
+                }
             }
         }
         if veldt.fitness_history.len() >= 2 {
