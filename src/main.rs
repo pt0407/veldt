@@ -2420,8 +2420,22 @@ fn verify_family(name: &str, args: &[String]) {
     for v in &variants {
         if v.id == fittest.id { continue; }
         let mut diverge: Option<String> = None;
-        'outer: for combo in domain.iter().copied()
-            .map(|x| vec![x; arity.max(1)]) {
+        // proper cross-product: every arg ranges independently for
+        // arity<=2 (441 checks); same-value fill for higher arities
+        let combos: Vec<Vec<i64>> = if arity <= 2 {
+            let mut c = Vec::new();
+            for a in &domain {
+                if arity == 1 { c.push(vec![*a]); }
+                else {
+                    for b in &domain { c.push(vec![*a, *b]); }
+                }
+            }
+            c
+        } else {
+            domain.iter().map(|x| vec![*x; arity]).collect()
+        };
+        let n_combos = combos.len();
+        'outer: for combo in combos {
             // eval quietly — side-effect prints pollute the report
             let a = interp.call_function(name, Some(v.id), combo.iter().map(|n| crate::interpreter::Value::Int(*n)).collect());
             let b = interp.call_function(name, Some(fittest.id), combo.iter().map(|n| crate::interpreter::Value::Int(*n)).collect());
@@ -2441,7 +2455,7 @@ fn verify_family(name: &str, args: &[String]) {
         match diverge {
             Some(d) => println!("  {}#{}: DIVERGES {}", name, v.id, d),
             None => println!("  {}#{}: bounded-verified ({} checks)",
-                             name, v.id, domain.len().pow(arity.max(1) as u32)),
+                             name, v.id, n_combos),
         }
     }
     println!("({} calls evaluated)", checked);
