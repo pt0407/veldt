@@ -63,6 +63,8 @@ impl Evolver {
 
         for cycle in 1..=cycles {
             events.push(EvolutionEvent::CycleStart(cycle));
+            let pre = veldt.functions.values().flatten()
+                .map(|e| e.fitness).fold(f64::NEG_INFINITY, f64::max);
 
             let budget = 10 + (veldt.run_count * 2);
             let mut spent = 0;
@@ -115,7 +117,7 @@ impl Evolver {
             if candidates.is_empty() {
                 events.push(EvolutionEvent::NoCandidates);
                 events.push(EvolutionEvent::CycleEnd {
-                    cycle, mutations: 0, births: 0, deaths: 0,
+                    cycle, mutations: 0, births: 0, deaths: 0, delta: 0.0,
                 });
                 continue;
             }
@@ -276,11 +278,14 @@ impl Evolver {
                 });
             }
 
+            let post = veldt.functions.values().flatten()
+                .map(|e| e.fitness).fold(f64::NEG_INFINITY, f64::max);
             events.push(EvolutionEvent::CycleEnd {
                 cycle,
                 mutations,
                 births,
                 deaths: obituaries.len(),
+                delta: post - pre,
             });
         }
 
@@ -1123,7 +1128,7 @@ pub enum EvolutionEvent {
     Mutate { name: String, parent_id: u32, new_id: u32, desc: String },
     Trial { name: String, id: u32, healthy: bool, score: f64, fitness: f64, parent_fitness: f64 },
     Death { name: String, id: u32, cause: String },
-    CycleEnd { cycle: usize, mutations: usize, births: usize, deaths: usize },
+    CycleEnd { cycle: usize, mutations: usize, births: usize, deaths: usize, delta: f64 },
 }
 
 impl EvolutionEvent {
@@ -1151,9 +1156,9 @@ impl EvolutionEvent {
             Self::Death { name, id, cause } => {
                 format!("  [CULL]   {}#{} died — {}", name, id, cause)
             }
-            Self::CycleEnd { cycle, mutations, births, deaths } => {
-                format!("[EVOLVE] Cycle {} complete: {} mutations, {} births, {} deaths",
-                    cycle, mutations, births, deaths)
+            Self::CycleEnd { cycle, mutations, births, deaths, delta } => {
+                format!("[EVOLVE] Cycle {} complete: {} mutations, {} births, {} deaths  Δ {:+.2}",
+                    cycle, mutations, births, deaths, delta)
             }
         }
     }
