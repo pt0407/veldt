@@ -197,14 +197,29 @@ fn main() {
             // parse-only — no exec; exits 1 on any lex/parse error
             let source = std::fs::read_to_string(&args[2])
                 .unwrap_or_else(|e| { eprintln!("Error reading {}: {}", args[2], e); process::exit(1); });
+            let json_out = args.iter().any(|a| a == "--json");
+            let report_err = |kind: &str, e: &dyn std::fmt::Display| {
+                if json_out {
+                    println!("{}", serde_json::json!({"file": args[2], "ok": false, "error": format!("{}: {}", kind, e)}));
+                } else {
+                    eprintln!("{}: {}", kind, e);
+                }
+                process::exit(1);
+            };
             let mut lx = lexer::Lexer::new(&source);
             match lx.tokenize() {
-                Err(e) => { eprintln!("Lex error: {}", e); process::exit(1); }
+                Err(e) => report_err("Lex error", &e),
                 Ok(toks) => {
                     let mut p = parser::Parser::new_with_lines(toks, lx.token_lines.clone());
                     match p.parse_program() {
-                        Err(e) => { eprintln!("Parse error: {}", e); process::exit(1); }
-                        Ok(stmts) => println!("{} — ok ({} statements)", args[2], stmts.len()),
+                        Err(e) => report_err("Parse error", &e),
+                        Ok(stmts) => {
+                            if json_out {
+                                println!("{}", serde_json::json!({"file": args[2], "ok": true, "statements": stmts.len()}));
+                            } else {
+                                println!("{} — ok ({} statements)", args[2], stmts.len());
+                            }
+                        }
                     }
                 }
             }
