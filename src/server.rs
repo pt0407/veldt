@@ -21,6 +21,11 @@ pub async fn start_server(port: u16) {
     if veldt.load().is_err() {
         eprintln!("Starting with empty veldt");
     }
+    // --vm — every code-run through the fast engine for this session
+    if std::env::args().any(|a| a == "--vm") {
+        veldt.prefer_vm = true;
+        eprintln!("[server] prefer_vm — all evaluate paths on the bytecode VM + JIT");
+    }
 
     let state = Arc::new(AppState {
         veldt: Mutex::new(veldt),
