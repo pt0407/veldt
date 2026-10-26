@@ -1631,6 +1631,112 @@ impl Interpreter {
                 }
                 Ok(Some(Value::Str(out.into())))
             }
+            "canvas_print" => {
+                let Some(Value::Dict(d)) = args.get(0) else { return Err("canvas_print(c) expects a canvas".into()) };
+                let Some(Value::List(rows)) = d.get("cells") else { return Err("canvas: no cells".into()) };
+                for r in rows {
+                    if let Value::List(row) = r {
+                        for c in row { if let Value::Str(s) = c { print!("{}", s); } }
+                        println!();
+                    }
+                }
+                Ok(Some(Value::Null))
+            }
+            "sprite" => {
+                // sprite(c, x, y, lines) — draw a multi-line string sprite
+                let (c, x0, y0, lines) = match (args.get(0), args.get(1), args.get(2), args.get(3)) {
+                    (Some(Value::Dict(d)), Some(Value::Int(x)), Some(Value::Int(y)), Some(Value::Str(s)))
+                        => (d.clone(), *x, *y, s.clone()),
+                    _ => return Err("sprite(c, x, y, str) expects dict, x, y, str".into()),
+                };
+                let Some(Value::List(rows)) = c.get("cells") else { return Err("canvas: no cells".into()) };
+                let mut rows2 = rows.clone();
+                for (dy, line) in lines.lines().enumerate() {
+                    let yy = (y0 + dy as i64) as usize;
+                    if yy >= rows2.len() { break; }
+                    if let Value::List(r) = &rows2[yy] {
+                        let mut nr = r.clone();
+                        for (dx, ch) in line.chars().enumerate() {
+                            let xx = (x0 + dx as i64) as usize;
+                            if xx < nr.len() { nr[xx] = Value::Str(ch.to_string().into()); }
+                        }
+                        rows2[yy] = Value::List(nr);
+                    }
+                }
+                let mut d = c.clone();
+                d.insert("cells".to_string(), Value::List(rows2));
+                Ok(Some(Value::Dict(d)))
+            }
+            "choice" => {
+                let Value::List(items) = args.get(0).cloned().unwrap_or(Value::Null) else {
+                    return Err("choice(list) expects a list".into())
+                };
+                if items.is_empty() { return Ok(Some(Value::Null)); }
+                let mut x = self.rng_state;
+                x ^= x << 13; x ^= x >> 7; x ^= x << 17;
+                self.rng_state = x;
+                Ok(Some(items[(x % items.len() as u64) as usize].clone()))
+            }
+            "randf" => {
+                let mut x = self.rng_state;
+                x ^= x << 13; x ^= x >> 7; x ^= x << 17;
+                self.rng_state = x;
+                Ok(Some(Value::Float((x % 1_000_000) as f64 / 1_000_000.0)))
+            }
+            "rand_range" => {
+                let (lo, hi) = match (args.get(0), args.get(1)) {
+                    (Some(Value::Int(lo)), Some(Value::Int(hi))) => (*lo, *hi),
+                    _ => return Err("rand_range(lo, hi) expects two ints".into()),
+                };
+                if hi <= lo { return Ok(Some(Value::Int(lo))); }
+                let mut x = self.rng_state;
+                x ^= x << 13; x ^= x >> 7; x ^= x << 17;
+                self.rng_state = x;
+                Ok(Some(Value::Int(lo + (x % ((hi - lo + 1) as u64)) as i64)))
+            }
+            "dice" => {
+                let (n, sides) = match (args.get(0), args.get(1)) {
+                    (Some(Value::Int(n)), Some(Value::Int(s))) => (*n as usize, *s as i64),
+                    _ => return Err("dice(n, sides) expects two ints".into()),
+                };
+                let mut total = 0i64;
+                for _ in 0..n {
+                    let mut x = self.rng_state;
+                    x ^= x << 13; x ^= x >> 7; x ^= x << 17;
+                    self.rng_state = x;
+                    total += 1 + (x % (sides.max(1) as u64)) as i64;
+                }
+                Ok(Some(Value::Int(total)))
+            }
+            "balance_compare" => {
+                // balance_compare(f1, f2, trials) — A/B two strategies, f returns
+                // a score; report which wins more often.
+                let (f1, f2, trials) = match (args.get(0), args.get(1), args.get(2)) {
+                    (Some(f1 @ Value::Closure(_, _, _)), Some(f2 @ Value::Closure(_, _, _)), Some(Value::Int(t)))
+                        => (f1, f2, *t as usize),
+                    _ => return Err("balance_compare(f1, f2, trials) expects two closures + int".into()),
+                };
+                let (mut a_wins, mut b_wins, mut draws) = (0usize, 0usize, 0usize);
+                for _ in 0..trials {
+                    let a = self.call_closure_value(f1, vec![])?;
+                    let b = self.call_closure_value(f2, vec![])?;
+                    let score_of = |v: &Value| match v {
+                        Value::Int(i) => *i as f64,
+                        Value::Float(f) => *f,
+                        Value::Dict(d) => d.get("score").and_then(|v| match v {
+                            Value::Int(i) => Some(*i as f64), Value::Float(f) => Some(*f), _ => None }).unwrap_or(0.0),
+                        _ => 0.0,
+                    };
+                    let (sa, sb) = (score_of(&a), score_of(&b));
+                    if sa > sb { a_wins += 1; } else if sb > sa { b_wins += 1; } else { draws += 1; }
+                }
+                let mut out = im::HashMap::new();
+                out.insert("a_wins".to_string(), Value::Int(a_wins as i64));
+                out.insert("b_wins".to_string(), Value::Int(b_wins as i64));
+                out.insert("draws".to_string(), Value::Int(draws as i64));
+                out.insert("winner".to_string(), Value::Str(if a_wins > b_wins { "a".into() } else if b_wins > a_wins { "b".into() } else { "draw".into() }));
+                Ok(Some(Value::Dict(out)))
+            }
             "canvas_clear" => {
                 let (d, ch) = match (args.get(0), args.get(1)) {
                     (Some(Value::Dict(d)), Some(Value::Str(ch))) => (d.clone(), ch.clone()),
