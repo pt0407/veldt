@@ -1943,7 +1943,10 @@ fn main() {
                 eprintln!("Error loading veldt: {}", e);
                 process::exit(1);
             }
-            let dry = args.iter().any(|a| a == "--dry");
+            let dry = args.iter().any(|a| a == "--dry" || a == "--dry-run");
+            if dry {
+                eprintln!("[EVOLVE] dry run — cycle runs in memory, garden file unchanged");
+            }
             if dry { eprintln!("[EVOLVE] dry run — changes not persisted"); }
             let fam_scope = args.iter().position(|a| a == "--family")
                 .and_then(|p| args.get(p + 1));
