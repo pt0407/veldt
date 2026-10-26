@@ -9,6 +9,7 @@ use std::cell::RefCell;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[repr(C, u8)]
 pub enum Value {
     Int(i64),
     Float(f64),

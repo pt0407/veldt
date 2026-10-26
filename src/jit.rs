@@ -98,6 +98,8 @@ impl JitEngine {
         jb.symbol("veldt_rt_nullbox", veldt_rt_nullbox as *const u8);
         jb.symbol("veldt_rt_capture", veldt_rt_capture as *const u8);
         jb.symbol("veldt_rt_callvar", veldt_rt_callvar as *const u8);
+        jb.symbol("veldt_rt_intbox", veldt_rt_intbox as *const u8);
+        jb.symbol("veldt_rt_boolbox", veldt_rt_boolbox as *const u8);
         let mut module = JITModule::new(jb);
         let rt = RtIds::declare(&mut module);
         Some(JitEngine {
@@ -875,9 +877,74 @@ impl JitEngine {
                             Instr::Gt => 8, Instr::Le => 9, _ => 10,
                         };
                         let o = b.ins().iconst(types::I64, op);
-                                                let v = ecall!(rt.binop, rtv, o, l, r)
-                            .unwrap_or_else(|| b.ins().iconst(types::I64, 0));
-                        catch_check!(v);
+                        // specialization: Int/Int ops inline — tag byte 0
+                        // (Int) + i64 payload at offset 8 (#[repr(C,u8)]
+                        // union). Skips the helper's match + dispatch.
+                        let can_inline = matches!(chunk.code[pc],
+                            Instr::Add|Instr::Sub|Instr::Mul|Instr::Eq|
+                            Instr::Neq|Instr::Lt|Instr::Gt|Instr::Le|Instr::Ge);
+                        let v = if can_inline {
+                            let lt = b.ins().load(types::I8,
+                                cranelift_codegen::ir::MemFlagsData::trusted(), l, 0);
+                            let rtg = b.ins().load(types::I8,
+                                cranelift_codegen::ir::MemFlagsData::trusted(), r, 0);
+                            let z = b.ins().iconst(types::I8, 0);
+                            let li = b.ins().icmp(IntCC::Equal, lt, z);
+                            let ri = b.ins().icmp(IntCC::Equal, rtg, z);
+                            let both = b.ins().band(li, ri);
+                            let fb = b.create_block();
+                            let hb = b.create_block();
+                            let mb = b.create_block();
+                            let arg = b.append_block_param(mb, types::I64);
+                            b.ins().brif(both, fb, &[], hb, &[]);
+                            b.seal_block(fb); b.seal_block(hb);
+                            // fast: native op on the int payloads
+                            b.switch_to_block(fb);
+                            let a = b.ins().load(types::I64,
+                                cranelift_codegen::ir::MemFlagsData::trusted(), l, 8);
+                            let c = b.ins().load(types::I64,
+                                cranelift_codegen::ir::MemFlagsData::trusted(), r, 8);
+                            let is_cmp = matches!(chunk.code[pc],
+                                Instr::Eq|Instr::Neq|Instr::Lt|Instr::Gt|
+                                Instr::Le|Instr::Ge);
+                            let fv = if is_cmp {
+                                let cc = match chunk.code[pc] {
+                                    Instr::Eq => IntCC::Equal,
+                                    Instr::Neq => IntCC::NotEqual,
+                                    Instr::Lt => IntCC::SignedLessThan,
+                                    Instr::Gt => IntCC::SignedGreaterThan,
+                                    Instr::Le => IntCC::SignedLessThanOrEqual,
+                                    _ => IntCC::SignedGreaterThanOrEqual,
+                                };
+                                let c8 = b.ins().icmp(cc, a, c);
+                                let c64 = b.ins().uextend(types::I64, c8);
+                                ecall!(rt.boolbox, rtv, c64)
+                                    .unwrap_or_else(|| b.ins().iconst(types::I64, 0))
+                            } else {
+                                let res = match chunk.code[pc] {
+                                    Instr::Add => b.ins().iadd(a, c),
+                                    Instr::Sub => b.ins().isub(a, c),
+                                    _ => b.ins().imul(a, c),
+                                };
+                                ecall!(rt.intbox, rtv, res)
+                                    .unwrap_or_else(|| b.ins().iconst(types::I64, 0))
+                            };
+                            b.ins().jump(mb, &[cranelift_codegen::ir::BlockArg::Value(fv)]);
+                            // slow: helper covers every other type pair
+                            b.switch_to_block(hb);
+                            let hv = ecall!(rt.binop, rtv, o, l, r)
+                                .unwrap_or_else(|| b.ins().iconst(types::I64, 0));
+                            catch_check!(hv);
+                            b.ins().jump(mb, &[cranelift_codegen::ir::BlockArg::Value(hv)]);
+                            b.switch_to_block(mb);
+                            b.seal_block(mb);
+                            arg
+                        } else {
+                            let v = ecall!(rt.binop, rtv, o, l, r)
+                                .unwrap_or_else(|| b.ins().iconst(types::I64, 0));
+                            catch_check!(v);
+                            v
+                        };
                         stack.push(v);
                     }
                     Instr::Neg | Instr::Not => {
@@ -1604,6 +1671,14 @@ pub unsafe extern "C" fn veldt_rt_callvar(rt: *mut JitRt,
     }
 }
 #[no_mangle]
+pub unsafe extern "C" fn veldt_rt_intbox(rt: *mut JitRt, i: i64) -> *mut Value {
+    mk(rt, Value::Int(i))
+}
+#[no_mangle]
+pub unsafe extern "C" fn veldt_rt_boolbox(rt: *mut JitRt, i: i64) -> *mut Value {
+    mk(rt, Value::Bool(i != 0))
+}
+#[no_mangle]
 pub unsafe extern "C" fn veldt_rt_nullbox(rt: *mut JitRt) -> *mut Value {
     mk(rt, Value::Null)
 }
@@ -1636,6 +1711,7 @@ struct RtIds {
     iterpop: FuncId, append: FuncId, insert: FuncId, insertdyn: FuncId,
     fieldset: FuncId, take_err: FuncId, nullbox: FuncId,
     capture: FuncId, callvar: FuncId,
+    intbox: FuncId, boolbox: FuncId,
 }
 
 impl RtIds {
@@ -1686,6 +1762,8 @@ impl RtIds {
             nullbox: d(m, "veldt_rt_nullbox", 1, true),
             capture: d(m, "veldt_rt_capture", 3, true),
             callvar: d(m, "veldt_rt_callvar", 3, true),
+            intbox: d(m, "veldt_rt_intbox", 2, true),
+            boolbox: d(m, "veldt_rt_boolbox", 2, true),
         }
     }
 }
