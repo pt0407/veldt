@@ -491,6 +491,7 @@
     <button class="btn" id="swarmBtn" title="bidirectional genome gossip with a peer">Swarm</button>
     <button class="btn" id="playBtn" title="run a bundled game demo">Play</button>
     <button class="btn" id="statsBtn" title="garden census + histograms">Stats</button>
+    <button class="btn" id="lintBtn" title="strict-lint census across the garden">Lint</button>
     <button class="btn" id="gameBtn" title="run the editor as a game program">Game</button>
     <button class="btn danger" id="clearBtn">Clear Garden</button>
     <button class="btn primary" id="runBtn">▶ Run</button>
@@ -539,6 +540,8 @@
             <button class="chip" onclick="askAgent('surprise me')">surprise me</button>
             <button class="chip" onclick="askAgent('show fib')">show fib</button>
             <button class="chip" onclick="askAgent('tend the garden')">tend the garden</button>
+            <button class="chip" onclick="askAgent('code health')">code health</button>
+            <button class="chip" onclick="askAgent('lint fib')">lint fib</button>
             <button class="chip" onclick="askAgent('obituaries')">obituaries</button>
             <button class="chip" onclick="askAgent('what\'s alive?')">what's alive?</button>
           </div>
@@ -1295,6 +1298,15 @@ document.getElementById('statsBtn').addEventListener('click', async () => {
     `fitness by source: ${fmt(d.fitness_by_source)}\n` +
     `mutation success: ${fmt(d.mutation_success)}\n` +
     `probe coverage: ${fmt(d.probe_coverage)}` + '</pre>';
+});
+document.getElementById('lintBtn').addEventListener('click', async () => {
+  const res = await fetch(API + '/api/lint');
+  const d = await res.json();
+  const fams = (d.families || []).map(f =>
+    `  ${f.family}: ${f.warnings}w${f.defects ? ` (${f.defects} defect)` : ''}`).join('\n');
+  document.getElementById('output').innerHTML = '<pre style="color:#8ef;margin:0">' +
+    `lint: ${d.warnings} warnings · ${d.defects} defect-class\n` +
+    (fams || '  lint-clean — no warnings') + '</pre>';
 });
 document.getElementById('playBtn').addEventListener('click', async () => {
   const demo = prompt('Demo', 'dungeon');
