@@ -4118,6 +4118,7 @@ fn fuzz_family(name: &str, json: bool) {
     let mut divergences = 0u32;
     let mut probes_planted = 0u32;
     let mut divergent_cases: Vec<serde_json::Value> = Vec::new();
+    let mut group_counts: Vec<f64> = Vec::new();
     // sweep each param-position boundary value (up to 8 cases per arg slot)
     for case in 0..8 {
         // build args: boundary value for every param (any/unknown -> int)
@@ -4146,6 +4147,7 @@ fn fuzz_family(name: &str, json: bool) {
             };
             by_out.entry(out).or_default().push(v.id);
         }
+        group_counts.push(by_out.len() as f64);
         if by_out.len() > 1 {
             divergences += 1;
             if json {
@@ -4203,7 +4205,8 @@ fn fuzz_family(name: &str, json: bool) {
             "divergent_cases": divergent_cases,
         }));
     } else {
-        println!("{} boundary cases, {} divergent", cases, divergences);
+        println!("{} boundary cases, {} divergent  {}", cases, divergences,
+            spark(&group_counts));
     }
 }
 
