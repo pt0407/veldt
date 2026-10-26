@@ -44,6 +44,7 @@ pub async fn start_server(port: u16) {
         .route("/api/compare", post(compare_engines))
         .route("/api/lineage", get(lineage_family))
         .route("/api/obituaries", get(obituaries))
+        .route("/api/traces", get(traces))
         .route("/api/run", post(run_program))
         .route("/api/evolve", post(evolve))
         .route("/api/clear", post(clear_veldt))
@@ -185,6 +186,17 @@ async fn obituaries() -> Json<serde_json::Value> {
         "health": format!("{:?}", o.health), "healing": o.healing_attempts.len(),
     })).collect();
     Json(serde_json::json!({"obituaries": obits}))
+}
+
+async fn traces() -> Json<serde_json::Value> {
+    let mut veldt = veldt::Veldt::new();
+    if veldt.load().is_err() {
+        return Json(serde_json::json!({"error": "garden load failed"}));
+    }
+    let tr: Vec<serde_json::Value> = veldt.traces.iter().map(|(n, ts)| serde_json::json!({
+        "name": n, "count": ts.len(),
+    })).collect();
+    Json(serde_json::json!({"traces": tr}))
 }
 
 #[derive(Deserialize)]
