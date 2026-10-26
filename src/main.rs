@@ -3454,6 +3454,17 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                         out.push(format!("while condition {} never assigned inside the loop — likely infinite", v));
                     }
                 }
+                // while f(x) where x is never mutated — the call can't change
+                if let Expr::Call(_, _, args) = cond {
+                    for arg in args {
+                        if let Expr::Var(v) = arg {
+                            if !body.iter().any(|s| stmt_assigns(s, v)) {
+                                out.push(format!("while condition {} never assigned inside the loop — likely infinite", v));
+                                break;
+                            }
+                        }
+                    }
+                }
                 let mut inner = outer.clone();
                 for (_, n) in &bound { inner.insert((*n).clone()); }
                 lint_block(body, out, &mut inner);
