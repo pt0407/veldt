@@ -49,6 +49,7 @@ pub async fn start_server(port: u16) {
         .route("/api/niches", get(niches))
         .route("/api/usage", get(usage))
         .route("/api/trend", get(trend))
+        .route("/api/sources", get(sources))
         .route("/api/run", post(run_program))
         .route("/api/evolve", post(evolve))
         .route("/api/clear", post(clear_veldt))
@@ -257,6 +258,28 @@ async fn trend() -> Json<serde_json::Value> {
         return Json(serde_json::json!({"error": "garden load failed"}));
     }
     Json(serde_json::json!({"trend": veldt.fitness_history}))
+}
+
+async fn sources() -> Json<serde_json::Value> {
+    let mut veldt = veldt::Veldt::new();
+    if veldt.load().is_err() {
+        return Json(serde_json::json!({"error": "garden load failed"}));
+    }
+    let mut src_data: std::collections::HashMap<String, (usize, f64, usize)> =
+        std::collections::HashMap::new();
+    for vs in veldt.functions.values() {
+        for e in vs {
+            let origin = e.origin.split(' ').next().unwrap_or("seed").to_string();
+            let ent = src_data.entry(origin).or_default();
+            ent.0 += 1; ent.1 += e.fitness;
+            if e.health == crate::veldt::Health::Healthy { ent.2 += 1; }
+        }
+    }
+    let src: Vec<serde_json::Value> = src_data.iter().map(|(s, (n, f, h))| serde_json::json!({
+        "source": s, "count": n, "avg_fitness": f / (*n).max(1) as f64,
+        "healthy": h, "success_rate": *h as f64 / (*n).max(1) as f64,
+    })).collect();
+    Json(serde_json::json!({"sources": src}))
 }
 
 #[derive(Deserialize)]
