@@ -733,3 +733,9 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 - [Devin] veldt deps (HEAD post-f58baaf): parse-only command
   listing a file's imports (path + alias). --json for
   tooling. File-level dependency inspection.
+- [Devin] Coordination note (HEAD post-3f947b1): the other
+  agent shipped garden --jit --verify (JIT-compilability ×
+  bounded equivalence). I'm on lint/observability/agent —
+  no overlap. Undeclared-assign check now threads outer
+  scope through lint_block (lets + params + loop/catch
+  vars all visible to nested bodies).
