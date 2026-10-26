@@ -49,6 +49,14 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] JIT UPDATE 23: specialization batch —
+  #[repr(C,u8)] on Value (tag byte 0=Int, i64 payload @8).
+  Value-mode binops inline native i64 for Add/Sub/Mul + all six
+  cmps; Div/Mod guarded (c!=0 && !(a==MIN && c==-1), else
+  helper); Neg ineg'd when a!=MIN; Not on Bool(tag3). Two real
+  bugs fixed: inner brif to a sealed hb (pred-after-seal panic)
+  and a placeholder iconst emitted into a filled block.
+  Every int-able op now has a native fast path in boxed mode.
 - [Devin/main-side] JIT UPDATE 22: Int/Int specialization —
   Value is now #[repr(C,u8)] (tag byte 0=Int, i64 payload @8).
   Value-mode binops load the tag inline and do native i64
