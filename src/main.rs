@@ -2349,6 +2349,43 @@ fn main() {
             }
         }
         "bench" => {
+            // veldt bench --lint — how fast is strict-lint, per file +
+            // garden-wide? (the IDE's debounced lintEditor + check
+            // --garden --watch depend on this staying sub-50ms)
+            if args.iter().any(|a| a == "--lint") {
+                for entry in std::fs::read_dir("bench").unwrap() {
+                    let p = entry.unwrap().path();
+                    if p.extension().and_then(|e| e.to_str())
+                        != Some("veldt") { continue; }
+                    let src = std::fs::read_to_string(&p).unwrap();
+                    let t0 = std::time::Instant::now();
+                    let mut lx = lexer::Lexer::new(&src);
+                    let toks = lx.tokenize().unwrap();
+                    let mut pa = parser::Parser::new_with_lines(toks, lx.token_lines.clone());
+                    let stmts = pa.parse_program().unwrap();
+                    let n = lint(&stmts).len();
+                    println!("{:>18} {:>8.1}ms {:>4} warnings",
+                             p.file_name().unwrap().to_str().unwrap(),
+                             t0.elapsed().as_secs_f64() * 1000.0, n);
+                }
+                let mut v = veldt::Veldt::new();
+                if v.load().is_ok() {
+                    let t0 = std::time::Instant::now();
+                    let mut total = 0usize;
+                    for (name, vs) in &v.functions {
+                        for e in vs {
+                            let w = ast::Stmt::Grow(ast::GrowItem::Fn(
+                                name.clone(), e.params.clone(),
+                                e.body.clone(), e.tests.clone()));
+                            total += lint(&[w]).len();
+                        }
+                    }
+                    println!("{:>18} {:>8.1}ms {:>4} warnings",
+                             "garden census",
+                             t0.elapsed().as_secs_f64() * 1000.0, total);
+                }
+                return;
+            }
             // veldt bench <file.veldt> — single-workload timing (N reps)
             if let Some(file) = args.get(2).filter(|a| a.ends_with(".veldt")) {
                 let reps: usize = args.iter().position(|a| a == "--reps")
