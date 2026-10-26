@@ -4617,13 +4617,22 @@ fn fuzz_family(name: &str, json: bool) {
     let mut probes_planted = 0u32;
     let mut divergent_cases: Vec<serde_json::Value> = Vec::new();
     let mut group_counts: Vec<f64> = Vec::new();
-    // sweep each param-position boundary value (up to 8 cases per arg slot)
-    for case in 0..8 {
+    // sweep each param-position boundary value (up to 8 cases per arg
+    // slot); 2-param fns also get the ci x cj cross-product so
+    // mixed-boundary cases like div(i64::MIN, -1) are actually generated
+    let case_list: Vec<(usize, usize)> = {
+        let two = variants.first().map(|v| v.params.len() == 2)
+            .unwrap_or(false);
+        if two { (0..8).flat_map(|ci| (0..8).map(move |cj| (ci, cj))).collect() }
+        else { (0..8).map(|ci| (ci, ci)).collect() }
+    };
+    for (ci, cj) in case_list {
         // build args: boundary value for every param (any/unknown -> int)
         let Some(first) = variants.first() else { break };
         let mut args = Vec::new();
         let mut ok = true;
-        for p in &first.params {
+        for (i, p) in first.params.iter().enumerate() {
+            let case = if i == 0 { ci } else { cj };
             match evolve::boundary_value(&p.typ, case) {
                 Some(v) => args.push(v),
                 None => { ok = false; break; }
@@ -4654,7 +4663,7 @@ fn fuzz_family(name: &str, json: bool) {
             divergences += 1;
             if json {
                 divergent_cases.push(serde_json::json!({
-                    "case": case,
+                    "case": ci * 8 + cj,
                     "args": args.iter().map(|a| serde_json::to_string(a).unwrap_or_default())
                         .collect::<Vec<_>>(),
                     "groups": by_out.iter().map(|(out, ids)| serde_json::json!({
@@ -4662,7 +4671,7 @@ fn fuzz_family(name: &str, json: bool) {
                     })).collect::<Vec<_>>(),
                 }));
             } else {
-                println!("  case {} args {:?}:", case,
+                println!("  case {} args {:?}:", ci * 8 + cj,
                     args.iter().map(|a| format!("{:?}", a)).collect::<Vec<_>>().join(","));
                 for (out, ids) in &by_out {
                     println!("    {} -> #{}", out, ids.iter().map(|i| i.to_string())
@@ -4681,7 +4690,7 @@ fn fuzz_family(name: &str, json: bool) {
                         pool.push(veldt::Probe {
                             args: arg_strs,
                             expected: expected.clone(),
-                            niche: format!("fuzz:case{}", case),
+                            niche: format!("fuzz:case{}", ci * 8 + cj),
                             born: std::time::SystemTime::now()
                                 .duration_since(std::time::UNIX_EPOCH)
                                 .map(|d| d.as_secs()).unwrap_or(0),
