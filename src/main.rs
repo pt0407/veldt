@@ -2422,6 +2422,16 @@ fn print_stats(veldt: &veldt::Veldt) {
                         println!("    {}#{:<3} {}", e.name, e.id, scores.join(" "));
                     }
                 }
+                // healing details — what the family's healing attempts tried
+                let healed: Vec<_> = vs.iter().filter(|e| !e.healing_attempts.is_empty()).collect();
+                if !healed.is_empty() {
+                    println!("  healing attempts:");
+                    for e in healed.iter().take(5) {
+                        for a in e.healing_attempts.iter().take(3) {
+                            println!("    {}#{} — {}", e.name, e.id, a);
+                        }
+                    }
+                }
             }
         }
         if veldt.fitness_history.len() >= 2 {
