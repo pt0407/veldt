@@ -94,6 +94,7 @@ impl JitEngine {
         jb.symbol("veldt_rt_insert", veldt_rt_insert as *const u8);
         jb.symbol("veldt_rt_insertdyn", veldt_rt_insertdyn as *const u8);
         jb.symbol("veldt_rt_fieldset", veldt_rt_fieldset as *const u8);
+        jb.symbol("veldt_rt_take_err", veldt_rt_take_err as *const u8);
         let mut module = JITModule::new(jb);
         let rt = RtIds::declare(&mut module);
         Some(JitEngine {
@@ -270,6 +271,29 @@ impl JitEngine {
             let mut fail_pc = usize::MAX;
             let mut terminated = false;
             let mut ok = true;
+            macro_rules! catch_check_status {
+                ($res:expr) => {{
+                    if let Some(&(cpc, esl)) = try_ct.last() {
+                        let r = $res;
+                        let z = b.ins().iconst(types::I64, 0);
+                        let isn = b.ins().icmp(IntCC::SignedLessThan, r, z);
+                        let cb = *block_for.entry(cpc as usize)
+                            .or_insert_with(|| b.create_block());
+                        let eb = b.create_block();
+                        let kb = b.create_block();
+                        b.ins().brif(isn, eb, &[], kb, &[]);
+                        b.switch_to_block(eb);
+                        b.seal_block(eb);
+                        let rtv3 = b.use_var(rt_v);
+                        if let Some(m) = ecall!(rt.take_err, rtv3) {
+                            b.def_var(vars[esl as usize], m);
+                        }
+                        b.ins().jump(cb, &[]);
+                        b.switch_to_block(kb);
+                        b.seal_block(kb);
+                    }
+                }};
+            }
             while pc < chunk.code.len() {
                 if terminated || (pc > 0 && leaders.contains(&pc)) {
                     let bl = get_block(&mut b, &mut block_for, pc);
@@ -653,7 +677,8 @@ impl JitEngine {
         for (i, instr) in chunk.code.iter().enumerate() {
             match *instr {
                 Instr::Jump(t) | Instr::JumpIfFalse(t)
-                | Instr::PeekJumpIfNull(t) | Instr::ForNext(_, t) => {
+                | Instr::PeekJumpIfNull(t) | Instr::ForNext(_, t)
+                | Instr::TryPush(t, _) => {
                     leaders.insert(t as usize);
                 }
                 _ => {}
@@ -707,6 +732,9 @@ impl JitEngine {
             }
             let mut stack: Vec<cranelift_codegen::ir::Value> = Vec::new();
             let mut iter_hs: Vec<cranelift_codegen::ir::Value> = Vec::new();
+            // compile-time mirror of the try_stack — TryPush/TryPop
+            // are lexically matched so no runtime stack is needed.
+            let mut try_ct: Vec<(u32, u32)> = Vec::new();
             let mut pc = 0usize;
             let mut terminated = false;
             let mut ok = true;
@@ -718,6 +746,54 @@ impl JitEngine {
                 }};
             }
             let rt = self.rt;
+            // after a fallible helper call inside try{}: on null, take
+            // the pending error into the err slot and jump to catch
+            macro_rules! catch_check {
+                ($res:expr) => {{
+                    if let Some(&(cpc, esl)) = try_ct.last() {
+                        let r = $res;
+                        let z = b.ins().iconst(types::I64, 0);
+                        let isn = b.ins().icmp(IntCC::Equal, r, z);
+                        let cb = *block_for.entry(cpc as usize)
+                            .or_insert_with(|| b.create_block());
+                        let eb = b.create_block();
+                        let kb = b.create_block();
+                        b.ins().brif(isn, eb, &[], kb, &[]);
+                        b.switch_to_block(eb);
+                        b.seal_block(eb);
+                        let rtv3 = b.use_var(rt_v);
+                        if let Some(m) = ecall!(rt.take_err, rtv3) {
+                            b.def_var(vars[esl as usize], m);
+                        }
+                        b.ins().jump(cb, &[]);
+                        b.switch_to_block(kb);
+                        b.seal_block(kb);
+                    }
+                }};
+            }
+            macro_rules! catch_check_status {
+                ($res:expr) => {{
+                    if let Some(&(cpc, esl)) = try_ct.last() {
+                        let r = $res;
+                        let z = b.ins().iconst(types::I64, 0);
+                        let isn = b.ins().icmp(IntCC::SignedLessThan, r, z);
+                        let cb = *block_for.entry(cpc as usize)
+                            .or_insert_with(|| b.create_block());
+                        let eb = b.create_block();
+                        let kb = b.create_block();
+                        b.ins().brif(isn, eb, &[], kb, &[]);
+                        b.switch_to_block(eb);
+                        b.seal_block(eb);
+                        let rtv3 = b.use_var(rt_v);
+                        if let Some(m) = ecall!(rt.take_err, rtv3) {
+                            b.def_var(vars[esl as usize], m);
+                        }
+                        b.ins().jump(cb, &[]);
+                        b.switch_to_block(kb);
+                        b.seal_block(kb);
+                    }
+                }};
+            }
             while pc < chunk.code.len() {
                 if terminated || (pc > 0 && leaders.contains(&pc)) {
                     let bl = *block_for.entry(pc)
@@ -730,9 +806,10 @@ impl JitEngine {
                 match chunk.code[pc] {
                     Instr::Const(k) => {
                         let kk = b.ins().iconst(types::I64, k as i64);
-                        if let Some(v) = ecall!(rt.const_, rtv, kk) {
-                            stack.push(v);
-                        }
+                                                let v = ecall!(rt.const_, rtv, kk)
+                            .unwrap_or_else(|| b.ins().iconst(types::I64, 0));
+                        catch_check!(v);
+                        stack.push(v);
                     }
                     Instr::Load(sl) => {
                         stack.push(b.use_var(vars[sl as usize]));
@@ -747,15 +824,20 @@ impl JitEngine {
                     }
                     Instr::LoadG(ni) => {
                         let n = b.ins().iconst(types::I64, ni as i64);
-                        if let Some(v) = ecall!(rt.gget, rtv, n) {
-                            stack.push(v);
-                        }
+                                                let v = ecall!(rt.gget, rtv, n)
+                            .unwrap_or_else(|| b.ins().iconst(types::I64, 0));
+                        catch_check!(v);
+                        stack.push(v);
                     }
                     Instr::StoreG(ni) => {
                         let Some(v) = stack.pop() else {
                             fail_pc = pc; ok = false; break; };
                         let n = b.ins().iconst(types::I64, ni as i64);
-                        ecall!(rt.gset, rtv, n, v);
+                        let st = ecall!(rt.gset, rtv, n, v)
+
+                            .unwrap_or_else(|| b.ins().iconst(types::I64, 0));
+
+                        catch_check_status!(st);
                     }
                     Instr::Pop => { stack.pop(); }
                     Instr::Add | Instr::Sub | Instr::Mul | Instr::Div
@@ -771,9 +853,10 @@ impl JitEngine {
                             Instr::Gt => 8, Instr::Le => 9, _ => 10,
                         };
                         let o = b.ins().iconst(types::I64, op);
-                        if let Some(v) = ecall!(rt.binop, rtv, o, l, r) {
-                            stack.push(v);
-                        }
+                                                let v = ecall!(rt.binop, rtv, o, l, r)
+                            .unwrap_or_else(|| b.ins().iconst(types::I64, 0));
+                        catch_check!(v);
+                        stack.push(v);
                     }
                     Instr::Neg | Instr::Not => {
                         let Some(v) = stack.pop() else {
@@ -789,16 +872,18 @@ impl JitEngine {
                             else { fail_pc = pc; ok = false; break; };
                         let a = b.ins().iconst(types::I64,
                             matches!(chunk.code[pc], Instr::AndOp) as i64);
-                        if let Some(v) = ecall!(rt.logop, rtv, a, l, r) {
-                            stack.push(v);
-                        }
+                                                let v = ecall!(rt.logop, rtv, a, l, r)
+                            .unwrap_or_else(|| b.ins().iconst(types::I64, 0));
+                        catch_check!(v);
+                        stack.push(v);
                     }
                     Instr::InOp => {
                         let (Some(r), Some(l)) = (stack.pop(), stack.pop())
                             else { fail_pc = pc; ok = false; break; };
-                        if let Some(v) = ecall!(rt.inop, rtv, l, r) {
-                            stack.push(v);
-                        }
+                                                let v = ecall!(rt.inop, rtv, l, r)
+                            .unwrap_or_else(|| b.ins().iconst(types::I64, 0));
+                        catch_check!(v);
+                        stack.push(v);
                     }
                     Instr::Jump(t) => {
                         let bl = *block_for.entry(t as usize)
@@ -841,9 +926,10 @@ impl JitEngine {
                         if !ok { break; }
                         let n = b.ins().iconst(types::I64, ni as i64);
                         let c = b.ins().iconst(types::I64, argc as i64);
-                        if let Some(v) = ecall!(rt.call, rtv, n, c) {
-                            stack.push(v);
-                        }
+                                                let v = ecall!(rt.call, rtv, n, c)
+                            .unwrap_or_else(|| b.ins().iconst(types::I64, 0));
+                        catch_check!(v);
+                        stack.push(v);
                     }
                     Instr::CallId(ni, vid, argc) => {
                         for _ in 0..argc {
@@ -855,9 +941,10 @@ impl JitEngine {
                         let n = b.ins().iconst(types::I64, ni as i64);
                         let vv = b.ins().iconst(types::I64, vid as i64);
                         let c = b.ins().iconst(types::I64, argc as i64);
-                        if let Some(v) = ecall!(rt.callid, rtv, n, vv, c) {
-                            stack.push(v);
-                        }
+                                                let v = ecall!(rt.callid, rtv, n, vv, c)
+                            .unwrap_or_else(|| b.ins().iconst(types::I64, 0));
+                        catch_check!(v);
+                        stack.push(v);
                     }
                     Instr::MethodCall(ni, argc) => {
                         for _ in 0..argc {
@@ -870,9 +957,10 @@ impl JitEngine {
                             fail_pc = pc; ok = false; break; };
                         let n = b.ins().iconst(types::I64, ni as i64);
                         let c = b.ins().iconst(types::I64, argc as i64);
-                        if let Some(v) = ecall!(rt.method, rtv, recv, n, c) {
-                            stack.push(v);
-                        }
+                                                let v = ecall!(rt.method, rtv, recv, n, c)
+                            .unwrap_or_else(|| b.ins().iconst(types::I64, 0));
+                        catch_check!(v);
+                        stack.push(v);
                     }
                     Instr::MethodCallVar(sl, ni, argc) => {
                         for _ in 0..argc {
@@ -885,9 +973,10 @@ impl JitEngine {
                         let sp = b.use_var(vars[sl as usize]);
                         let n = b.ins().iconst(types::I64, ni as i64);
                         let c = b.ins().iconst(types::I64, argc as i64);
-                        if let Some(v) = ecall!(rt.methodvar, rtv, sp, n, c) {
-                            stack.push(v);
-                        }
+                                                let v = ecall!(rt.methodvar, rtv, sp, n, c)
+                            .unwrap_or_else(|| b.ins().iconst(types::I64, 0));
+                        catch_check!(v);
+                        stack.push(v);
                     }
                     Instr::MakeList(n) => {
                         for _ in 0..n {
@@ -897,23 +986,29 @@ impl JitEngine {
                         }
                         if !ok { break; }
                         let nn = b.ins().iconst(types::I64, n as i64);
-                        if let Some(v) = ecall!(rt.makelist, rtv, nn) {
-                            stack.push(v);
-                        }
+                                                let v = ecall!(rt.makelist, rtv, nn)
+                            .unwrap_or_else(|| b.ins().iconst(types::I64, 0));
+                        catch_check!(v);
+                        stack.push(v);
                     }
                     Instr::IndexGet => {
                         let (Some(i), Some(o)) = (stack.pop(), stack.pop())
                             else { fail_pc = pc; ok = false; break; };
-                        if let Some(v) = ecall!(rt.index, rtv, o, i) {
-                            stack.push(v);
-                        }
+                                                let v = ecall!(rt.index, rtv, o, i)
+                            .unwrap_or_else(|| b.ins().iconst(types::I64, 0));
+                        catch_check!(v);
+                        stack.push(v);
                     }
                     Instr::IndexSetVar(sl) => {
                         let (Some(val), Some(idx)) =
                             (stack.pop(), stack.pop())
                             else { fail_pc = pc; ok = false; break; };
                         let sp = b.use_var(vars[sl as usize]);
-                        ecall!(rt.indexset, rtv, sp, idx, val);
+                        let st = ecall!(rt.indexset, rtv, sp, idx, val)
+
+                            .unwrap_or_else(|| b.ins().iconst(types::I64, 0));
+
+                        catch_check_status!(st);
                     }
                     Instr::ToStr => {
                         let Some(v) = stack.pop() else {
@@ -925,9 +1020,10 @@ impl JitEngine {
                     Instr::ForIter => {
                         let Some(v) = stack.pop() else {
                             fail_pc = pc; ok = false; break; };
-                        if let Some(h) = ecall!(rt.iternew, rtv, v) {
-                            iter_hs.push(h);
-                        } else { fail_pc = pc; ok = false; break; }
+                        let h = ecall!(rt.iternew, rtv, v)
+                            .unwrap_or_else(|| b.ins().iconst(types::I64, -1));
+                        catch_check_status!(h);
+                        iter_hs.push(h);
                     }
                     Instr::ForNext(sl, end) => {
                         let Some(&h) = iter_hs.last() else {
@@ -955,43 +1051,61 @@ impl JitEngine {
                         let (Some(hi), Some(lo), Some(o)) =
                             (stack.pop(), stack.pop(), stack.pop())
                             else { fail_pc = pc; ok = false; break; };
-                        if let Some(v) = ecall!(rt.slice, rtv, o, lo, hi) {
-                            stack.push(v);
-                        }
+                                                let v = ecall!(rt.slice, rtv, o, lo, hi)
+                            .unwrap_or_else(|| b.ins().iconst(types::I64, 0));
+                        catch_check!(v);
+                        stack.push(v);
                     }
                     Instr::ListPush(sl) | Instr::AppendVar(sl) => {
                         let Some(v) = stack.pop() else {
                             fail_pc = pc; ok = false; break; };
                         let sp = b.use_var(vars[sl as usize]);
-                        ecall!(rt.append, rtv, sp, v);
+                        let st = ecall!(rt.append, rtv, sp, v)
+
+                            .unwrap_or_else(|| b.ins().iconst(types::I64, 0));
+
+                        catch_check_status!(st);
                     }
                     Instr::InsertVar(sl, ki) => {
                         let Some(v) = stack.pop() else {
                             fail_pc = pc; ok = false; break; };
                         let sp = b.use_var(vars[sl as usize]);
                         let kk = b.ins().iconst(types::I64, ki as i64);
-                        ecall!(rt.insert, rtv, sp, kk, v);
+                        let st = ecall!(rt.insert, rtv, sp, kk, v)
+
+                            .unwrap_or_else(|| b.ins().iconst(types::I64, 0));
+
+                        catch_check_status!(st);
                     }
                     Instr::InsertDynVar(sl) => {
                         let (Some(v), Some(k)) = (stack.pop(), stack.pop())
                             else { fail_pc = pc; ok = false; break; };
                         let sp = b.use_var(vars[sl as usize]);
-                        ecall!(rt.insertdyn, rtv, sp, k, v);
+                        let st = ecall!(rt.insertdyn, rtv, sp, k, v)
+
+                            .unwrap_or_else(|| b.ins().iconst(types::I64, 0));
+
+                        catch_check_status!(st);
                     }
                     Instr::FieldSetVar(sl, ni) => {
                         let Some(v) = stack.pop() else {
                             fail_pc = pc; ok = false; break; };
                         let sp = b.use_var(vars[sl as usize]);
                         let n = b.ins().iconst(types::I64, ni as i64);
-                        ecall!(rt.fieldset, rtv, sp, n, v);
+                        let st = ecall!(rt.fieldset, rtv, sp, n, v)
+
+                            .unwrap_or_else(|| b.ins().iconst(types::I64, 0));
+
+                        catch_check_status!(st);
                     }
                     Instr::GetField(ni) => {
                         let Some(o) = stack.pop() else {
                             fail_pc = pc; ok = false; break; };
                         let n = b.ins().iconst(types::I64, ni as i64);
-                        if let Some(v) = ecall!(rt.getfield, rtv, o, n) {
-                            stack.push(v);
-                        }
+                                                let v = ecall!(rt.getfield, rtv, o, n)
+                            .unwrap_or_else(|| b.ins().iconst(types::I64, 0));
+                        catch_check!(v);
+                        stack.push(v);
                     }
                     Instr::MakeStruct(ni, n) => {
                         for _ in 0..(n * 2) {
@@ -1002,15 +1116,20 @@ impl JitEngine {
                         if !ok { break; }
                         let nn = b.ins().iconst(types::I64, ni as i64);
                         let c = b.ins().iconst(types::I64, n as i64);
-                        if let Some(v) = ecall!(rt.makestruct, rtv, nn, c) {
-                            stack.push(v);
-                        }
+                                                let v = ecall!(rt.makestruct, rtv, nn, c)
+                            .unwrap_or_else(|| b.ins().iconst(types::I64, 0));
+                        catch_check!(v);
+                        stack.push(v);
                     }
                     Instr::PrintOut => {
                         let Some(v) = stack.pop() else {
                             fail_pc = pc; ok = false; break; };
                         ecall!(rt.print, rtv, v);
                     }
+                    Instr::TryPush(cpc, esl) => {
+                        try_ct.push((cpc, esl));
+                    }
+                    Instr::TryPop => { try_ct.pop(); }
                     Instr::Return | Instr::Halt => {
                         let v = stack.pop().unwrap_or_else(||
                             b.ins().iconst(types::I64, 0));
@@ -1369,6 +1488,11 @@ pub unsafe extern "C" fn veldt_rt_insertdyn(rt: *mut JitRt, sp: *mut Value,
     }
 }
 #[no_mangle]
+pub unsafe extern "C" fn veldt_rt_take_err(rt: *mut JitRt) -> *mut Value {
+    let e = (*rt).err.take().unwrap_or_else(|| "error".into());
+    mk(rt, Value::Str(e.into()))
+}
+#[no_mangle]
 pub unsafe extern "C" fn veldt_rt_fieldset(rt: *mut JitRt, sp: *mut Value,
     ni: i64, v: *mut Value) -> i64 {
     if sp.is_null() || v.is_null() { return nok(rt, "fieldset on err".into()); }
@@ -1390,7 +1514,7 @@ struct RtIds {
     getfield: FuncId, makestruct: FuncId, tostr: FuncId, print: FuncId,
     gget: FuncId, gset: FuncId, iternew: FuncId, iternext: FuncId,
     iterpop: FuncId, append: FuncId, insert: FuncId, insertdyn: FuncId,
-    fieldset: FuncId,
+    fieldset: FuncId, take_err: FuncId,
 }
 
 impl RtIds {
@@ -1437,6 +1561,7 @@ impl RtIds {
             insert: d(m, "veldt_rt_insert", 4, true),
             insertdyn: d(m, "veldt_rt_insertdyn", 4, true),
             fieldset: d(m, "veldt_rt_fieldset", 4, true),
+            take_err: d(m, "veldt_rt_take_err", 1, true),
         }
     }
 }
