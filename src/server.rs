@@ -1427,14 +1427,55 @@ async fn family_detail(
     let variants: Vec<serde_json::Value> = vs.iter().map(|e| serde_json::json!({
         "id": e.id, "fitness": e.fitness, "health": format!("{:?}", e.health),
         "age": e.age, "usage": e.usage_count, "trust": format!("{:?}", e.trust),
-        "origin": e.origin,
+        "origin": e.origin, "born": e.born, "lifespan": e.lifespan,
+        "last_used": e.last_used, "trial_score": e.trial_score,
+        "efficiency": e.efficiency, "parents": e.parents.len(),
+        "healing_attempts": e.healing_attempts.len(),
+        "niches": e.niche_scores,
     })).collect();
     let peak: f64 = vs.iter().map(|e| e.fitness).fold(f64::NEG_INFINITY, f64::max);
     let avg: f64 = vs.iter().map(|e| e.fitness).sum::<f64>() / vs.len().max(1) as f64;
+    // health / trust / origin breakdowns
+    let healthy = vs.iter().filter(|e| matches!(e.health, crate::veldt::Health::Healthy)).count();
+    let sick_n = vs.iter().filter(|e| matches!(e.health, crate::veldt::Health::Sick(_))).count();
+    let dying = vs.len() - healthy - sick_n;
+    let seedling = vs.iter().filter(|e| matches!(e.trust, crate::veldt::Trust::Seedling)).count();
+    let established = vs.iter().filter(|e| matches!(e.trust, crate::veldt::Trust::Established)).count();
+    let canonical = vs.len() - seedling - established;
+    let mut origins: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for e in vs.iter() { *origins.entry(e.origin.clone()).or_insert(0) += 1; }
+    // niche avg scores
+    let mut niche_tot: std::collections::HashMap<String, (f64, usize)> = std::collections::HashMap::new();
+    for e in vs.iter() {
+        for (n, s) in &e.niche_scores {
+            let ent = niche_tot.entry(n.clone()).or_insert((0.0, 0));
+            ent.0 += s; ent.1 += 1;
+        }
+    }
+    let niche_avgs: serde_json::Map<String, serde_json::Value> = niche_tot.iter()
+        .map(|(n, (t, c))| (n.clone(), serde_json::json!(t / *c as f64))).collect();
+    // ages / turnover / deaths
+    let min_age = vs.iter().map(|e| e.age).min().unwrap_or(0);
+    let max_age = vs.iter().map(|e| e.age).max().unwrap_or(0);
+    let avg_age = vs.iter().map(|e| e.age as f64).sum::<f64>() / vs.len().max(1) as f64;
+    let deaths = veldt.obituaries.iter().filter(|o| o.name == req.name).count();
+    let traces = veldt.traces.get(&req.name).map(|t| t.len()).unwrap_or(0);
+    // champion / weakest
+    let champ = vs.iter().max_by(|a, b| a.fitness.partial_cmp(&b.fitness)
+        .unwrap_or(std::cmp::Ordering::Equal));
+    let weak = vs.iter().min_by(|a, b| a.fitness.partial_cmp(&b.fitness)
+        .unwrap_or(std::cmp::Ordering::Equal));
     Json(serde_json::json!({
         "name": req.name, "variants": variants,
         "probes": veldt.probes.get(&req.name).map(|p| p.len()).unwrap_or(0),
+        "traces": traces, "deaths": deaths,
         "peak_fitness": peak, "avg_fitness": avg,
+        "healthy": healthy, "sick": sick_n, "dying": dying,
+        "seedling": seedling, "established": established, "canonical": canonical,
+        "origins": origins, "niche_averages": niche_avgs,
+        "min_age": min_age, "max_age": max_age, "avg_age": avg_age,
+        "champion": champ.map(|e| serde_json::json!({"id": e.id, "fitness": e.fitness})),
+        "weakest": weak.map(|e| serde_json::json!({"id": e.id, "fitness": e.fitness})),
     }))
 }
 
