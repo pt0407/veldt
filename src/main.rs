@@ -3366,6 +3366,9 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
                 if matches!(body.last(), Some(Stmt::Continue)) {
                     out.push("continue as the last statement of a loop body — redundant".into());
                 }
+                if body.len() == 1 && matches!(body[0], Stmt::Break) {
+                    out.push("loop body is just break — degenerate loop".into());
+                }
                 // condition var never assigned inside the body — likely infinite
                 if let Expr::Var(v) = cond {
                     if !body.iter().any(|s| stmt_assigns(s, v)) {
@@ -3393,6 +3396,9 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
                 }
                 if matches!(body.last(), Some(Stmt::Continue)) {
                     out.push("continue as the last statement of a loop body — redundant".into());
+                }
+                if body.len() == 1 && matches!(body[0], Stmt::Break) {
+                    out.push("loop body is just break — degenerate loop".into());
                 }
                 if !name.starts_with('_')
                     && !body.iter().any(|s| stmt_mentions(s, name)) {
