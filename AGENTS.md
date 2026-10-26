@@ -1079,3 +1079,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   strict checks. New: let a = b where b is bound to a
   literal through c — the let propagates a constant
   through two hops.
+- [Devin] Lint batch 52 (HEAD post-let-trans-call): ~83
+  strict checks. New: let a = b where b is bound to a
+  call through c — the let propagates a call result
+  through two hops.
