@@ -1083,3 +1083,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   strict checks. New: let a = b where b is bound to a
   call through c — the let propagates a call result
   through two hops.
+- [Devin] Lint batch 53 (HEAD post-let-trans-binop): ~84
+  strict checks. New: let a = b where b is bound to a
+  binop through c — the let propagates a computed expr
+  through two hops.
