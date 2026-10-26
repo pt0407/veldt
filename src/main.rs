@@ -421,7 +421,37 @@ fn main() {
                 eprintln!("Usage: veldt diff <name#a> <name#b>");
                 process::exit(1);
             }
-            diff_variants(&args[2], &args[3]);
+            if args.get(3).map(|s| s.as_str()) == Some("--filter") {
+                // --filter <expr> — diff the two best-matching variants in args[2]
+                let expr = args.get(4).map(|s| s.as_str()).unwrap_or("");
+                let mut veldt = veldt::Veldt::new();
+                if let Err(e) = veldt.load() { eprintln!("Error: {}", e); process::exit(1); }
+                let or_groups: Vec<Vec<&str>> = expr.split("||")
+                    .map(|g| g.split("&&").map(|s| s.trim()).collect())
+                    .collect();
+                let vs = veldt.functions.get(&args[2]);
+                match vs {
+                    Some(vs) => {
+                        let mut matching: Vec<_> = vs.iter()
+                            .filter(|e| or_groups.iter().any(|g|
+                                g.iter().all(|c| veldt::variant_matches(e, c))))
+                            .collect();
+                        matching.sort_by(|a, b| b.fitness.partial_cmp(&a.fitness)
+                            .unwrap_or(std::cmp::Ordering::Equal));
+                        if matching.len() >= 2 {
+                            let a = format!("{}#{}", args[2], matching[0].id);
+                            let b = format!("{}#{}", args[2], matching[1].id);
+                            println!("[diff --filter {} — {} vs {}]", expr, a, b);
+                            diff_variants(&a, &b);
+                        } else {
+                            println!("need 2+ matching variants in '{}' — found {}", args[2], matching.len());
+                        }
+                    }
+                    None => println!("family '{}' not found", args[2]),
+                }
+            } else {
+                diff_variants(&args[2], &args[3]);
+            }
         }
         "absorb" => {
             absorb_traces(args.get(2).map(|s| s.as_str()));
