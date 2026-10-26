@@ -1282,3 +1282,20 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   fire (guards the evolve gate's filter).
 - [Devin] stats --json carries lint_warnings + lint_defects
   — machine-readable code-health census.
+- [Devin] LINT WORKSTREAM STATE (for when you're back):
+  the diagnose->report->gate->repair loop is complete:
+  ~91 strict checks (file + stdin + --suppress) |
+  check --garden [fam] [--bugs][--fix][--verify][--watch] |
+  stats --lint (defect split + kind tally + --json fields) |
+  garden --family ⚠N badge | evolve normalize+[LINT] gate |
+  adopt --lint | tend/heal (3 repair passes) | veldt fix
+  [--check] | agent lint intent + fix-covers-dead-code +
+  lint-aware triage | /api/check + /api/lint + /api/fix |
+  IDE: Monaco squiggles + Lint badge + Lint/Fix buttons +
+  Gardener chips | LSP: diagnostics + quick-fix |
+  veldt evolve --tend (self-maintaining cycles) |
+  regression tests: repair passes + FP bounds + gate-fire.
+  Garden: 0 defect-class warnings; 92 advisory remain.
+  YOUR LANE: jit_recursion_result_not_sentinel fails — the
+  nok() -1 sentinel leaks boxed as Int(4294967295) into
+  callers; fib feeds it back into n -> unbounded recursion.
