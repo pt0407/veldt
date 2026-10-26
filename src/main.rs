@@ -566,6 +566,20 @@ fn main() {
                 }
                 println!("=== The Veldt (fitness >= {}) ===", min);
                 filtered.print_garden(sick_only, healthy_only);
+            } else if args.iter().any(|a| a == "--bare") {
+                // families with 0 probes — the untested
+                let mut filtered = veldt::Veldt::new();
+                filtered.probes = veldt.probes.clone();
+                filtered.obituaries = veldt.obituaries.clone();
+                filtered.run_count = veldt.run_count;
+                filtered.garden_path = veldt.garden_path.clone();
+                for (name, vs) in &veldt.functions {
+                    if veldt.probes.get(name).map(|p| p.is_empty()).unwrap_or(true) {
+                        filtered.functions.insert(name.clone(), vs.clone());
+                    }
+                }
+                println!("=== The Veldt (bare) ===");
+                filtered.print_garden(sick_only, healthy_only);
             } else if args.iter().any(|a| a == "--zero_usage") {
                 // variants never called — the dead weight
                 let mut filtered = veldt::Veldt::new();
