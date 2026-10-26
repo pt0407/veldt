@@ -603,6 +603,11 @@ fn main() {
                         }
                     }
                 }
+                if json_out {
+                    println!("{}", serde_json::json!({"summary": {
+                        "warnings": total, "variants_flagged": flagged,
+                        "repaired": repaired}}));
+                }
                 // --verify: re-trial every repaired variant — proves the
                 // mechanical passes preserved semantics; writes back the
                 // honest post-repair health/fitness
