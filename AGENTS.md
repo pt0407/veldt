@@ -497,3 +497,13 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   fib" → per-family dashboard summary) and `triage` ("what needs
   attention"/"weakest"/"risky" → dying + sick-with-errors +
   weakest-per-family). Reuses find_lineage for name extraction.
+- [Devin] Agent inspection-intent batch 2 (HEAD post-1228c17):
+  `veldt agent` now answers — lineage ("fib#145 parents"/"fib
+  lineage" → parents/children or the full breeding map), usage
+  ("most used fib"/"hot functions" → workload leaders), efficiency
+  ("fastest fib"/"most efficient" → speed ranking), trust ("fib
+  trust"/"what's canonical" → levels + canonical list), age
+  ("newest fib"/"oldest" → age-sorted). All reuse find_lineage +
+  parse_variant_ref; scoped-or-global pattern throughout. Also
+  evolve --dry-run is an alias for --dry (banner makes the
+  no-persist behavior explicit).
