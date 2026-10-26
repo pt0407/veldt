@@ -1051,3 +1051,6 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   strict checks. New: match on a container-bound var —
   the scrutinee is a list/struct literal, could match
   the literal directly.
+- [Devin] Lint batch 46 (HEAD post-match-binop): ~77 strict
+  checks. New: match on a binop-bound var — the scrutinee
+  is a computed expr, could match it directly.
