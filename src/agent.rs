@@ -289,6 +289,9 @@ pub fn respond(task: &str, editor_source: &str, veldt: &mut Veldt) -> AgentRespo
     if has(&["healing", "heal", "recovering", "recovery", "being fixed"]) {
         return healing_intent(&words, veldt);
     }
+    if has(&["where did", "origin", "origins", "sources", "bred from", "mutation source", "made of"]) {
+        return sources_intent(&words, veldt);
+    }
     if has(&["garden", "status", "alive", "what's growing", "what is growing", "what have you", "ecosystem"]) {
         return status_intent(veldt);
     }
@@ -1168,6 +1171,37 @@ fn healing_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
         text.push_str(&format!("  {}#{} — {} attempts, {} (last: {})\n",
             n, e.id, e.healing_attempts.len(), state,
             e.healing_attempts.last().map(|s| s.as_str()).unwrap_or("")));
+    }
+    plain(&text)
+}
+
+/// Sources — "where did fib come from" / "mutation sources" — origin breakdown.
+fn sources_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
+    let scoped = find_lineage(words, veldt);
+    // origin-prefix -> (count, sum fitness)
+    let mut map: std::collections::HashMap<String, (usize, f64)> =
+        std::collections::HashMap::new();
+    for (n, vs) in &veldt.functions {
+        if let Some(f) = &scoped { if n != f { continue; } }
+        for e in vs {
+            let src = e.origin.split(' ').next().unwrap_or("seed").to_string();
+            let ent = map.entry(src).or_insert((0, 0.0));
+            ent.0 += 1; ent.1 += e.fitness;
+        }
+    }
+    if map.is_empty() {
+        return plain("No variants to report on.");
+    }
+    let mut sorted: Vec<(String, usize, f64)> = map.iter()
+        .map(|(s, (c, f))| (s.clone(), *c, *f / (*c).max(1) as f64)).collect();
+    sorted.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+    let mut text = if let Some(f) = &scoped {
+        format!("{} — mutation sources\n", f)
+    } else {
+        String::from("Mutation sources (best avg fitness first)\n")
+    };
+    for (src, count, avg) in sorted {
+        text.push_str(&format!("  {} — {} variants, avg fit {:.2}\n", src, count, avg));
     }
     plain(&text)
 }
