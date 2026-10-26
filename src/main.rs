@@ -4995,6 +4995,16 @@ fn print_family_detail(veldt: &veldt::Veldt, fam: &String, vs: &[veldt::Function
                 println!("    {}({}) → {} [v{}]", fam, t.args.join(" "), t.result, t.variant);
             }
         }
+        // usage timeline — calls per run (the family's hotness curve)
+        let mut calls: std::collections::HashMap<u64, usize> = std::collections::HashMap::new();
+        for t in traces.iter() { *calls.entry(t.at).or_insert(0) += 1; }
+        if calls.len() > 1 {
+            let mut runs: Vec<_> = calls.iter().collect();
+            runs.sort_by_key(|(r, _)| *r);
+            let timeline: Vec<_> = runs.iter().map(|(r, n)| format!("{}:{}", **r % 100, n)).collect();
+            let counts: Vec<f64> = runs.iter().map(|(_, n)| **n as f64).collect();
+            println!("  usage timeline: {}  {}", timeline.join(" "), spark(&counts));
+        }
     }
     // recent deaths — the family's obituary log
     let deaths: Vec<_> = veldt.obituaries.iter().filter(|o| o.name == *fam).rev().take(5).collect();
