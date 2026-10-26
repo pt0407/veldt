@@ -813,6 +813,18 @@ pub fn variant_matches_in(e: &FunctionEntry, family: &str, clause: &str) -> bool
     }
 
     let r = match field {
+        _ if field.starts_with("niche:") => {
+            // niche:<name> — per-niche score query: niche:int:big > 0.5
+            let niche = &field[6..];
+            let score = e.niche_scores.get(niche).copied().unwrap_or(0.0);
+            match (op, num_val) {
+                (">", Some(v)) => score > v, ("<", Some(v)) => score < v,
+                (">=", Some(v)) => score >= v, ("<=", Some(v)) => score <= v,
+                ("==", Some(v)) => (score - v).abs() < f64::EPSILON,
+                ("!=", Some(v)) => (score - v).abs() >= f64::EPSILON,
+                _ => false,
+            }
+        }
         "family" => {
             match op { "==" => family == val, "!=" => family != val, "~" => family.contains(&val), _ => false }
         }
