@@ -536,3 +536,9 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   → age vs lifespan split), size ("smallest fib"/"biggest" →
   code-size ranking). All scoped-or-global via find_lineage +
   parse_variant_ref; documented in help_intent.
+- [Devin] Agent intent batch 5 (HEAD post-d6c9d4a): siblings
+  ("fib#216 siblings" → shared-parent variants), stale
+  ("what's stale"/"forgotten" → runs-since-last-call dormant
+  list), dead ("dead code"/"unreachable" → dead-code-removal
+  variants; checked BEFORE obituary — it's not a death query).
+  All help-documented. ~30 intents total now.
