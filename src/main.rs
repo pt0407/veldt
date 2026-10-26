@@ -552,9 +552,14 @@ fn main() {
                         bt.partial_cmp(&at).unwrap_or(std::cmp::Ordering::Equal)
                     }),
                 }
+                let overall = hits.iter().map(|(_, vs)|
+                    vs.iter().map(|e| e.fitness).fold(f64::NEG_INFINITY, f64::max))
+                    .fold(f64::NEG_INFINITY, f64::max);
                 for (name, vs) in hits {
                     let top = vs.iter().map(|e| e.fitness).fold(f64::NEG_INFINITY, f64::max);
-                    println!("{} — {} variants, peak fitness {:.2}", name, vs.len(), top);
+                    let bar = "█".repeat(
+                        ((top / overall.max(f64::EPSILON)) * 8.0).round() as usize);
+                    println!("{} — {} variants, peak fitness {:.2} {}", name, vs.len(), top, bar);
                 }
             }
         }
