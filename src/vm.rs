@@ -84,6 +84,7 @@ struct Frame {
 pub struct Vm {
     pub fns: HashMap<String, Vec<CompiledFn>>,
     pub globals: HashMap<String, Value>,
+    jit_engine: Option<crate::jit::JitEngine>,
     helper: Interpreter,                // delegation for builtins/methods
     pub steps: u64,
     max_steps: u64,
@@ -521,6 +522,7 @@ fn expr_tag(e: &Expr) -> &'static str {
 impl Vm {
     pub fn new() -> Self {
         Vm {
+            jit_engine: None,
             fns: HashMap::new(),
             globals: HashMap::new(),
             helper: Interpreter::new(),
@@ -961,8 +963,15 @@ impl Vm {
                     chosen.calls.set(chosen.calls.get() + 1);
                     if chosen.calls.get() >= 64 && !chosen.jit_tried.get() {
                         chosen.jit_tried.set(true);
-                        *chosen.jit.borrow_mut() = crate::jit::try_compile(
-                            &chosen.code, chosen.params.len(), &name);
+                        if self.jit_engine.is_none() {
+                            self.jit_engine = crate::jit::JitEngine::new();
+                        }
+                        if let Some(e) = self.jit_engine.as_mut() {
+                            if let Some(p) = e.compile_fn(&name, &self.fns) {
+                                *chosen.jit.borrow_mut() =
+                                    Some(crate::jit::JitFn { code_ptr: p });
+                            }
+                        }
                     }
                     if let Some(j) = chosen.jit.borrow().as_ref() {
                         if args.len() <= 4
