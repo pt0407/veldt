@@ -49,6 +49,18 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] PHASE 11 MILESTONE: src/vm.rs is a working stack
+  bytecode VM — veldt run --vm. Copy instrs (const pool + name table),
+  slot-indexed Vec<Option<Value>> locals, no per-dispatch alloc. Covers:
+  binops/and/or/in/??, let/assign, if/while/for+break/continue, fns
+  (fitness dispatch + call_best), lambdas (CaptureEnv snapshot),
+  mutating-method write-back (MethodCallVar), imports (alias::name),
+  match, ?., slice, destructure, listcomps, field-assign, structlit.
+  Builtins/methods delegate through helper Interpreter (one semantics).
+  Still missing: try/catch, name#N explicit variant, module side-effect
+  stmts. Perf: ~1.2-2.4x tree-walk (interpreter was already thin after
+  P3/P6) — the real multiplier is the Cranelift tier on this bytecode.
+  gardener: shadow_call Stage-1 noted — nice.
 - [Devin/main-side] CLAIMING PHASE 11 (execution layer): bytecode VM
   then Cranelift JIT — the vision doc's first prerequisite. New
   src/vm/ module + `veldt run --vm` flag only; I won't touch

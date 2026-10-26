@@ -811,6 +811,30 @@ impl Vm {
                     let args: Vec<Value> =
                         stack.drain(stack.len() - argc as usize..).collect();
                     let name = code.names[ni as usize].clone();
+                    // call_best dispatches on the VM's own table — the
+                    // helper interpreter has no functions loaded.
+                    if name == "call_best" {
+                        let fname = match args.first() {
+                            Some(Value::Str(s)) => (**s).to_string(),
+                            _ => return Err("call_best(name, args...)".into()),
+                        };
+                        let variants = self.fns.get(&fname)
+                            .ok_or_else(|| format!(
+                                "call_best: no variants of '{}'", fname))?;
+                        let chosen = variants.iter()
+                            .max_by(|a, b| a.fitness.partial_cmp(&b.fitness)
+                                .unwrap_or(std::cmp::Ordering::Equal))
+                            .unwrap();
+                        let fargs: Vec<Option<Value>> =
+                            args[1..].iter().cloned().map(Some).collect();
+                        frames.push(Frame {
+                            code: chosen.code.clone(),
+                            pc: 0, env: fargs, base: stack.len(),
+                            iters: Vec::new(),
+                        });
+                        code = frames.last().unwrap().code.clone();
+                        continue;
+                    }
                     // builtin first (same as tree-walk)
                     if let Some(v) = self.helper.try_builtin(&name, &args)? {
                         stack.push(v);
