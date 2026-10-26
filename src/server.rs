@@ -856,7 +856,7 @@ async fn stats(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
 }
 
 #[derive(Deserialize)]
-struct CheckRequest { source: String }
+struct CheckRequest { source: String, strict: Option<bool> }
 
 async fn check_source(
     Json(req): Json<CheckRequest>,
@@ -870,7 +870,11 @@ async fn check_source(
         });
     match res {
         Ok(stmts) => {
-            let warnings = crate::lint(&stmts);
+            let warnings = if req.strict.unwrap_or(false) {
+                crate::lint(&stmts)
+            } else {
+                Vec::new()
+            };
             Json(serde_json::json!({"ok": true, "warnings": warnings}))
         }
         Err(e) => Json(serde_json::json!({"ok": false, "error": e})),
