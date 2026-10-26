@@ -1169,3 +1169,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   repaired variants re-trial healthy. The lint loop is fully
   closed: report (check --garden/stats --lint) -> gate
   (evolve birth + adopt --lint) -> repair (--fix/heal).
+- [Devin] LSP lint diagnostics: publishDiagnostics now runs
+  the strict linter on every buffer — IDE squiggles for all
+  ~91 checks (severity 2, anchored at fn-def lines). The
+  Gardener's static analysis is live in the editor.
