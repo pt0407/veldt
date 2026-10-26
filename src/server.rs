@@ -53,6 +53,7 @@ pub async fn start_server(port: u16) {
         .route("/api/fitness", get(fitness))
         .route("/api/health", get(health))
         .route("/api/trust", get(trust))
+        .route("/api/bare", get(bare))
         .route("/api/run", post(run_program))
         .route("/api/evolve", post(evolve))
         .route("/api/clear", post(clear_veldt))
@@ -336,6 +337,17 @@ async fn trust() -> Json<serde_json::Value> {
         }
     }
     Json(serde_json::json!({"seedling": seed, "established": estab, "canonical": canon}))
+}
+
+async fn bare() -> Json<serde_json::Value> {
+    let mut veldt = veldt::Veldt::new();
+    if veldt.load().is_err() {
+        return Json(serde_json::json!({"error": "garden load failed"}));
+    }
+    let bare: Vec<String> = veldt.functions.keys()
+        .filter(|n| veldt.probes.get(*n).map(|p| p.is_empty()).unwrap_or(true))
+        .cloned().collect();
+    Json(serde_json::json!({"bare": bare}))
 }
 
 #[derive(Deserialize)]
