@@ -3354,6 +3354,16 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                 if let Expr::Var(v) = e {
                     if v == name { out.push(format!("{} = {} — self-assignment, likely a typo", name, name)); }
                 }
+                // compound assignment — x = x op y → x op= y
+                if let Expr::BinOp(l, op, _) = e {
+                    if let Expr::Var(v) = l.as_ref() {
+                        if v == name && matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div) {
+                            out.push(format!("{} = {} {} ... — use {} compound assign", name, name,
+                                match op { BinOp::Add => "+", BinOp::Sub => "-", BinOp::Mul => "*", BinOp::Div => "/", _ => "?" },
+                                match op { BinOp::Add => "+=", BinOp::Sub => "-=", BinOp::Mul => "*=", BinOp::Div => "/=", _ => "?" }));
+                        }
+                    }
+                }
                 // dead store — next mention of the var is another assign, not a read
                 let next = stmts.iter().skip(i + 1)
                     .find(|s| stmt_mentions(s, name) || matches!(s, Stmt::Assign(n, _) if n == name));
