@@ -566,6 +566,25 @@ fn main() {
                 }
                 println!("=== The Veldt (fitness >= {}) ===", min);
                 filtered.print_garden(sick_only, healthy_only);
+            } else if args.iter().any(|a| a == "--obit") {
+                // most-deaths families first — sort families by obituary count
+                let mut sorted = veldt::Veldt::new();
+                sorted.probes = veldt.probes.clone();
+                sorted.obituaries = veldt.obituaries.clone();
+                sorted.run_count = veldt.run_count;
+                sorted.garden_path = veldt.garden_path.clone();
+                let mut fams: Vec<(&String, &Vec<veldt::FunctionEntry>)> =
+                    veldt.functions.iter().collect();
+                fams.sort_by(|a, b| {
+                    let dc_b = veldt.obituaries.iter().filter(|o| o.name == **b.0).count();
+                    let dc_a = veldt.obituaries.iter().filter(|o| o.name == **a.0).count();
+                    dc_b.cmp(&dc_a)
+                });
+                for (name, vs) in fams {
+                    sorted.functions.insert(name.clone(), vs.clone());
+                }
+                println!("=== The Veldt (most-deaths first) ===");
+                sorted.print_garden(sick_only, healthy_only);
             } else if args.iter().any(|a| a == "--trace") {
                 // most-traced families first — sort families by trace volume
                 let mut sorted = veldt::Veldt::new();
