@@ -3725,6 +3725,15 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                     if e.len() == 1 && matches!(e[0], Stmt::Return(_) | Stmt::Break | Stmt::Continue) {
                         out.push("match else just exits — the match adds no handling".into());
                     }
+                    if e.len() == 1 && matches!(e[0], Stmt::Print(_)) {
+                        out.push("match else only prints — the match adds no handling".into());
+                    }
+                }
+                // arm body that's just print — the arm adds no handling
+                for (p, body) in arms.iter() {
+                    if body.len() == 1 && matches!(body[0], Stmt::Print(_)) {
+                        out.push(format!("match arm {:?} only prints — no handling", p));
+                    }
                 }
                 for (_, body) in arms {
                     let mut inner = outer.clone();
