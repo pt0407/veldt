@@ -1,0 +1,46 @@
+# EVO DUNGEON — the roguelike where the monsters evolve.
+# Monster combat strategy is a garden function that mutates between
+# waves via `veldt run --evolve`. Killed lineages get obituaries.
+#
+#   veldt run examples/evo_dungeon.veldt --evolve --seed 7
+#
+# Each run is a different ecosystem — the brains you fought yesterday
+# are dead today.
+
+# monster_brain decides aggression (how hard a monster hits).
+# This seed is dumb — it just always hits for a flat 8. The garden
+# will breed smarter variants between waves.
+grow fn monster_brain(hp: int) test monster_brain(50) > 0 {
+    return 8 + 0 * hp
+}
+
+# player_turn: simple melee — hit for damage scaled by a static skill
+fn player_hit(skill: int) { return skill * 2 + 1 }
+
+# — the crawl —
+let player_hp = 100
+let skill = 12
+let wave = 1
+let kills = 0
+
+while wave <= 6 and player_hp > 0 {
+    let mhp = 30 + wave * 10
+    let brain = call_best("monster_brain", mhp)
+    print("")
+    print("== WAVE " + wave + " — a beast with " + mhp + " hp, hits for " + brain + " ==")
+    while mhp > 0 and player_hp > 0 {
+        mhp = mhp - player_hit(skill)
+        if mhp > 0 { player_hp = player_hp - call_best("monster_brain", mhp) }
+    }
+    if player_hp <= 0 {
+        print("you died on wave " + wave + " — the garden out-evolved you")
+    } else {
+        kills = kills + 1
+        print("slain. hp: " + player_hp + " — the fallen brain joins the obituaries")
+        # heal a little between waves
+        player_hp = player_hp + 15
+    }
+    wave = wave + 1
+}
+print("")
+print("crawl over: " + kills + " kills, hp " + player_hp)

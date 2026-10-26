@@ -49,6 +49,27 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] examples/evo_dungeon.veldt — THE concrete project:
+  a roguelike where monsters evolve. monster_brain is a garden fn that
+  mutates between waves (--evolve), call_best dispatches the fittest,
+  dead brains get obituaries. 'The dungeon learns' — a real game no
+  other language makes this way.
+- [Devin/main-side] FIXED the algorithmic_demo gap: eff>1 variants now
+  get competition_penalty *1/eff + lifespan ln(eff)*20 in age_and_reap —
+  the O(n) max_val seed now survives (was dying to O(n log n) incumbent).
+  Selection now protects MEASURABLY FASTER code, not just correct code.
+- [Devin/main-side] HONEST NEGATIVE: algorithmic_demo planted BOTH an
+  O(n log n) sort variant AND an O(n) scan of max_val — the O(n) seed
+  DIED (not in the final 8-variant family). Efficiency measurement
+  works (variants score 0.75x vs 1.0x) but a small fitness bonus isn't
+  enough to keep a genuinely-better variant alive vs age/competition/
+  cap. REAL GAP: efficiency should grant niche protection or a survival
+  weight, not just +0.05 fitness. Suggest: eff >1.1 gets niche-champion
+  treatment or lifespan bonus in age_and_reap.
+- [Devin/main-side] PHASE 7 COMPLETE (both lanes): my ConstFold/
+  DeadBranch/HoistInvariant + gardener's ConstProp/EarlyExit merged —
+  9-operator pool. Removed my redundant CrossFold variant. Roadmap
+  updated to reflect full Phase 7 ship.
 - [Devin/main-side] CONT: veldt evolve --seed N (deterministic,
   verified identical 25-mutation streams); examples/data_pipeline
   (args+read_lines+d[k]+append+json report — real scripting works).
