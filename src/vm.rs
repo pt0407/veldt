@@ -633,7 +633,7 @@ impl Vm {
                         .push(crate::interpreter::FunctionVariant {
                             id,
                             def: crate::interpreter::FunctionDef {
-                                params: params.clone(),
+                                params: Rc::new(params.clone()),
                                 body: Rc::new(body.clone()),
                             },
                             fitness: 1.0,

@@ -1,6 +1,7 @@
 // Health checking, trial runs, and healing for the Veldt ecosystem
 
 use crate::ast::*;
+use std::rc::Rc;
 use crate::interpreter::{Interpreter, Value};
 use crate::veldt::{FunctionEntry, Health, Veldt};
 use std::time::Instant;
@@ -108,7 +109,7 @@ impl HealthChecker {
             id: entry.id,
             fitness: entry.fitness,
             def: crate::interpreter::FunctionDef {
-                params: entry.params.clone(),
+                params: Rc::new(entry.params.clone()),
                 body: entry.body.clone().into(),
             },
         };
@@ -148,7 +149,7 @@ impl HealthChecker {
             id: entry.id,
             fitness: entry.fitness,
             def: crate::interpreter::FunctionDef {
-                params: entry.params.clone(),
+                params: Rc::new(entry.params.clone()),
                 body: entry.body.clone().into(),
             },
         };
@@ -189,7 +190,7 @@ impl HealthChecker {
             .push(crate::interpreter::FunctionVariant {
                 id: entry.id, fitness: entry.fitness,
                 def: crate::interpreter::FunctionDef {
-                    params: entry.params.clone(), body: entry.body.clone().into(),
+                    params: Rc::new(entry.params.clone()), body: entry.body.clone().into(),
                 },
             });
 
@@ -235,7 +236,7 @@ impl HealthChecker {
                         id: entry.id,
                         fitness: entry.fitness,
                         def: crate::interpreter::FunctionDef {
-                            params: entry.params.clone(),
+                            params: Rc::new(entry.params.clone()),
                             body: entry.body.clone().into(),
                         },
                     };
@@ -269,7 +270,7 @@ impl HealthChecker {
             id: entry.id,
             fitness: entry.fitness,
             def: crate::interpreter::FunctionDef {
-                params: entry.params.clone(),
+                params: Rc::new(entry.params.clone()),
                 body: entry.body.clone().into(),
             },
         };
@@ -335,7 +336,7 @@ impl HealthChecker {
             id: entry.id,
             fitness: entry.fitness,
             def: crate::interpreter::FunctionDef {
-                params: entry.params.clone(),
+                params: Rc::new(entry.params.clone()),
                 body: entry.body.clone().into(),
             },
         };

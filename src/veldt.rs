@@ -1,5 +1,6 @@
 // The Veldt ecosystem — where code lives, ages, competes, and dies
 
+use std::rc::Rc;
 use crate::ast::*;
 use crate::interpreter::{FunctionVariant, FunctionDef, Interpreter, Value};
 use serde::{Deserialize, Serialize};
@@ -238,7 +239,7 @@ impl Veldt {
                         id: entry.id,
                         fitness: entry.fitness,
                         def: FunctionDef {
-                            params: entry.params.clone(),
+                            params: Rc::new(entry.params.clone()),
                             body: std::rc::Rc::new(entry.body.clone()),
                         },
                     };
