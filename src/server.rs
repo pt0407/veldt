@@ -47,6 +47,7 @@ pub async fn start_server(port: u16) {
         .route("/api/traces", get(traces))
         .route("/api/probes", get(probes))
         .route("/api/niches", get(niches))
+        .route("/api/usage", get(usage))
         .route("/api/run", post(run_program))
         .route("/api/evolve", post(evolve))
         .route("/api/clear", post(clear_veldt))
@@ -232,6 +233,21 @@ async fn niches() -> Json<serde_json::Value> {
         "niche": n, "count": c, "avg": s / (*c).max(1) as f64, "max": mx,
     })).collect();
     Json(serde_json::json!({"niches": ni}))
+}
+
+async fn usage() -> Json<serde_json::Value> {
+    let mut veldt = veldt::Veldt::new();
+    if veldt.load().is_err() {
+        return Json(serde_json::json!({"error": "garden load failed"}));
+    }
+    let mut use_data: Vec<serde_json::Value> = veldt.functions.iter()
+        .flat_map(|(n, vs)| vs.iter().map(|e| serde_json::json!({
+            "variant": format!("{}#{}", n, e.id), "calls": e.usage_count,
+        })).collect::<Vec<_>>())
+        .collect();
+    use_data.sort_by(|a, b| b["calls"].as_u64().unwrap_or(0)
+        .cmp(&a["calls"].as_u64().unwrap_or(0)));
+    Json(serde_json::json!({"usage": use_data}))
 }
 
 #[derive(Deserialize)]
