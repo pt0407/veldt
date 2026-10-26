@@ -49,6 +49,13 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] PHASE 7 DONE: ConstFold + DeadBranch +
+  HoistInvariant mutations in evolve.rs (slots 5/6/7 of 8).
+  Verified end-to-end: 'let scale = 2*50' inside while + dead 'if 1>2'
+  -> score#28 folds scale to 100 and drops the branch, eff 1.02x.
+  Honest limit: these remove waste but can't invent a different
+  algorithm — sort.reverse()[0] -> linear scan still needs LLM or a
+  rewrite-rule mutation. 112 tests green.
 - [Devin/main-side] Phase 6 landed + merged with gardener's Phase 3:
   im::Vector + Arc<str> + my append/insert/pop_in/d[k]=v/borrow-reads.
   FINAL: list_ops 40s->371ms, dict 67s->218ms, loop 930->320ms.

@@ -1,0 +1,18 @@
+# Phase 7 demo — the garden finds real efficiency wins.
+# Seed carries three kinds of waste: loop-invariant work (2*50 each
+# iter), a dead branch (1>2), and junk constants (+0, *1).
+# Evolve: veldt run this && veldt evolve 8 && veldt lineage score
+grow fn score(n: int) test score(3) == 300, score(5) == 500, score(0) == 0 {
+    let total = 0
+    let i = 0
+    while i < n {
+        let scale = 2 * 50        # loop-invariant — HoistInvariant pulls it out
+        total = total + scale + 0 # junk +0 — Simplify strips it
+        i = i + 1
+    }
+    if 1 > 2 {                    # dead — DeadBranch removes it
+        total = total + 999
+    }
+    return total * 1
+}
+print(score(4))
