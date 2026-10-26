@@ -2069,6 +2069,35 @@ fn main() {
                     eprintln!("[exact] requires the smt feature (cargo build --features smt)");
                 }
             }
+            // --lint — strict-lint census: how clean is the garden's
+            // code? per-family warning counts, worst offenders first
+            if args.iter().any(|a| a == "--lint") {
+                let mut total = 0usize;
+                let mut flagged = 0usize;
+                let mut per_fam: Vec<(&String, usize)> = Vec::new();
+                for (name, entries) in &veldt.functions {
+                    let mut fam_warns = 0usize;
+                    for e in entries {
+                        let wrapped = ast::Stmt::Grow(ast::GrowItem::Fn(
+                            name.clone(), e.params.clone(),
+                            e.body.clone(), e.tests.clone()));
+                        let n = lint(&[wrapped]).into_iter()
+                            .filter(|w| !w.contains("defined but never called")
+                                && !w.contains("no top-level statements"))
+                            .count();
+                        if n > 0 { flagged += 1; }
+                        fam_warns += n;
+                    }
+                    total += fam_warns;
+                    if fam_warns > 0 { per_fam.push((name, fam_warns)); }
+                }
+                per_fam.sort_by(|a, b| b.1.cmp(&a.1));
+                println!("[lint] {} warnings across {} variant(s) — garden code-health",
+                         total, flagged);
+                for (f, n) in per_fam.iter().take(5) {
+                    eprintln!("  {} — {} warnings", f, n);
+                }
+            }
             // --watch — re-render on a 2s poll until interrupted
             if args.iter().any(|a| a == "--watch") {
                 loop {
