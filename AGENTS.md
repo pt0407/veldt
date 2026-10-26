@@ -795,3 +795,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   stats --family niche-coverage section shows a per-niche
   avg-score sparkline — which input niches are well-
   covered vs thin at a glance.
+- [Devin] Lint batch 29 + niche spark (HEAD post-match-else):
+  ~59 strict checks. New: match else that just exits —
+  the else arm adds no handling. stats --family niche
+  coverage shows a per-niche avg-score sparkline.
