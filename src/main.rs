@@ -192,7 +192,7 @@ fn main() {
                             g.iter().all(|c| veldt::variant_matches_in(e, name, c))))
                         .map(|e| (name.clone(), e.id, e.fitness)))
                     .fold(None::<(String, u32, f64)>, |acc, c| {
-                        if acc.map(|a| c.2 > a.2).unwrap_or(true) { Some(c) } else { acc }
+                        if acc.as_ref().map(|a| c.2 > a.2).unwrap_or(true) { Some(c) } else { acc }
                     });
                 match best {
                     Some((name, id, fit)) => {
