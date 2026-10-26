@@ -2463,6 +2463,18 @@ fn print_stats(veldt: &veldt::Veldt) {
                     let avg_len = bodies.iter().map(|b| b.len()).sum::<usize>() / bodies.len();
                     println!("  code diversity: {} unique bodies (avg {} chars)", unique.len(), avg_len);
                 }
+                // death causes — what killed the family's variants
+                let deaths: Vec<_> = veldt.obituaries.iter().filter(|o| o.name == *fam).collect();
+                if !deaths.is_empty() {
+                    let mut causes: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+                    for o in &deaths { *causes.entry(o.cause_of_death.clone()).or_insert(0) += 1; }
+                    let mut sorted: Vec<_> = causes.iter().collect();
+                    sorted.sort_by(|a, b| b.1.cmp(&a.1));
+                    println!("  death causes:");
+                    for (cause, n) in sorted.iter().take(5) {
+                        println!("    {:<20} {}", cause, n);
+                    }
+                }
             }
         }
         if veldt.fitness_history.len() >= 2 {
