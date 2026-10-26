@@ -73,6 +73,7 @@ pub async fn start_server(port: u16) {
         .route("/api/diversity", get(diversity))
         .route("/api/pressure", get(pressure))
         .route("/api/builtin_usage", get(builtin_usage))
+        .route("/api/champions", get(champions))
         .route("/api/run", post(run_program))
         .route("/api/evolve", post(evolve))
         .route("/api/clear", post(clear_veldt))
