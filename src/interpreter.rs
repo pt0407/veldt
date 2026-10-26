@@ -1293,6 +1293,45 @@ impl Interpreter {
         Ok(())
     }
 
+    /// Evaluate a behavior-tree node: ["seq", ...] all must succeed,
+    /// ["sel", ...] first success wins, ["inv", a] flips, ["act", fn]
+    /// calls fn(ctx) → bool. Returns Ok(true) on success.
+    fn bt_tick(&mut self, node: &im::Vector<Value>, ctx: &Value) -> Result<bool, String> {
+        let Some(Value::Str(kind)) = node.get(0) else {
+            return Err("bt node must start with a kind string".into());
+        };
+        match &**kind {
+            "seq" => {
+                for child in node.iter().skip(1) {
+                    let Value::List(c) = child else { return Err("bt child must be a node".into()) };
+                    if !self.bt_tick(c, ctx)? { return Ok(false); }
+                }
+                Ok(true)
+            }
+            "sel" => {
+                for child in node.iter().skip(1) {
+                    let Value::List(c) = child else { return Err("bt child must be a node".into()) };
+                    if self.bt_tick(c, ctx)? { return Ok(true); }
+                }
+                Ok(false)
+            }
+            "inv" => {
+                let Some(Value::List(c)) = node.get(1) else { return Err("inv expects one child".into()) };
+                Ok(!self.bt_tick(c, ctx)?)
+            }
+            "act" => {
+                let Some(f @ Value::Closure(_, _, _)) = node.get(1) else {
+                    return Err("act expects a closure".into())
+                };
+                match self.call_closure_value(f, vec![ctx.clone()])? {
+                    Value::Bool(b) => Ok(b),
+                    _ => Err("act closure must return bool".into()),
+                }
+            }
+            other => Err(format!("unknown bt node kind: {}", other)),
+        }
+    }
+
     pub(crate) fn try_builtin(&mut self, name: &str, args: &[Value]) -> Result<Option<Value>, String> {
         // std:sandbox gate — denied capabilities error before dispatch
         if self.caps.denied(name) {
@@ -1454,6 +1493,110 @@ impl Interpreter {
                     }
                     _ => Err("rand() expects an integer".into()),
                 }
+            }
+            // === std:render / std:ui — ASCII canvas (game pillar) ===
+            // A canvas is a dict {w, h, cells: [[str]]} — all ops return
+            // a new dict (persistent, matches the immutable-value style).
+            "canvas_new" => {
+                let (w, h) = match (args.get(0), args.get(1)) {
+                    (Some(Value::Int(w)), Some(Value::Int(h))) => (*w as usize, *h as usize),
+                    _ => return Err("canvas_new(w, h) expects two ints".into()),
+                };
+                let row: im::Vector<Value> = (0..w).map(|_| Value::Str(" ".into())).collect();
+                let cells: im::Vector<Value> = (0..h).map(|_| Value::List(row.clone())).collect();
+                let mut d = im::HashMap::new();
+                d.insert("w".to_string(), Value::Int(w as i64));
+                d.insert("h".to_string(), Value::Int(h as i64));
+                d.insert("cells".to_string(), Value::List(cells));
+                Ok(Some(Value::Dict(d)))
+            }
+            "canvas_set" => {
+                let (c, x, y, ch) = match (args.get(0), args.get(1), args.get(2), args.get(3)) {
+                    (Some(Value::Dict(d)), Some(Value::Int(x)), Some(Value::Int(y)), Some(Value::Str(ch)))
+                        => (d.clone(), *x as usize, *y as usize, ch.clone()),
+                    _ => return Err("canvas_set(c, x, y, ch) expects dict, x, y, str".into()),
+                };
+                let Some(Value::List(rows)) = c.get("cells") else { return Err("canvas: no cells".into()) };
+                if y >= rows.len() { return Ok(Some(Value::Dict(c))); }
+                let mut rows2 = rows.clone();
+                if let Value::List(r2) = &rows[y] {
+                    let mut nr = r2.clone();
+                    if x < nr.len() { nr[x] = Value::Str(ch); }
+                    rows2[y] = Value::List(nr);
+                }
+                let mut d = c.clone();
+                d.insert("cells".to_string(), Value::List(rows2));
+                Ok(Some(Value::Dict(d)))
+            }
+            "canvas_render" => {
+                let Some(Value::Dict(d)) = args.get(0) else { return Err("canvas_render(c) expects a canvas".into()) };
+                let Some(Value::List(rows)) = d.get("cells") else { return Err("canvas: no cells".into()) };
+                let mut out = String::new();
+                for r in rows {
+                    if let Value::List(row) = r {
+                        for c in row {
+                            if let Value::Str(s) = c { out.push_str(s.as_ref()); }
+                        }
+                        out.push('\n');
+                    }
+                }
+                Ok(Some(Value::Str(out.into())))
+            }
+            "canvas_clear" => {
+                let (d, ch) = match (args.get(0), args.get(1)) {
+                    (Some(Value::Dict(d)), Some(Value::Str(ch))) => (d.clone(), ch.clone()),
+                    (Some(Value::Dict(d)), None) => (d.clone(), " ".into()),
+                    _ => return Err("canvas_clear(c, ch?) expects a canvas".into()),
+                };
+                let (w, h) = (d.get("w").and_then(|v| if let Value::Int(w) = v { Some(*w as usize) } else { None }),
+                              d.get("h").and_then(|v| if let Value::Int(h) = v { Some(*h as usize) } else { None }));
+                let (Some(w), Some(h)) = (w, h) else { return Err("canvas: missing w/h".into()) };
+                let row: im::Vector<Value> = (0..w).map(|_| Value::Str(ch.clone())).collect();
+                let cells: im::Vector<Value> = (0..h).map(|_| Value::List(row.clone())).collect();
+                let mut d2 = d.clone();
+                d2.insert("cells".to_string(), Value::List(cells));
+                Ok(Some(Value::Dict(d2)))
+            }
+            // === std:balance — monte-carlo playtesting ===
+            "balance_test" => {
+                let (f, trials) = match (args.get(0), args.get(1)) {
+                    (Some(f @ Value::Closure(_, _, _)), Some(Value::Int(t))) => (f, *t as usize),
+                    _ => return Err("balance_test(fn, trials) expects a closure and int".into()),
+                };
+                let (mut wins, mut losses, mut draws, mut score_sum) = (0usize, 0usize, 0usize, 0f64);
+                for _ in 0..trials {
+                    let r = self.call_closure_value(f, vec![])?;
+                    match r {
+                        Value::Dict(d) => {
+                            let win = d.get("win").map(|v| matches!(v, Value::Bool(true))).unwrap_or(false);
+                            let draw = d.get("draw").map(|v| matches!(v, Value::Bool(true))).unwrap_or(false);
+                            let score = d.get("score").and_then(|v| match v { Value::Int(i) => Some(*i as f64), Value::Float(f) => Some(*f), _ => None }).unwrap_or(0.0);
+                            score_sum += score;
+                            if draw { draws += 1; } else if win { wins += 1; } else { losses += 1; }
+                        }
+                        Value::Bool(true) => wins += 1,
+                        Value::Bool(false) => losses += 1,
+                        Value::Int(s) => { score_sum += s as f64; if s > 0 { wins += 1; } else { losses += 1; } }
+                        _ => return Err("balance_test fn must return dict/bool/int".into()),
+                    }
+                }
+                let mut out = im::HashMap::new();
+                out.insert("trials".to_string(), Value::Int(trials as i64));
+                out.insert("wins".to_string(), Value::Int(wins as i64));
+                out.insert("losses".to_string(), Value::Int(losses as i64));
+                out.insert("draws".to_string(), Value::Int(draws as i64));
+                out.insert("win_rate".to_string(), Value::Float(if trials > 0 { wins as f64 / trials as f64 } else { 0.0 }));
+                out.insert("avg_score".to_string(), Value::Float(if trials > 0 { score_sum / trials as f64 } else { 0.0 }));
+                Ok(Some(Value::Dict(out)))
+            }
+            // === std:behavior — behavior trees ===
+            // tree: ["seq", a, b] | ["sel", a, b] | ["act", fn] | ["inv", a]
+            "bt_tick" => {
+                let (tree, ctx) = match (args.get(0), args.get(1)) {
+                    (Some(Value::List(t)), Some(ctx)) => (t, ctx.clone()),
+                    _ => return Err("bt_tick(tree, ctx) expects a tree and context".into()),
+                };
+                Ok(Some(Value::Bool(self.bt_tick(tree, &ctx)?)))
             }
             "read_file" => {
                 if args.len() != 1 { return Err("read_file() expects 1 argument".into()); }
