@@ -148,7 +148,7 @@ impl JitEngine {
                 // inline int builtins (abs/max/min) don't need fns —
                 // they lower to native ops in the Call arm below
                 let inlined = matches!(cn.as_str(),
-                    "abs" | "min" | "max"
+                    "abs" | "min" | "max" | "clamp"
                     | "floor" | "ceil" | "round" | "sqrt");
                 if cn != own_name && !inlined {
                     let vf = match fns.get(cn) {
@@ -327,6 +327,19 @@ impl JitEngine {
                                 let nx = b.ins().isub(z, x);
                                 let neg = b.ins().icmp(IntCC::SignedLessThan, x, z);
                                 stack.push(b.ins().select(neg, nx, x));
+                                pc += 1; continue;
+                            }
+                            ("clamp", 3) => {
+                                // clamp(v, lo, hi) = v<lo?lo : v>hi?hi : v
+                                let (Some(hi), Some(lo), Some(v)) =
+                                    (stack.pop(), stack.pop(), stack.pop())
+                                    else { fail_pc = pc; ok = false; break; };
+                                let lt = b.ins().icmp(
+                                    IntCC::SignedLessThan, v, lo);
+                                let gt = b.ins().icmp(
+                                    IntCC::SignedGreaterThan, v, hi);
+                                let h = b.ins().select(gt, hi, v);
+                                stack.push(b.ins().select(lt, lo, h));
                                 pc += 1; continue;
                             }
                             ("max", 2) | ("min", 2) => {
