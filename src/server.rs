@@ -64,6 +64,7 @@ pub async fn start_server(port: u16) {
         .route("/api/args", get(args))
         .route("/api/sizes", get(sizes))
         .route("/api/last_used", get(last_used))
+        .route("/api/niche_scores", get(niche_scores))
         .route("/api/run", post(run_program))
         .route("/api/evolve", post(evolve))
         .route("/api/clear", post(clear_veldt))
@@ -515,6 +516,20 @@ async fn last_used() -> Json<serde_json::Value> {
         })).collect::<Vec<_>>())
         .collect();
     Json(serde_json::json!({"last_used": stale_data}))
+}
+
+async fn niche_scores() -> Json<serde_json::Value> {
+    let mut veldt = veldt::Veldt::new();
+    if veldt.load().is_err() {
+        return Json(serde_json::json!({"error": "garden load failed"}));
+    }
+    let niche_data: Vec<serde_json::Value> = veldt.functions.iter()
+        .flat_map(|(n, vs)| vs.iter().map(|e| serde_json::json!({
+            "variant": format!("{}#{}", n, e.id),
+            "niches": e.niche_scores,
+        })).collect::<Vec<_>>())
+        .collect();
+    Json(serde_json::json!({"niche_scores": niche_data}))
 }
 
 #[derive(Deserialize)]
