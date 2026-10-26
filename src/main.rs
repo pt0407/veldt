@@ -1284,6 +1284,51 @@ fn print_stats(veldt: &veldt::Veldt) {
             .map(|(n, a)| format!("{}:{}", n, a)).collect();
         println!("avg size/family: {}", line.join(" "));
     }
+    // avg args per family — per-lineage arity (signature complexity)
+    let mut fam_args: Vec<(&String, f64)> = veldt.functions.iter()
+        .map(|(n, vs)| {
+            let avg = vs.iter().map(|e| e.params.len() as f64).sum::<f64>()
+                / vs.len().max(1) as f64;
+            (n, avg)
+        }).collect();
+    fam_args.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    if !fam_args.is_empty() {
+        let line: Vec<String> = fam_args.iter().take(8)
+            .map(|(n, a)| format!("{}:{:.0}", n, a)).collect();
+        println!("avg args/family: {}", line.join(" "));
+    }
+    // avg lifespan per family — per-lineage longevity
+    let mut fam_life: Vec<(&String, f64)> = veldt.functions.iter()
+        .map(|(n, vs)| {
+            let avg = vs.iter().map(|e| e.lifespan).sum::<f64>()
+                / vs.len().max(1) as f64;
+            (n, avg)
+        }).collect();
+    fam_life.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    if !fam_life.is_empty() {
+        let line: Vec<String> = fam_life.iter().take(8)
+            .map(|(n, a)| format!("{}:{:.0}", n, a)).collect();
+        println!("avg lifespan/family: {}", line.join(" "));
+    }
+    // avg usage per niche — per-niche call pressure
+    let mut niche_use: std::collections::HashMap<String, (u64, usize)> =
+        std::collections::HashMap::new();
+    for vs in veldt.functions.values() {
+        for e in vs {
+            for (n, _) in &e.niche_scores {
+                let ent = niche_use.entry(n.clone()).or_default();
+                ent.0 += e.usage_count; ent.1 += 1;
+            }
+        }
+    }
+    let mut niche_use_list: Vec<(String, f64)> = niche_use.into_iter()
+        .map(|(n, (u, c))| (n, u as f64 / c.max(1) as f64)).collect();
+    niche_use_list.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    if !niche_use_list.is_empty() {
+        let line: Vec<String> = niche_use_list.iter().take(8)
+            .map(|(n, a)| format!("{}:{:.0}", n, a)).collect();
+        println!("avg usage/niche: {}", line.join(" "));
+    }
     // fitness trend — peak per run, is the garden improving?
     if veldt.fitness_history.len() >= 2 {
         let trend: Vec<String> = veldt.fitness_history.iter()
