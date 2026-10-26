@@ -768,6 +768,12 @@ pub(crate) fn deserialize_value(s: &str) -> Result<Value, String> {
 ///         health trust origin calls
 /// ops: > < >= <= == != ~ (contains)
 pub fn variant_matches(e: &FunctionEntry, clause: &str) -> bool {
+    variant_matches_in(e, "", clause)
+}
+
+/// Evaluate a clause against a variant inside a named family —
+/// the `family` field matches the family name.
+pub fn variant_matches_in(e: &FunctionEntry, family: &str, clause: &str) -> bool {
     // `!`/`not` prefix negates the clause
     let (negate, clause) = if let Some(c) = clause.strip_prefix('!') {
         (true, c.trim_start())
@@ -803,6 +809,9 @@ pub fn variant_matches(e: &FunctionEntry, clause: &str) -> bool {
     }
 
     let r = match field {
+        "family" => {
+            match op { "==" => family == val, "!=" => family != val, "~" => family.contains(&val), _ => false }
+        }
         "health" => {
             let h = match &e.health {
                 Health::Healthy => "healthy",

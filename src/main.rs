@@ -749,7 +749,7 @@ fn main() {
                 for (name, vs) in &veldt.functions {
                     let keep: Vec<_> = vs.iter()
                         .filter(|e| or_groups.iter().any(|g|
-                            g.iter().all(|c| veldt::variant_matches(e, c))))
+                            g.iter().all(|c| veldt::variant_matches_in(e, name, c))))
                         .cloned().collect();
                     if !keep.is_empty() { filtered.functions.insert(name.clone(), keep); }
                 }
