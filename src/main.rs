@@ -1067,6 +1067,15 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
             out.push(format!("let {} bound but never read", name));
         }
     }
+    // unused imports — alias bound but never referenced
+    for s in stmts {
+        if let Stmt::Import(path, Some(alias)) = s {
+            if !alias.starts_with('_')
+                && !stmts.iter().any(|x| stmt_mentions(x, alias)) {
+                out.push(format!("import \"{}\" as {} — alias never used", path, alias));
+            }
+        }
+    }
 }
 
 fn stmt_mentions(s: &ast::Stmt, name: &str) -> bool {
