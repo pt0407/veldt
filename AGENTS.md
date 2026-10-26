@@ -782,3 +782,6 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   checks. The bare-expression check is now pure-expr only
   — Var/Lit/BinOp/UnOp/Index bodies flagged, Call/
   MethodCall bodies excluded (side-effecting).
+- [Devin] Lint batch 26 (HEAD post-binding-copy): ~56 strict
+  checks. New: let x = <param/for-var> — copies a binding
+  that could just be used directly.
