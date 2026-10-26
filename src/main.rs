@@ -3526,6 +3526,10 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                     && b.as_ref().map(|e| e.len() == 1 && matches!(&e[0], Stmt::ExprStmt(x) if is_pure(x))).unwrap_or(true) {
                     out.push("if body is a bare expression — computed and discarded".into());
                 }
+                if a.len() == 1 && matches!(a[0], Stmt::Print(_))
+                    && b.as_ref().map(|e| e.len() == 1 && matches!(e[0], Stmt::Print(_))).unwrap_or(true) {
+                    out.push("if body only prints — likely a debug trace".into());
+                }
                 if b.is_none() && a.len() == 1 {
                     if let Stmt::If(_, _, inner_else) = &a[0] {
                         if inner_else.is_none() {
@@ -3562,6 +3566,9 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
             Stmt::While(cond, body) => {
                 if body.len() == 1 && matches!(body[0], Stmt::ExprStmt(_)) {
                     out.push("loop body is a bare expression — computed and discarded".into());
+                }
+                if body.len() == 1 && matches!(body[0], Stmt::Print(_)) {
+                    out.push("loop body only prints — likely a debug trace".into());
                 }
                 if let Some(lit) = const_bool(cond) {
                     out.push(format!("loop on constant {} — dead or infinite", lit));
@@ -3608,6 +3615,9 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
             Stmt::For(name, iter, body) => {
                 if body.len() == 1 && matches!(body[0], Stmt::ExprStmt(_)) {
                     out.push("loop body is a bare expression — computed and discarded".into());
+                }
+                if body.len() == 1 && matches!(body[0], Stmt::Print(_)) {
+                    out.push("loop body only prints — likely a debug trace".into());
                 }
                 if let Expr::List(items) = iter {
                     if items.is_empty() { out.push("for over an empty list — dead loop".into()); }
