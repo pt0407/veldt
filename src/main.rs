@@ -5004,6 +5004,18 @@ fn print_family_detail(veldt: &veldt::Veldt, fam: &String, vs: &[veldt::Function
             println!("    {}#{} — {} (age {})", o.name, o.id, o.cause_of_death, o.age);
         }
     }
+    // death timeline — deaths per run (the family's mortality curve)
+    let mut died: std::collections::HashMap<u64, usize> = std::collections::HashMap::new();
+    for o in veldt.obituaries.iter().filter(|o| o.name == *fam) {
+        *died.entry(o.timestamp).or_insert(0) += 1;
+    }
+    if died.len() > 1 {
+        let mut runs: Vec<_> = died.iter().collect();
+        runs.sort_by_key(|(r, _)| *r);
+        let timeline: Vec<_> = runs.iter().map(|(r, n)| format!("{}:{}", **r % 100, n)).collect();
+        let counts: Vec<f64> = runs.iter().map(|(_, n)| **n as f64).collect();
+        println!("  death timeline: {}  {}", timeline.join(" "), spark(&counts));
+    }
     // probe pass rate — the family's test-suite health
     if let Some(probes) = veldt.probes.get(fam) {
         let passed = probes.iter().filter(|p|
