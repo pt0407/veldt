@@ -339,7 +339,27 @@ fn main() {
                 eprintln!("Usage: veldt tournament <url> [name]  (pull, trial, crown winners, push back)");
                 process::exit(1);
             }
-            tournament(&args[2], args.get(3).map(|s| s.as_str()));
+            if args.get(3).map(|s| s.as_str()) == Some("--filter") {
+                // --filter <expr> — tournament only families with matching variants
+                let expr = args.get(4).map(|s| s.as_str()).unwrap_or("");
+                let mut veldt = veldt::Veldt::new();
+                if let Err(e) = veldt.load() { eprintln!("Error: {}", e); process::exit(1); }
+                let or_groups: Vec<Vec<&str>> = expr.split("||")
+                    .map(|g| g.split("&&").map(|s| s.trim()).collect())
+                    .collect();
+                let names: Vec<String> = veldt.functions.iter()
+                    .filter(|(_, vs)| vs.iter().any(|e|
+                        or_groups.iter().any(|g|
+                            g.iter().all(|c| veldt::variant_matches(e, c)))))
+                    .map(|(n, _)| n.clone())
+                    .collect();
+                println!("[tournament --filter {} — {} families]", expr, names.len());
+                for name in &names {
+                    tournament(&args[2], Some(name));
+                }
+            } else {
+                tournament(&args[2], args.get(3).map(|s| s.as_str()));
+            }
         }
         "fuzz" => {
             if args.len() < 3 {
