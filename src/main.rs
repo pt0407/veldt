@@ -3779,6 +3779,19 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                                 out.push(format!("match on {} — bound to a computed expr", v));
                                 break;
                             }
+                            // match a where a is bound to Var(b) bound to a literal — transitive const
+                            if n == v {
+                                if let Expr::Var(w) = e {
+                                    for (_, s2) in stmts.iter().enumerate().take(i) {
+                                        if let Stmt::Let(n2, e2) = s2 {
+                                            if n2 == w && matches!(e2, Expr::Int(_) | Expr::Str(_) | Expr::Bool(_) | Expr::Null) {
+                                                out.push(format!("match on {} — transitive constant through {}", v, w));
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
