@@ -628,3 +628,9 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   which probes are hard vs easy at a glance, not just the
   overall 40/40 count. Every distribution/rate/count surface
   in veldt now visualizes its shape.
+- [Devin] Evolve trial delta (HEAD post-6083207): Trial events
+  carry parent_fitness; the printer shows Δ ±x.xx per trial —
+  which mutations regressed vs improved at a glance. Every
+  surface in veldt now visualizes shape + delta: distributions
+  (sparks), comparisons (fitness bars), diffs (Δ headers),
+  trials (Δ per mutation).
