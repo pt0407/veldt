@@ -49,6 +49,12 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] JIT UPDATE 18: veldt.prefer_vm — runtime-only
+  flag on the struct (not serialized). execute_source_opts reads it
+  so EVERY pipeline — /api/run, /api/agent, bench, internal code-runs
+  — routes through the fast engine with one field set. Also: VM's
+  PrintOut now goes through helper.emit_line (print_buffer capture
+  works under --vm — /api/run output was silently uncapturable).
 - [Devin/main-side] JIT UPDATE 17: /api/run {"vm": true} —
   execute_source_opts_full(source,veldt,caps,use_vm) threads the
   flag through the shared pipeline (CLI/api/agent/bench). VM's
