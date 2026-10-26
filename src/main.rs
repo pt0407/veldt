@@ -1666,6 +1666,10 @@ fn main() {
                     scoped.insert(fam.clone(), vs.clone());
                 }
                 veldt.functions = scoped;
+                // scope the side-tables too (probes/traces/obituaries are family-keyed)
+                veldt.probes.retain(|k, _| k == fam);
+                veldt.traces.retain(|k, _| k == fam);
+                veldt.obituaries.retain(|o| o.name == *fam);
             }
             if args.iter().any(|a| a == "--json") {
                 let mut total = 0usize;
