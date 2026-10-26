@@ -848,3 +848,6 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 - [Devin] Lint batch 30 (HEAD post-match-print): ~60 strict
   checks. New: match arm/else that only prints — the arm
   adds no handling, no recovery, no branching.
+- [Devin] Lint batch 31 (HEAD post-body-print): ~62 strict
+  checks. New: if/while/for/try body that only prints —
+  likely a debug trace left in.
