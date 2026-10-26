@@ -1178,3 +1178,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 - [Devin] LSP lint anchors refined: diagnostics now point at
   the offending statement (let/call/keyword scan inside the
   fn body), not the fn header.
+- [Devin] agent lint intent: "lint fib"/"code health"/
+  "warnings" — per-variant warnings + defect-class split,
+  or garden census. The Gardener reports code health
+  conversationally now.
