@@ -1096,6 +1096,19 @@ fn print_stats(veldt: &veldt::Veldt) {
         println!("staleness: {} of {} deaths sat 10+ runs idle (avg {}, max {})",
             stale_10, veldt.obituaries.len(), avg, max);
     }
+    // fitness at death — are the dead the weakest (selection working)
+    if !veldt.obituaries.is_empty() {
+        let dead_fits: Vec<f64> = veldt.functions.values()
+            .flat_map(|vs| vs.iter().map(|e| e.fitness))
+            .collect();
+        let live_peak = dead_fits.iter().copied()
+            .fold(f64::NEG_INFINITY, f64::max);
+        let dead_ages: Vec<f64> = veldt.obituaries.iter()
+            .map(|o| o.age as f64).collect();
+        let avg_dead_age = dead_ages.iter().sum::<f64>() / dead_ages.len() as f64;
+        println!("selection: live peak {:.2} vs dead avg age {:.0} runs",
+            live_peak, avg_dead_age);
+    }
     // fitness trend — peak per run, is the garden improving?
     if veldt.fitness_history.len() >= 2 {
         let trend: Vec<String> = veldt.fitness_history.iter()
