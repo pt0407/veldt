@@ -172,6 +172,20 @@ fn main() {
             push_garden(&url);
             eprintln!("[SWARM] sync complete — both gardens merged");
         }
+        "play" => {
+            // veldt play <demo> — run a bundled game from examples/
+            if args.len() < 3 {
+                eprintln!("Usage: veldt play <demo>  (e.g. veldt play dungeon)");
+                process::exit(1);
+            }
+            let path = format!("examples/{}.veldt", args[2]);
+            if !std::path::Path::new(&path).exists() {
+                eprintln!("No demo '{}' — try: dungeon", args[2]);
+                process::exit(1);
+            }
+            run_program(&path, args.iter().any(|a| a == "--trace"),
+                args.iter().any(|a| a == "--evolve"));
+        }
         "tournament" => {
             if args.len() < 3 {
                 eprintln!("Usage: veldt tournament <url> [name]  (pull, trial, crown winners, push back)");
