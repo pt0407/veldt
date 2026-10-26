@@ -566,6 +566,25 @@ fn main() {
                 }
                 println!("=== The Veldt (fitness >= {}) ===", min);
                 filtered.print_garden(sick_only, healthy_only);
+            } else if let Some(fam) = args.iter().position(|a| a == "--usage_rate_fam")
+                .and_then(|p| args.get(p + 1)).cloned() {
+                // --usage_rate_fam <name> — variants in this family sorted by usage/age
+                let mut sorted = veldt::Veldt::new();
+                sorted.probes = veldt.probes.clone();
+                sorted.obituaries = veldt.obituaries.clone();
+                sorted.run_count = veldt.run_count;
+                sorted.garden_path = veldt.garden_path.clone();
+                if let Some(vs) = veldt.functions.get(&fam) {
+                    let mut sorted_vs = vs.clone();
+                    sorted_vs.sort_by(|a, b| {
+                        let ra = if a.age > 0 { a.usage_count as f64 / a.age as f64 } else { 0.0 };
+                        let rb = if b.age > 0 { b.usage_count as f64 / b.age as f64 } else { 0.0 };
+                        rb.partial_cmp(&ra).unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                    sorted.functions.insert(fam.clone(), sorted_vs);
+                }
+                println!("=== The Veldt ({} most-called-per-run first) ===", fam);
+                sorted.print_garden(sick_only, healthy_only);
             } else if let Some(fam) = args.iter().position(|a| a == "--fit_rate_fam")
                 .and_then(|p| args.get(p + 1)).cloned() {
                 // --fit_rate_fam <name> — variants in this family sorted by fitness/age
