@@ -421,6 +421,7 @@ async fn mutation() -> Json<serde_json::Value> {
 #[derive(Deserialize)]
 struct FilterRequest {
     expr: Option<String>,
+    sort: Option<String>,
 }
 
 async fn filter_garden(
@@ -434,20 +435,29 @@ async fn filter_garden(
     let or_groups: Vec<Vec<&str>> = expr.split("||")
         .map(|g| g.split("&&").map(|s| s.trim()).collect())
         .collect();
-    let mut out = serde_json::Map::new();
+    let mut filtered = std::collections::HashMap::new();
     for (name, vs) in &veldt.functions {
         let keep: Vec<_> = vs.iter()
             .filter(|e| or_groups.iter().any(|g|
                 g.iter().all(|c| crate::veldt::variant_matches(e, c))))
-            .map(|e| serde_json::json!({
-                "id": e.id, "fitness": e.fitness, "age": e.age,
-                "usage": e.usage_count, "trust": format!("{:?}", e.trust),
-                "health": format!("{:?}", e.health), "origin": e.origin,
-            }))
-            .collect();
-        if !keep.is_empty() { out.insert(name.clone(), serde_json::json!(keep)); }
+            .cloned().collect();
+        if !keep.is_empty() { filtered.insert(name.clone(), keep); }
     }
-    Json(serde_json::json!({"expr": expr, "families": out}))
+    if let Some(field) = &req.sort {
+        for vs in filtered.values_mut() {
+            crate::veldt::sort_variants(vs, field);
+        }
+    }
+    let mut out = serde_json::Map::new();
+    for (name, vs) in &filtered {
+        let keep: Vec<_> = vs.iter().map(|e| serde_json::json!({
+            "id": e.id, "fitness": e.fitness, "age": e.age,
+            "usage": e.usage_count, "trust": format!("{:?}", e.trust),
+            "health": format!("{:?}", e.health), "origin": e.origin,
+        })).collect();
+        out.insert(name.clone(), serde_json::json!(keep));
+    }
+    Json(serde_json::json!({"expr": expr, "sort": req.sort, "families": out}))
 }
 
 async fn families() -> Json<serde_json::Value> {
