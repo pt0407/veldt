@@ -565,6 +565,32 @@ async fn deaths() -> Json<serde_json::Value> {
         .collect::<Vec<_>>()}))
 }
 
+async fn selection() -> Json<serde_json::Value> {
+    let mut veldt = veldt::Veldt::new();
+    if veldt.load().is_err() {
+        return Json(serde_json::json!({"error": "garden load failed"}));
+    }
+    let live_peak: f64 = veldt.functions.values()
+        .flat_map(|vs| vs.iter().map(|e| e.fitness))
+        .fold(f64::NEG_INFINITY, f64::max);
+    let dead_age: f64 = if !veldt.obituaries.is_empty() {
+        veldt.obituaries.iter().map(|o| o.age as f64).sum::<f64>()
+            / veldt.obituaries.len() as f64
+    } else { 0.0 };
+    let (mut h, mut s, mut d) = (0usize, 0usize, 0usize);
+    for o in &veldt.obituaries {
+        match o.health {
+            crate::veldt::Health::Healthy => h += 1,
+            crate::veldt::Health::Sick(_) => s += 1,
+            crate::veldt::Health::Dying => d += 1,
+        }
+    }
+    Json(serde_json::json!({
+        "live_peak": live_peak, "dead_avg_age": dead_age,
+        "death_health": {"healthy": h, "sick": s, "dying": d},
+    }))
+}
+
 #[derive(Deserialize)]
 struct CallRequest { name: String, variant: Option<u32>, args: Option<Vec<serde_json::Value>> }
 
