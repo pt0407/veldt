@@ -45,6 +45,12 @@ fn step(kind: &'static str, text: impl Into<String>) -> AgentStep {
 // grow + birth-check, heal the sick, age + reap. Used by both the
 // /api/run endpoint and the agent.
 pub fn execute_source(source: &str, veldt: &mut Veldt) -> ExecResult {
+    execute_source_opts(source, veldt, crate::interpreter::Caps::allow_all())
+}
+
+/// execute_source with capability control — sandboxed callers get a
+/// Stage-0 interpreter (fs/net/proc all denied).
+pub fn execute_source_opts(source: &str, veldt: &mut Veldt, caps: crate::interpreter::Caps) -> ExecResult {
     let mut output = String::new();
     let mut events = Vec::new();
 
@@ -76,6 +82,7 @@ pub fn execute_source(source: &str, veldt: &mut Veldt) -> ExecResult {
 
     let mut interp = Interpreter::new();
     interp.trace_calls = true;
+    interp.caps = caps;
     interp.call_stack.clear();
     veldt.load_into_interpreter(&mut interp);
 
