@@ -2178,10 +2178,27 @@ fn main() {
                 } else {
                     serde_json::Map::new()
                 };
+                // lint census for the JSON consumer — warnings +
+                // defect-class counts, same wrap as check --garden
+                let (mut lint_w, mut lint_d) = (0usize, 0usize);
+                for (name, vs) in &veldt.functions {
+                    for e in vs {
+                        let wrapped = ast::Stmt::Grow(ast::GrowItem::Fn(
+                            name.clone(), e.params.clone(),
+                            e.body.clone(), e.tests.clone()));
+                        for w in lint(&[wrapped]) {
+                            if w.contains("defined but never called")
+                                || w.contains("no top-level statements") { continue; }
+                            lint_w += 1;
+                            if crate::evolve::is_realbug_warning(&w) { lint_d += 1; }
+                        }
+                    }
+                }
                 let mut base = serde_json::json!({
                     "lineages": veldt.functions.len(), "variants": total,
                     "healthy": healthy, "sick": sick, "dying": dying,
                     "seedling": seed, "established": estab, "canonical": canon,
+                    "lint_warnings": lint_w, "lint_defects": lint_d,
                     "probes": veldt.probes.values().map(|v| v.len()).sum::<usize>(),
                     "deaths": veldt.obituaries.len(), "runs": veldt.run_count,
                     "builtin_usage": use_count.iter().map(|(b, c)| serde_json::json!({(*b): c})).collect::<Vec<_>>(),
