@@ -3561,6 +3561,11 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                                                 out.push(format!("let {} = {} — {} is bound to a literal through {}", name, v, v, w));
                                                 break;
                                             }
+                                            // let a = b where b was let-bound to Var(c) bound to a call — transitive call
+                                            if n2 == w && matches!(e2, Expr::Call(..) | Expr::MethodCall(..)) {
+                                                out.push(format!("let {} = {} — {} is bound to a call through {}", name, v, v, w));
+                                                break;
+                                            }
                                         }
                                     }
                                 }
