@@ -49,6 +49,15 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/gardener] SORT DSL + COMPOSE: `--sort <field>` sorts variants
+  (fields: fitness age usage size args lifespan last_used niches
+  fit_rate usage_rate size_rate efficiency niche_score id origin
+  health trust). `--filter` + `--sort` compose — `garden --filter
+  "health == healthy" --sort age` filters then sorts. Usable in
+  garden/stats/lineage/find/evolve + `/api/filter?sort=`.
+  `sort_variants` is in `veldt.rs` (shared with `variant_matches`).
+  The 155+ garden flags are now covered by the DSL — consolidation
+  could remove the mechanical `_fam` variants.
 - [Devin/gardener] FILTER DSL + FIX: `veldt garden --filter <expr>`
   — composable variant query (`--filter "fitness > 1.5 && age < 100"`,
   `||` for OR groups). Fields: fitness age usage size args lifespan
