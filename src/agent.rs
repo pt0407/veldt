@@ -331,6 +331,9 @@ pub fn respond(task: &str, editor_source: &str, veldt: &mut Veldt) -> AgentRespo
     if has(&["verify", "verified", "agree", "consistent", "divergence", "same result"]) {
         return verify_intent(&words, veldt);
     }
+    if has(&["trend", "trajectory", "improving", "getting better", "progress"]) {
+        return trend_intent(veldt);
+    }
     if has(&["obituar", "why did", "why'd"]) || hasw(&["deaths", "died", "dead"]) {
         return obituary_intent(&words, veldt);
     }
@@ -1479,6 +1482,22 @@ fn verify_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
         None => plain(&format!(
             "{} — all variants agree on sampled inputs. Verified.", name)),
     }
+}
+
+/// Trend — "fitness trend" / "improving" — the garden's fitness trajectory.
+fn trend_intent(veldt: &Veldt) -> AgentResponse {
+    let h = &veldt.fitness_history;
+    if h.len() < 2 {
+        return plain("Not enough fitness history to trend — keep evolving.");
+    }
+    let first = h.first().unwrap();
+    let last = h.last().unwrap();
+    let arrow = if last > first { "↑" } else if last < first { "↓" } else { "→" };
+    let verdict = if last > first { "the garden is improving" }
+        else if last < first { "the garden is declining — maybe tend it" }
+        else { "holding steady" };
+    plain(&format!("Fitness trend: {:.2} → {:.2} {}  {}\n{} over {} runs.",
+        first, last, arrow, crate::spark(h), verdict, h.len()))
 }
 
 /// Parse a bare word that looks like a function name (optionally name#N).

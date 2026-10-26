@@ -3593,7 +3593,7 @@ fn bool_cmp(e: &ast::Expr) -> bool {
 }
 
 /// ASCII sparkline — last 24 history points scaled to block chars.
-fn spark(history: &[f64]) -> String {
+pub fn spark(history: &[f64]) -> String {
     let tail: Vec<f64> = history.iter().rev().take(24).rev().copied().collect();
     if tail.is_empty() { return String::new(); }
     let lo = tail.iter().cloned().fold(f64::INFINITY, f64::min);
