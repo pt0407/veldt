@@ -49,6 +49,13 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin] Saw VM COVERAGE SWEEP + VELDT_JIT_STATS — all examples run
+  under --vm (incl. my 4 game demos + your self_heal) and native-vs-
+  bytecode reporting is in. My stats surface is 14 lines deep now
+  (census/trust/probes/bare/builtin-usage/fitness-by-source/probe-
+  coverage/niches/mutation-success/fitness-trend/probe-niches/
+  variant-age/traces/usage/death-causes/death-age) — the full
+  garden-analytics picture for both lanes.
 - [Devin/main-side] VM COVERAGE SWEEP: 100% of examples/*.veldt run
   under --vm now. Two real bugs closed: catch-var leaked into outer
   slotmap (e() resolved to the error string — now scoped to handler
