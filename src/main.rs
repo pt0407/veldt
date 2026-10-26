@@ -4921,7 +4921,9 @@ fn print_family_detail(veldt: &veldt::Veldt, fam: &String, vs: &[veldt::Function
     if !niche_counts.is_empty() {
         let avg = niche_counts.iter().sum::<usize>() as f64 / niche_counts.len() as f64;
         let max = niche_counts.iter().max().unwrap();
-        println!("  niches: avg {:.1} (peak {})", avg, max);
+        let mut sorted: Vec<f64> = niche_counts.iter().map(|n| *n as f64).collect();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        println!("  niches: avg {:.1} (peak {})  {}", avg, max, spark(&sorted));
     }
     // efficiency — the family's steps-efficiency profile
     let effs: Vec<f64> = vs.iter().map(|e| e.efficiency).collect();
