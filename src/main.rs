@@ -2522,6 +2522,20 @@ fn print_stats(veldt: &veldt::Veldt) {
                 if llm_n > 0 {
                     println!("  LLM-bred: {} variants", llm_n);
                 }
+                // immigrant origins — which gardens the immigrants came from
+                let mut imm_sources: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+                for e in vs.iter().filter(|e| e.origin.contains("immigrant")) {
+                    let src = e.origin.split(':').next().unwrap_or("unknown").to_string();
+                    *imm_sources.entry(src).or_insert(0) += 1;
+                }
+                if !imm_sources.is_empty() {
+                    println!("  immigrant origins:");
+                    let mut sorted: Vec<_> = imm_sources.iter().collect();
+                    sorted.sort_by(|a, b| b.1.cmp(&a.1));
+                    for (src, n) in sorted.iter().take(5) {
+                        println!("    {:<20} {}", src, n);
+                    }
+                }
             }
         }
         if veldt.fitness_history.len() >= 2 {
