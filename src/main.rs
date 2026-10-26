@@ -4137,11 +4137,15 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                         }
                     }
                 }
-                // dead store — next mention of the var is another assign, not a read
-                let next = stmts.iter().skip(i + 1)
-                    .find(|s| stmt_mentions(s, name) || matches!(s, Stmt::Assign(n, _) if n == name));
-                if matches!(next, Some(Stmt::Assign(n, _)) if n == name) {
-                    out.push(format!("{} overwritten before being read — dead store", name));
+                // dead store — next mention of the var is another assign, not
+                // a read. A self-referential RHS (x = x.put(..), x = f(x))
+                // reads the old value itself — never a dead store.
+                if !expr_mentions(e, name) {
+                    let next = stmts.iter().skip(i + 1)
+                        .find(|s| stmt_mentions(s, name) || matches!(s, Stmt::Assign(n, _) if n == name));
+                    if matches!(next, Some(Stmt::Assign(n, _)) if n == name) {
+                        out.push(format!("{} overwritten before being read — dead store", name));
+                    }
                 }
             }
             Stmt::If(cond, a, b) => {
