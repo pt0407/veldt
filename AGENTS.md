@@ -559,3 +559,11 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   ("what's proven" → healthy + established/canonical), risky
   ("what's risky" → sick/dying OR seedling — the flip of
   proven). ~35 intents — the inspection surface is exhaustive.
+- [Devin] check --strict lint batch 3 + agent verify intent
+  (HEAD post-41db5eb): lint gained — identical if branches,
+  bool-comparison (x == true/false), let/assign x = x
+  self-assignment, empty match body, match arm after _
+  (unreachable), for over empty list, unused catch variable,
+  empty catch handler, match on literal scrutinee. Agent
+  gained verify ("verify fib" → do the variants agree on
+  sampled inputs? calls verify_family_find_divergent).
