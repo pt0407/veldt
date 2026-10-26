@@ -1816,6 +1816,15 @@ fn read_garden_json(path: &str) -> serde_json::Value {
     })
 }
 
+/// Run a program in a subprocess and capture its stdout — for /api/play.
+pub fn run_program_capture(path: &str) -> String {
+    let exe = std::env::current_exe().unwrap_or_else(|_| "veldt".into());
+    match std::process::Command::new(exe).arg("run").arg(path).output() {
+        Ok(o) => String::from_utf8_lossy(&o.stdout).to_string(),
+        Err(e) => format!("Error running {}: {}", path, e),
+    }
+}
+
 fn run_program(path: &str, trace: bool, evolve_after: bool) {
     // Read source file
     let source = match std::fs::read_to_string(path) {

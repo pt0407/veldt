@@ -35,6 +35,7 @@ pub async fn start_server(port: u16) {
         .route("/api/check", post(check_source))
         .route("/api/tournament", post(tournament))
         .route("/api/swarm", post(swarm))
+        .route("/api/play", post(play_demo))
         .route("/api/call", post(call_fn))
         .route("/api/adopt", post(adopt_variant))
         .route("/api/run", post(run_program))
@@ -108,6 +109,21 @@ async fn call_fn(
         Ok(v) => Json(serde_json::json!({"ok": true, "result": serde_json::to_value(&v).unwrap_or(serde_json::Value::Null)})),
         Err(e) => Json(serde_json::json!({"ok": false, "error": e})),
     }
+}
+
+#[derive(Deserialize)]
+struct PlayRequest { demo: String }
+
+async fn play_demo(
+    Json(req): Json<PlayRequest>,
+) -> Json<serde_json::Value> {
+    let path = format!("examples/{}.veldt", req.demo);
+    if !std::path::Path::new(&path).exists() {
+        return Json(serde_json::json!({ "ok": false, "error": format!("no demo '{}'", req.demo) }));
+    }
+    // run the demo and capture stdout (the canvas_print output)
+    let out = crate::run_program_capture(&path);
+    Json(serde_json::json!({ "ok": true, "output": out }))
 }
 
 #[derive(Deserialize)]

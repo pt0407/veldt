@@ -489,6 +489,7 @@
     <button class="btn" id="absorbBtn" title="bake live call traces into probes">Absorb</button>
     <button class="btn" id="tourBtn" title="pull a remote pool, trial, push winners back">Tournament</button>
     <button class="btn" id="swarmBtn" title="bidirectional genome gossip with a peer">Swarm</button>
+    <button class="btn" id="playBtn" title="run a bundled game demo">Play</button>
     <button class="btn danger" id="clearBtn">Clear Garden</button>
     <button class="btn primary" id="runBtn">▶ Run</button>
     <label style="font-size:11px;opacity:.7;margin-left:6px"><input type="checkbox" id="sandboxChk"> sandbox</label>
@@ -1226,6 +1227,15 @@ document.getElementById('fuzzBtn').addEventListener('click', async () => {
   document.getElementById('output').innerHTML =
     '<pre style="color:#aef;margin:0">' + (d.report || 'no report') + '</pre>';
   renderGarden();
+});
+document.getElementById('playBtn').addEventListener('click', async () => {
+  const demo = prompt('Demo', 'dungeon');
+  if (!demo) return;
+  const res = await fetch(API + '/api/play', { method: 'POST',
+    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ demo }) });
+  const d = await res.json();
+  document.getElementById('output').innerHTML =
+    '<pre style="color:#8ef;margin:0">' + (d.ok ? d.output : d.error) + '</pre>';
 });
 document.getElementById('swarmBtn').addEventListener('click', async () => {
   const url = prompt('Peer URL', 'http://localhost:7878');
