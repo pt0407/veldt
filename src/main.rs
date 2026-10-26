@@ -4156,9 +4156,13 @@ fn verify_family(name: &str, args: &[String]) {
     // bounded domain: each int arg ranges over -bound..bound
     let mut domain: Vec<i64> = (-bound..=bound).collect();
     if domain.len() > 21 { domain.truncate(21); }
-    println!("Verifying '{}' ({} variants, {}-arg, domain {} points)",
-             name, variants.len(), arity, domain.len());
+    let json = args.iter().any(|a| a == "--json");
+    if !json {
+        println!("Verifying '{}' ({} variants, {}-arg, domain {} points)",
+                 name, variants.len(), arity, domain.len());
+    }
     let mut checked = 0;
+    let mut results: Vec<serde_json::Value> = Vec::new();
     for v in &variants {
         if v.id == fittest.id { continue; }
         let mut diverge: Option<String> = None;
@@ -4195,12 +4199,38 @@ fn verify_family(name: &str, args: &[String]) {
             }
         }
         match diverge {
-            Some(d) => println!("  {}#{}: DIVERGES {}", name, v.id, d),
-            None => println!("  {}#{}: bounded-verified ({} checks)",
-                             name, v.id, n_combos),
+            Some(d) => {
+                if json {
+                    results.push(serde_json::json!({
+                        "id": v.id, "verdict": "diverges", "detail": d,
+                    }));
+                } else {
+                    println!("  {}#{}: DIVERGES {}", name, v.id, d);
+                }
+            }
+            None => {
+                if json {
+                    results.push(serde_json::json!({
+                        "id": v.id, "verdict": "verified", "checks": n_combos,
+                    }));
+                } else {
+                    println!("  {}#{}: bounded-verified ({} checks)",
+                             name, v.id, n_combos);
+                }
+            }
         }
     }
-    println!("({} calls evaluated)", checked);
+    if json {
+        let divergent = results.iter().filter(|r| r["verdict"] == "diverges").count();
+        println!("{}", serde_json::json!({
+            "family": name, "fittest_id": fittest.id,
+            "domain_points": domain.len(), "calls_evaluated": checked,
+            "divergent": divergent, "verified": results.len() - divergent,
+            "results": results,
+        }));
+    } else {
+        println!("({} calls evaluated)", checked);
+    }
 }
 
 // Run the bounded check on `name`, return the first divergent
