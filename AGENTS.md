@@ -768,3 +768,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   agent shipped garden --jit --verify + a garden-wipe/
   --vm-grow persistence fix (47cbbd4). I'm on lint/
   observability/agent — no overlap. ~51 strict checks now.
+- [Devin] Lint batch 22 (HEAD post-a5c9e9c): ~52 strict
+  checks. New: if/while/for body that's a bare expression
+  (computes a value and discards it — dead computation).
+  Fires on tictactoe's if-with-bare-expr.
