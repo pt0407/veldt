@@ -1068,3 +1068,6 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   100% garden coverage + CallId JIT + test --vm + verify
   --vm + specialization + dead-code removal. Both streams
   on main, no conflicts.
+- [Devin] Lint batch 49 (HEAD post-match-trans-binop): ~80
+  strict checks. New: match on a transitive-binop var —
+  the scrutinee is a computed expr through an alias chain.
