@@ -2096,7 +2096,9 @@ fn print_stats(veldt: &veldt::Veldt) {
                     .and_then(|p| argv.get(p + 1)).and_then(|s| s.parse::<usize>().ok()).unwrap_or(5);
                 println!("  top variants:");
                 for e in sorted.iter().take(top_n) {
-                    println!("    {}#{} fitness {:.2} (age {})", e.name, e.id, e.fitness, e.age);
+                    let h = match &e.health { Health::Healthy => "ok", Health::Sick(_) => "sick", Health::Dying => "dying" };
+                    let t = match e.trust { veldt::Trust::Canonical => "canon", veldt::Trust::Established => "estab", _ => "seed" };
+                    println!("    {}#{:<3} fit {:.2} | age {} | usage {} | {} {}", e.name, e.id, e.fitness, e.age, e.usage_count, h, t);
                 }
             }
         }
