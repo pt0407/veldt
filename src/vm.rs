@@ -32,6 +32,7 @@ enum Instr {
     JumpIfFalse(u32),        // pops the condition
     PeekJumpIfNull(u32),     // for ??: jump keeping value if null
     Call(u32, u32),          // name idx, argc
+    CallId(u32, u32, u32),   // name idx, variant id, argc
     MethodCall(u32, u32),    // name idx, argc
     MakeList(u32),
     IndexGet,
@@ -335,11 +336,11 @@ impl Compiler {
                 self.compile_expr(inner)?; self.emit(Instr::Not);
             }
             Expr::Call(name, variant, args) => {
-                if let Some(v) = variant {
-                    return Err(format!("VM subset: explicit variant {}#{} unsupported", name, v));
-                }
                 for a in args { self.compile_expr(a)?; }
-                if let Some(&sl) = self.slots.get(name) {
+                if let Some(v) = variant {
+                    let ni = self.name_idx(name);
+                    self.emit(Instr::CallId(ni, *v, args.len() as u32));
+                } else if let Some(&sl) = self.slots.get(name) {
                     // name is a local var — may hold a Closure
                     self.emit(Instr::CallVar(sl, args.len() as u32));
                 } else {
@@ -904,6 +905,27 @@ impl Vm {
                         args.into_iter().map(Some).collect();
                     frames.push(Frame {
                         code: chosen.code.clone(),   // Rc bump — no alloc
+                        pc: 0, env, base: stack.len(), iters: Vec::new(),
+                        try_stack: Vec::new(),
+                    });
+                    *code = frames.last().unwrap().code.clone();
+                }
+                Instr::CallId(ni, vid, argc) => {
+                    let args: Vec<Value> =
+                        stack.drain(stack.len() - argc as usize..).collect();
+                    let name = code.names[ni as usize].clone();
+                    let variants = self.fns.get(&name)
+                        .ok_or_else(|| format!("Undefined function: {}", name))?;
+                    let chosen = variants.iter().find(|v| v.id == vid)
+                        .ok_or_else(|| format!("Variant {}#{} not found", name, vid))?;
+                    if args.len() != chosen.params.len() {
+                        return Err(format!("{}#{} expects {} args",
+                            name, vid, chosen.params.len()));
+                    }
+                    let env: Vec<Option<Value>> =
+                        args.into_iter().map(Some).collect();
+                    frames.push(Frame {
+                        code: chosen.code.clone(),
                         pc: 0, env, base: stack.len(), iters: Vec::new(),
                         try_stack: Vec::new(),
                     });
