@@ -1908,6 +1908,94 @@ impl Interpreter {
                 path.reverse();
                 Ok(Some(Value::List(path.into_iter().collect())))
             }
+            "flood_fill" => {
+                // flood_fill(c, x, y, ch) — fill all connected cells that
+                // share the source cell's char with ch.
+                let (d, x0, y0, ch) = match (args.get(0), args.get(1), args.get(2), args.get(3)) {
+                    (Some(Value::Dict(d)), Some(Value::Int(x)), Some(Value::Int(y)), Some(Value::Str(ch)))
+                        => (d.clone(), *x as usize, *y as usize, ch.clone()),
+                    _ => return Err("flood_fill(c, x, y, ch) expects dict + 2 ints + str".into()),
+                };
+                let Some(Value::List(rows)) = d.get("cells") else { return Err("canvas: no cells".into()) };
+                let (w, h) = (rows.get(0).and_then(|r| if let Value::List(r) = r { Some(r.len()) } else { None }), rows.len());
+                let Some(w) = w else { return Err("canvas: missing w".into()) };
+                let Some(Value::Str(target)) = rows.get(y0)
+                    .and_then(|r| if let Value::List(r) = r { r.get(x0) } else { None })
+                    .cloned() else { return Ok(Some(Value::Dict(d))); };
+                if target == ch { return Ok(Some(Value::Dict(d))); }
+                let mut rows2 = rows.clone();
+                let mut stack = vec![(x0, y0)];
+                let mut seen: std::collections::HashSet<(usize, usize)> = std::collections::HashSet::new();
+                while let Some((x, y)) = stack.pop() {
+                    if x >= w || y >= h || !seen.insert((x, y)) { continue; }
+                    let is_target = rows2.get(y)
+                        .and_then(|r| if let Value::List(r) = r { r.get(x) } else { None })
+                        .map(|v| if let Value::Str(s) = v { *s == target } else { false })
+                        .unwrap_or(false);
+                    if !is_target { continue; }
+                    if let Value::List(r) = &mut rows2[y] {
+                        let mut nr = r.clone();
+                        nr[x] = Value::Str(ch.clone());
+                        *r = nr;
+                    }
+                    stack.extend([(x.wrapping_sub(1), y), (x + 1, y), (x, y.wrapping_sub(1)), (x, y + 1)]);
+                }
+                let mut d2 = d.clone();
+                d2.insert("cells".to_string(), Value::List(rows2));
+                Ok(Some(Value::Dict(d2)))
+            }
+            "neighbors" => {
+                // neighbors(c, x, y, diag?) — 4-dir (or 8-dir) in-bounds cells
+                let (d, x0, y0, diag) = match (args.get(0), args.get(1), args.get(2), args.get(3)) {
+                    (Some(Value::Dict(d)), Some(Value::Int(x)), Some(Value::Int(y)), dg)
+                        => (d, *x, *y, matches!(dg, Some(Value::Bool(true)))),
+                    _ => return Err("neighbors(c, x, y, diag?) expects dict + 2 ints + bool".into()),
+                };
+                let (w, h) = (d.get("w").and_then(|v| if let Value::Int(w) = v { Some(*w) } else { None }),
+                              d.get("h").and_then(|v| if let Value::Int(h) = v { Some(*h) } else { None }));
+                let (Some(w), Some(h)) = (w, h) else { return Err("canvas: missing w/h".into()) };
+                let dirs: &[(i64, i64)] = if diag {
+                    &[(0,-1),(0,1),(-1,0),(1,0),(-1,-1),(1,-1),(-1,1),(1,1)]
+                } else { &[(0,-1),(0,1),(-1,0),(1,0)] };
+                let out: Vec<Value> = dirs.iter()
+                    .map(|(dx, dy)| (x0 + dx, y0 + dy))
+                    .filter(|(x, y)| *x >= 0 && *y >= 0 && *x < w && *y < h)
+                    .map(|(x, y)| Value::List(im::vector![Value::Int(x), Value::Int(y)]))
+                    .collect();
+                Ok(Some(Value::List(out.into_iter().collect())))
+            }
+            "noise2" => {
+                // noise2(x, y) — deterministic value noise in [0,1]. Bilinear
+                // interp over a hash-seeded lattice.
+                let (x, y) = (num_at(args, 0)?, num_at(args, 1)?);
+                let hash = |ix: i64, iy: i64| -> f64 {
+                    let mut n = ix.wrapping_mul(374761393).wrapping_add(iy.wrapping_mul(668265263));
+                    n = (n ^ (n >> 13)).wrapping_mul(1274126177);
+                    ((n ^ (n >> 16)) as u64 & 0xffffff) as f64 / 0xffffff as f64
+                };
+                let (ix, iy) = (x.floor() as i64, y.floor() as i64);
+                let (fx, fy) = (x - x.floor(), y - y.floor());
+                let s = |t: f64| t * t * (3.0 - 2.0 * t); // smoothstep
+                let (a, b, c, d) = (hash(ix, iy), hash(ix + 1, iy), hash(ix, iy + 1), hash(ix + 1, iy + 1));
+                let v = a + (b - a) * s(fx) + (c - a) * s(fy) + (a - b - c + d) * s(fx) * s(fy);
+                Ok(Some(Value::Float(v)))
+            }
+            "ease_in" => { let t = num_at(args, 0)?; Ok(Some(Value::Float(t * t))) }
+            "ease_out" => { let t = num_at(args, 0)?; Ok(Some(Value::Float(1.0 - (1.0 - t) * (1.0 - t)))) }
+            "ease_in_out" => {
+                let t = num_at(args, 0)?;
+                Ok(Some(Value::Float(if t < 0.5 { 2.0 * t * t } else { 1.0 - (-2.0 * t + 2.0).powi(2) / 2.0 })))
+            }
+            "bounce" => {
+                // bounce(t) — quadratic bounce-out
+                let t = num_at(args, 0)?.clamp(0.0, 1.0);
+                let (n1, d1) = (7.5625f64, 2.75f64);
+                let v = if t < 1.0 / d1 { n1 * t * t }
+                    else if t < 2.0 / d1 { let t2 = t - 1.5 / d1; n1 * t2 * t2 + 0.75 }
+                    else if t < 2.5 / d1 { let t2 = t - 2.25 / d1; n1 * t2 * t2 + 0.9375 }
+                    else { let t2 = t - 2.625 / d1; n1 * t2 * t2 + 0.984375 };
+                Ok(Some(Value::Float(v)))
+            }
             "dist_stats" => {
                 // dist_stats(fn, trials) — mean/stddev/min/max over n samples
                 let (f, trials) = match (args.get(0), args.get(1)) {
