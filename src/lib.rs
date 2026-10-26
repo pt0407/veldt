@@ -10,3 +10,4 @@ pub mod lexer;
 pub mod parser;
 pub mod veldt;
 pub mod vm;
+pub mod smt;
