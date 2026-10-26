@@ -2130,6 +2130,20 @@ fn print_stats(veldt: &veldt::Veldt) {
                         println!("    {:<20} avg {:.2} ({} variants)", niche, total / *count as f64, count);
                     }
                 }
+                // origin/source breakdown — the family's mutation-source histogram
+                let mut origins: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+                for e in vs.iter() {
+                    let src = e.origin.split(' ').next().unwrap_or("?").to_string();
+                    *origins.entry(src).or_insert(0) += 1;
+                }
+                if !origins.is_empty() {
+                    println!("  origins:");
+                    let mut sorted: Vec<_> = origins.iter().collect();
+                    sorted.sort_by(|a, b| b.1.cmp(&a.1));
+                    for (src, count) in sorted.iter().take(10) {
+                        println!("    {:<20} {} variants", src, count);
+                    }
+                }
             }
         }
         if veldt.fitness_history.len() >= 2 {
