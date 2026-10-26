@@ -2374,6 +2374,75 @@ impl Interpreter {
                 }
                 Ok(Some(Value::List(out.into_iter().collect())))
             }
+            "bezier" => {
+                // bezier(t, p0x,p0y, p1x,p1y, p2x,p2y, p3x,p3y) — cubic bezier [x,y]
+                let t = num_at(args, 0)?;
+                let (p0x, p0y, p1x, p1y, p2x, p2y, p3x, p3y) = (
+                    num_at(args, 1)?, num_at(args, 2)?, num_at(args, 3)?, num_at(args, 4)?,
+                    num_at(args, 5)?, num_at(args, 6)?, num_at(args, 7)?, num_at(args, 8)?);
+                let u = 1.0 - t;
+                let x = u*u*u*p0x + 3.0*u*u*t*p1x + 3.0*u*t*t*p2x + t*t*t*p3x;
+                let y = u*u*u*p0y + 3.0*u*u*t*p1y + 3.0*u*t*t*p2y + t*t*t*p3y;
+                Ok(Some(Value::List(im::vector![Value::Float(x), Value::Float(y)])))
+            }
+            "point_in_poly" => {
+                // point_in_poly(x, y, [[px,py],...]) — even-odd ray cast
+                let (px, py) = (num_at(args, 0)?, num_at(args, 1)?);
+                let Value::List(pts) = args.get(2).cloned().unwrap_or(Value::Null) else {
+                    return Err("point_in_poly(x, y, [[px,py],...]) expects a point list".into())
+                };
+                let mut inside = false;
+                let n = pts.len();
+                let f_of = |v: &Value| match v { Value::Int(i) => *i as f64, Value::Float(f) => *f, _ => 0.0 };
+                for i in 0..n {
+                    let (Value::List(a), Value::List(b)) = (&pts[i], &pts[(i + 1) % n]) else { continue };
+                    let (ax, ay) = (f_of(&a[0]), f_of(&a[1]));
+                    let (bx, by) = (f_of(&b[0]), f_of(&b[1]));
+                    if (ay > py) != (by > py)
+                        && px < (bx - ax) * (py - ay) / (by - ay) + ax {
+                        inside = !inside;
+                    }
+                }
+                Ok(Some(Value::Bool(inside)))
+            }
+            "convex_hull" => {
+                // convex_hull([[x,y],...]) — Andrew's monotone chain → hull
+                let Value::List(pts) = args.get(0).cloned().unwrap_or(Value::Null) else {
+                    return Err("convex_hull([[x,y],...]) expects a point list".into())
+                };
+                let f_of = |v: &Value| match v { Value::Int(i) => *i as f64, Value::Float(f) => *f, _ => 0.0 };
+                let mut p: Vec<(f64, f64)> = pts.iter().filter_map(|v| {
+                    if let Value::List(pair) = v {
+                        if pair.len() == 2 { return Some((f_of(&pair[0]), f_of(&pair[1]))); }
+                    }
+                    None
+                }).collect();
+                p.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+                p.dedup();
+                if p.len() <= 1 {
+                    return Ok(Some(Value::List(pts.iter().cloned().collect::<Vec<Value>>().into_iter().collect())));
+                }
+                let cross = |o: &(f64, f64), a: &(f64, f64), b: &(f64, f64)| (a.0 - o.0) * (b.1 - o.1) - (a.1 - o.1) * (b.0 - o.0);
+                let mut hull: Vec<(f64, f64)> = Vec::new();
+                // lower hull: left→right
+                for &pt in &p {
+                    while hull.len() >= 2 && cross(&hull[hull.len() - 2], &hull[hull.len() - 1], &pt) <= 0.0 {
+                        hull.pop();
+                    }
+                    hull.push(pt);
+                }
+                // upper hull: right→left, bounded by the lower hull's length
+                let lower_len = hull.len();
+                for &pt in p.iter().rev().skip(1) {
+                    while hull.len() > lower_len && cross(&hull[hull.len() - 2], &hull[hull.len() - 1], &pt) <= 0.0 {
+                        hull.pop();
+                    }
+                    hull.push(pt);
+                }
+                if !hull.is_empty() { hull.pop(); } // duplicated start
+                Ok(Some(Value::List(hull.into_iter()
+                    .map(|(x, y)| Value::List(im::vector![Value::Float(x), Value::Float(y)])).collect())))
+            }
             "dist_stats" => {
                 // dist_stats(fn, trials) — mean/stddev/min/max over n samples
                 let (f, trials) = match (args.get(0), args.get(1)) {
