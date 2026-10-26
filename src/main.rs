@@ -2967,6 +2967,22 @@ fn main() {
                 eprintln!("Error loading veldt: {}", e);
                 process::exit(1);
             }
+            if let Some(expr) = args.iter().position(|a| a == "--filter")
+                .and_then(|p| args.get(p + 1)) {
+                let or_groups: Vec<Vec<&str>> = expr.split("||")
+                    .map(|g| g.split("&&").map(|s| s.trim()).collect())
+                    .collect();
+                let mut filtered = std::collections::HashMap::new();
+                for (name, vs) in &veldt.functions {
+                    let keep: Vec<_> = vs.iter()
+                        .filter(|e| or_groups.iter().any(|g|
+                            g.iter().all(|c| veldt::variant_matches(e, c))))
+                        .cloned().collect();
+                    if !keep.is_empty() { filtered.insert(name.clone(), keep); }
+                }
+                veldt.functions = filtered;
+                println!("[stats --filter {}]", expr);
+            }
             if args.iter().any(|a| a == "--json") {
                 let mut total = 0usize;
                 let (mut healthy, mut sick, mut dying) = (0usize, 0usize, 0usize);
