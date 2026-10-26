@@ -322,6 +322,9 @@ pub fn respond(task: &str, editor_source: &str, veldt: &mut Veldt) -> AgentRespo
     if has(&["best", "winner", "winning", "strongest", "fittest", "leaderboard", "top variant"]) {
         return best_intent(&words, veldt);
     }
+    if has(&["proven", "production", "production-ready", "deployment", "stable", "safe to use"]) {
+        return proven_intent(veldt);
+    }
     if has(&["obituar", "why did", "why'd"]) || hasw(&["deaths", "died", "dead"]) {
         return obituary_intent(&words, veldt);
     }
@@ -1400,6 +1403,33 @@ fn best_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
     let mut text = String::from("Garden leaderboard (peak per family):\n");
     for (n, e) in rows.iter().take(8) {
         text.push_str(&format!("  {}#{} — {:.2}\n", n, e.id, e.fitness));
+    }
+    plain(&text)
+}
+
+/// Proven — "what's proven" / "production-ready" — healthy + established/canonical.
+fn proven_intent(veldt: &Veldt) -> AgentResponse {
+    use crate::veldt::Trust;
+    let mut rows: Vec<(&String, &FunctionEntry)> = veldt.functions.iter()
+        .flat_map(|(n, vs)| vs.iter().filter_map(move |e|
+            if matches!(e.health, Health::Healthy)
+                && matches!(e.trust, Trust::Established | Trust::Canonical) {
+                Some((n, e))
+            } else { None })).collect();
+    rows.sort_by(|a, b| b.1.fitness.partial_cmp(&a.1.fitness)
+        .unwrap_or(std::cmp::Ordering::Equal));
+    let total: usize = veldt.functions.values().map(|v| v.len()).sum();
+    if rows.is_empty() {
+        return plain("Nothing is proven yet — the garden is still experimental.");
+    }
+    let mut text = format!("Proven ({} of {} variants):\n", rows.len(), total);
+    for (n, e) in rows.iter().take(10) {
+        let t = match e.trust {
+            Trust::Canonical => "canonical",
+            Trust::Established => "established",
+            _ => "",
+        };
+        text.push_str(&format!("  {}#{} — {:.2} {}\n", n, e.id, e.fitness, t));
     }
     plain(&text)
 }
