@@ -788,3 +788,6 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 - [Devin] Lint batch 27 (HEAD post-const-alias): ~57 strict
   checks. New: let a = b where b is let-bound to a literal
   — the let propagates a constant through an alias.
+- [Devin] Lint batch 28 (HEAD post-1-elem-list): ~58 strict
+  checks. New: let x = [v] — a 1-element list literal,
+  could be let x = v.
