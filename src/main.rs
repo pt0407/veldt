@@ -755,6 +755,11 @@ fn print_stats(veldt: &veldt::Veldt) {
         println!("mutation sources: {}", ranked.iter()
             .map(|(s, n)| format!("{}×{}", s, n)).collect::<Vec<_>>().join("  "));
     }
+    let immigrants: usize = veldt.functions.values().flatten()
+        .filter(|e| e.origin.starts_with("immigrant:")).count();
+    if immigrants > 0 {
+        println!("immigrants: {} variants from remote gardens", immigrants);
+    }
     if !best.is_empty() {
         println!("top families:");
         for (name, fit, n) in best.iter().take(10) {
