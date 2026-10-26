@@ -566,6 +566,24 @@ fn main() {
                 }
                 println!("=== The Veldt (fitness >= {}) ===", min);
                 filtered.print_garden(sick_only, healthy_only);
+            } else if let Some(min_n) = args.iter().position(|a| a == "--niches")
+                .and_then(|p| args.get(p + 1)).and_then(|s| s.parse::<usize>().ok()) {
+                // --niches <n> — families covering at least n niche types
+                let mut filtered = veldt::Veldt::new();
+                filtered.probes = veldt.probes.clone();
+                filtered.obituaries = veldt.obituaries.clone();
+                filtered.run_count = veldt.run_count;
+                filtered.garden_path = veldt.garden_path.clone();
+                for (name, vs) in &veldt.functions {
+                    let niche_count: usize = vs.iter()
+                        .flat_map(|e| e.niche_scores.keys())
+                        .collect::<std::collections::HashSet<_>>().len();
+                    if niche_count >= min_n {
+                        filtered.functions.insert(name.clone(), vs.clone());
+                    }
+                }
+                println!("=== The Veldt (niches >= {}) ===", min_n);
+                filtered.print_garden(sick_only, healthy_only);
             } else if let Some(max_t) = args.iter().position(|a| a == "--max_traces")
                 .and_then(|p| args.get(p + 1)).and_then(|s| s.parse::<usize>().ok()) {
                 // --max_traces <n> — families with at most n traces
