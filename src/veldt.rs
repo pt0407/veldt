@@ -866,14 +866,14 @@ pub fn sort_variants(vs: &mut Vec<FunctionEntry>, field: &str) {
     vs.sort_by(|a, b| {
         let ord = match field {
             "fitness" => b.fitness.partial_cmp(&a.fitness),
-            "age" => b.age.cmp(&a.age),
-            "usage" => b.usage_count.cmp(&a.usage_count),
-            "size" => crate::fmt::format_program(&b.body).len()
-                .cmp(&crate::fmt::format_program(&a.body).len()),
-            "args" => b.params.len().cmp(&a.params.len()),
+            "age" => Some(b.age.cmp(&a.age)),
+            "usage" => Some(b.usage_count.cmp(&a.usage_count)),
+            "size" => Some(crate::fmt::format_program(&b.body).len()
+                .cmp(&crate::fmt::format_program(&a.body).len())),
+            "args" => Some(b.params.len().cmp(&a.params.len())),
             "lifespan" => b.lifespan.partial_cmp(&a.lifespan),
-            "last_used" => b.last_used.cmp(&a.last_used),
-            "niches" => b.niche_scores.len().cmp(&a.niche_scores.len()),
+            "last_used" => Some(b.last_used.cmp(&a.last_used)),
+            "niches" => Some(b.niche_scores.len().cmp(&a.niche_scores.len())),
             "fit_rate" => (b.fitness / (b.age as f64 + 1.0))
                 .partial_cmp(&(a.fitness / (a.age as f64 + 1.0))),
             "usage_rate" => (b.usage_count as f64 / (b.age as f64 + 1.0))
@@ -894,20 +894,20 @@ pub fn sort_variants(vs: &mut Vec<FunctionEntry>, field: &str) {
                 let bscore = b.niche_scores.get(niche).copied().unwrap_or(0.0);
                 bscore.partial_cmp(&ascore)
             }
-            "id" => a.id.cmp(&b.id),
-            "born" => b.born.cmp(&a.born),
+            "id" => Some(a.id.cmp(&b.id)),
+            "born" => Some(b.born.cmp(&a.born)),
             "trial_score" => b.trial_score.partial_cmp(&a.trial_score),
             "efficiency" => b.efficiency.partial_cmp(&a.efficiency),
-            "parents" => b.parents.len().cmp(&a.parents.len()),
-            "healing" => b.healing_attempts.len().cmp(&a.healing_attempts.len()),
-            "origin" => a.origin.cmp(&b.origin),
+            "parents" => Some(b.parents.len().cmp(&a.parents.len())),
+            "healing" => Some(b.healing_attempts.len().cmp(&a.healing_attempts.len())),
+            "origin" => Some(a.origin.cmp(&b.origin)),
             "health" => {
                 let h = |e: &FunctionEntry| match &e.health {
                     Health::Healthy => 0,
                     Health::Sick(_) => 1,
                     Health::Dying => 2,
                 };
-                h(a).cmp(&h(b))
+                Some(h(a).cmp(&h(b)))
             }
             "trust" => {
                 let t = |e: &FunctionEntry| match e.trust {
@@ -916,7 +916,7 @@ pub fn sort_variants(vs: &mut Vec<FunctionEntry>, field: &str) {
                     Trust::Seedling => 2,
                     _ => 3,
                 };
-                t(a).cmp(&t(b))
+                Some(t(a).cmp(&t(b)))
             }
             _ => return std::cmp::Ordering::Equal,
         };
