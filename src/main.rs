@@ -706,6 +706,18 @@ fn main() {
                     println!("  {}#{}{} — {:?} | age: {} | fitness: {:.2} | origin: {}",
                         fam, e.id, mark, e.health, e.age, e.fitness, e.origin);
                 }
+                // footer — compact family summary
+                if !vs.is_empty() {
+                    let healthy = vs.iter().filter(|e| matches!(e.health, Health::Healthy)).count();
+                    let seed = vs.iter().filter(|e| matches!(e.trust, veldt::Trust::Seedling)).count();
+                    let estab = vs.iter().filter(|e| matches!(e.trust, veldt::Trust::Established)).count();
+                    let canon = vs.len() - seed - estab;
+                    let peak = vs.iter().map(|e| e.fitness).fold(f64::NEG_INFINITY, f64::max);
+                    let probes = veldt.probes.get(fam).map(|p| p.len()).unwrap_or(0);
+                    let deaths = veldt.obituaries.iter().filter(|o| o.name == *fam).count();
+                    println!("  — {} variants · {} healthy | {} seed {} estab {} canon | peak {:.2} | {} probes · {} deaths",
+                        vs.len(), healthy, seed, estab, canon, peak, probes, deaths);
+                }
             } else if args.iter().any(|a| a == "--games") {
                 // --games — only families whose variants call game builtins
                 const GAME_BUILTINS: &[&str] = &[
