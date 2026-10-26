@@ -1798,6 +1798,48 @@ fn main() {
                 }
             }
         }
+        // veldt tend [family] — on-demand healing: run the healer on
+        // every sick variant (or one family's). Same machinery as the
+        // grow-flow pass: mechanical dead-code repair first, then
+        // healer-merge — and re-trials the healed entry so health is
+        // honest, not just asserted.
+        "tend" | "heal" => {
+            let fam = args.get(2).filter(|s| !s.starts_with("--"));
+            let mut veldt = veldt::Veldt::new();
+            if let Err(e) = veldt.load() { eprintln!("Error: {}", e); process::exit(1); }
+            let sick: Vec<(String, u32)> = veldt.functions.iter()
+                .flat_map(|(name, vs)| vs.iter()
+                    .filter(|e| matches!(e.health, veldt::Health::Sick(_)))
+                    .filter(|_| fam.map(|f| *name == *f).unwrap_or(true))
+                    .map(|e| (name.clone(), e.id)))
+                .collect();
+            if sick.is_empty() {
+                match fam {
+                    Some(f) => println!("{}: no sick variants to tend", f),
+                    None => println!("no sick variants — the garden is healthy"),
+                }
+            }
+            let mut healed = 0usize;
+            for (name, id) in sick {
+                let mut entry = veldt.functions[&name].iter()
+                    .find(|e| e.id == id).cloned().unwrap();
+                if health::HealthChecker::heal(&mut entry, &veldt) {
+                    healed += 1;
+                    eprintln!("[TEND] {}#{} — healed", name, id);
+                    if let Some(vs) = veldt.functions.get_mut(&name) {
+                        for e in vs.iter_mut() {
+                            if e.id == id { *e = entry.clone(); break; }
+                        }
+                    }
+                } else {
+                    eprintln!("[TEND] {}#{} — no healer found, still sick", name, id);
+                }
+            }
+            if healed > 0 {
+                let _ = veldt.save();
+                println!("tend: healed {} sick variant(s)", healed);
+            }
+        }
         "prune" => {
             if args.len() < 3 {
                 eprintln!("Usage: veldt prune <name#N>");
