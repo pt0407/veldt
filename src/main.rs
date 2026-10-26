@@ -963,6 +963,17 @@ fn print_stats(veldt: &veldt::Veldt) {
             .map(|(n, c)| format!("{}:{}", n, c)).collect();
         println!("call traces: {}", line.join(" "));
     }
+    // usage distribution — which variants actually get called
+    let mut usage: Vec<(String, u64)> = veldt.functions.iter()
+        .flat_map(|(n, vs)| vs.iter().map(move |e| (format!("{}#{}", n, e.id), e.usage_count)))
+        .collect();
+    usage.sort_by(|a, b| b.1.cmp(&a.1));
+    let nonzero: Vec<_> = usage.into_iter().filter(|(_, u)| *u > 0).take(8).collect();
+    if !nonzero.is_empty() {
+        let line: Vec<String> = nonzero.iter()
+            .map(|(n, u)| format!("{}:{}", n, u)).collect();
+        println!("usage: {}", line.join(" "));
+    }
     // fitness trend — peak per run, is the garden improving?
     if veldt.fitness_history.len() >= 2 {
         let trend: Vec<String> = veldt.fitness_history.iter()
