@@ -2348,11 +2348,56 @@ fn test_family(name: &str) {
 }
 
 fn adopt_variant(target: &str) {
+    let verify = std::env::args().any(|a| a == "--verify");
     if let Some(pos) = target.find('#') {
         let name = &target[..pos];
         let id: u32 = target[pos+1..].parse().unwrap_or(0);
         let mut veldt = veldt::Veldt::new();
         if let Err(e) = veldt.load() { eprintln!("Error: {}", e); process::exit(1); }
+        // --verify: bounded equivalence check against the fittest —
+        // only promote if this variant agrees on every domain point.
+        if verify {
+            let mut interp = interpreter::Interpreter::new();
+            veldt.load_into_interpreter(&mut interp);
+            let variants = match interp.functions.get(name) {
+                Some(v) => v.clone(),
+                None => { println!("No lineage '{}'", name); return; }
+            };
+            let fittest = variants.iter()
+                .max_by(|a, b| a.fitness.partial_cmp(&b.fitness)
+                    .unwrap_or(std::cmp::Ordering::Equal)).unwrap();
+            if fittest.id == id {
+                println!("{}#{} is already the fittest — trivially verified",
+                         name, id);
+            } else {
+                let arity = fittest.def.params.len();
+                let mut ok = true;
+                for x in -10..=10i64 {
+                    let args: Vec<crate::interpreter::Value> =
+                        vec![crate::interpreter::Value::Int(x); arity.max(1)];
+                    let a = interp.call_function(
+                        name, Some(id), args.clone());
+                    let b = interp.call_function(
+                        name, Some(fittest.id), args.clone());
+                    let same = match (&a, &b) {
+                        (Ok(p), Ok(q)) => p == q,
+                        (Err(_), Err(_)) => true,
+                        _ => false,
+                    };
+                    if !same {
+                        println!("{}#{} diverges from fittest at {:?} —                             NOT promoting", name, id, args);
+                        ok = false;
+                        break;
+                    }
+                }
+                if !ok {
+                    println!("Verification failed — {}#{} stays at its                         current trust", name, id);
+                    return;
+                }
+                println!("{}#{} bounded-verified — safe to promote",
+                         name, id);
+            }
+        }
         if let Some(variants) = veldt.functions.get_mut(name) {
             let mut found = false;
             for v in variants.iter_mut() {
