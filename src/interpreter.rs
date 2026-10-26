@@ -2208,6 +2208,325 @@ impl Interpreter {
                     None => Ok(Some(Value::Null)),
                 }
             }
+            "weighted_choice" => {
+                // weighted_choice([[item, weight], ...]) — weighted random pick
+                let Value::List(items) = args.get(0).cloned().unwrap_or(Value::Null) else {
+                    return Err("weighted_choice(list) expects [[item, w], ...]".into())
+                };
+                if items.is_empty() { return Ok(Some(Value::Null)); }
+                let mut total = 0f64;
+                let mut weights = Vec::with_capacity(items.len());
+                for it in items.iter() {
+                    let Value::List(pair) = it else { return Err("weighted_choice expects [item, w] pairs".into()) };
+                    if pair.len() != 2 { return Err("weighted_choice expects [item, w] pairs".into()) }
+                    let w = match &pair[1] { Value::Int(i) => *i as f64, Value::Float(f) => *f, _ => 0.0 };
+                    weights.push(w);
+                    total += w;
+                }
+                if total <= 0.0 { return Ok(Some(Value::Null)); }
+                let mut x = self.rng_state;
+                x ^= x << 13; x ^= x >> 7; x ^= x << 17;
+                self.rng_state = x;
+                let mut roll = (x % 1_000_000) as f64 / 1_000_000.0 * total;
+                for (i, it) in items.iter().enumerate() {
+                    roll -= weights[i];
+                    if roll <= 0.0 {
+                        if let Value::List(pair) = it { return Ok(Some(pair[0].clone())); }
+                    }
+                }
+                if let Value::List(pair) = items.last().unwrap() { return Ok(Some(pair[0].clone())); }
+                Ok(Some(Value::Null))
+            }
+            "roll" => {
+                // roll("2d6+3") — dice notation: NdS+M / NdS-M / NdS
+                let Some(Value::Str(s)) = args.get(0) else { return Err("roll(str) expects dice notation".into()) };
+                let s = s.trim();
+                let Some(dpos) = s.find('d') else { return Err("roll expects NdS+M".into()) };
+                let n: i64 = s[..dpos].parse::<i64>().map_err(|_| "roll: bad dice count".to_string())?;
+                let rest = &s[dpos + 1..];
+                let (sides, modifier): (i64, i64) = if let Some(p) = rest.find('+') {
+                    (rest[..p].parse::<i64>().map_err(|_| "roll: bad sides".to_string())?,
+                     rest[p + 1..].parse::<i64>().map_err(|_| "roll: bad modifier".to_string())?)
+                } else if let Some(m) = rest.rfind('-') {
+                    (rest[..m].parse::<i64>().map_err(|_| "roll: bad sides".to_string())?,
+                     -rest[m + 1..].parse::<i64>().map_err(|_| "roll: bad modifier".to_string())?)
+                } else {
+                    (rest.parse::<i64>().map_err(|_| "roll: bad sides".to_string())?, 0i64)
+                };
+                let mut total = 0i64;
+                for _ in 0..n {
+                    let mut x = self.rng_state;
+                    x ^= x << 13; x ^= x >> 7; x ^= x << 17;
+                    self.rng_state = x;
+                    total += 1 + (x % (sides.max(1) as u64)) as i64;
+                }
+                Ok(Some(Value::Int(total + modifier)))
+            }
+            "rand_shuffle" => {
+                // rand_shuffle(list) — Fisher-Yates shuffle, returns new list
+                let Value::List(items) = args.get(0).cloned().unwrap_or(Value::Null) else {
+                    return Err("rand_shuffle(list) expects a list".into())
+                };
+                let mut out: Vec<Value> = items.iter().cloned().collect();
+                for i in (1..out.len()).rev() {
+                    let mut x = self.rng_state;
+                    x ^= x << 13; x ^= x >> 7; x ^= x << 17;
+                    self.rng_state = x;
+                    let j = (x % (i + 1) as u64) as usize;
+                    out.swap(i, j);
+                }
+                Ok(Some(Value::List(out.into_iter().collect())))
+            }
+            "astar_cost" => {
+                // astar_cost(c, sx, sy, tx, ty, cost_dict) — weighted pathfind:
+                // cost_dict maps cell char → step cost (missing = unwalkable).
+                // Diagonal = 1.4x straight cost. Returns [[x,y],...] or null.
+                let (d, sx, sy, tx, ty, costs) = match (args.get(0), args.get(1), args.get(2), args.get(3), args.get(4), args.get(5)) {
+                    (Some(Value::Dict(d)), Some(Value::Int(sx)), Some(Value::Int(sy)),
+                     Some(Value::Int(tx)), Some(Value::Int(ty)), Some(Value::Dict(c)))
+                        => (d, *sx, *sy, *tx, *ty, c.clone()),
+                    _ => return Err("astar_cost(c, sx, sy, tx, ty, cost_dict) expects 2 dicts + 4 ints".into()),
+                };
+                let (w, h) = (d.get("w").and_then(|v| if let Value::Int(w) = v { Some(*w) } else { None }),
+                              d.get("h").and_then(|v| if let Value::Int(h) = v { Some(*h) } else { None }));
+                let (Some(w), Some(h)) = (w, h) else { return Err("canvas: missing w/h".into()) };
+                let Some(Value::List(cells)) = d.get("cells") else { return Err("canvas: no cells".into()) };
+                let step_cost = |x: i64, y: i64| -> Option<i64> {
+                    if x < 0 || y < 0 || x >= w || y >= h { return None; }
+                    if let Value::List(r) = &cells[y as usize] {
+                        if let Some(Value::Str(s)) = r.get(x as usize) {
+                            return costs.get(s.as_ref() as &str)
+                                .and_then(|v| match v { Value::Int(i) => Some(*i), Value::Float(f) => Some(*f as i64), _ => None });
+                        }
+                    }
+                    None
+                };
+                let mut open: std::collections::BinaryHeap<(std::cmp::Reverse<i64>, i64, i64)> = std::collections::BinaryHeap::new();
+                let mut g: std::collections::HashMap<(i64, i64), i64> = std::collections::HashMap::new();
+                let mut prev: std::collections::HashMap<(i64, i64), (i64, i64)> = std::collections::HashMap::new();
+                let h_of = |x: i64, y: i64| ((tx - x).abs() + (ty - y).abs()) * 10;
+                g.insert((sx, sy), 0);
+                open.push((std::cmp::Reverse(h_of(sx, sy)), sx, sy));
+                while let Some((_, cx, cy)) = open.pop() {
+                    if cx == tx && cy == ty { break; }
+                    let cg = g[&(cx, cy)];
+                    for (dx, dy, diag) in [(0,-1,false),(0,1,false),(-1,0,false),(1,0,false),(-1,-1,true),(1,-1,true),(-1,1,true),(1,1,true)] {
+                        let (nx, ny) = (cx + dx, cy + dy);
+                        let Some(sc) = step_cost(nx, ny).or(if nx == tx && ny == ty { Some(1) } else { None }) else { continue };
+                        let ng = cg + sc * if diag { 14 } else { 10 };
+                        if g.get(&(nx, ny)).map(|&v| ng < v).unwrap_or(true) {
+                            g.insert((nx, ny), ng);
+                            prev.insert((nx, ny), (cx, cy));
+                            open.push((std::cmp::Reverse(ng + h_of(nx, ny)), nx, ny));
+                        }
+                    }
+                }
+                if !prev.contains_key(&(tx, ty)) && (sx, sy) != (tx, ty) {
+                    return Ok(Some(Value::Null));
+                }
+                let mut path = Vec::new();
+                let mut cur = (tx, ty);
+                loop {
+                    path.push(Value::List(im::vector![Value::Int(cur.0), Value::Int(cur.1)]));
+                    if cur == (sx, sy) { break; }
+                    cur = prev[&cur];
+                }
+                path.reverse();
+                Ok(Some(Value::List(path.into_iter().collect())))
+            }
+            "turn" => {
+                // turn(units) — initiative order: sort by unit["speed"] desc.
+                // Each unit is a dict with a "speed" field.
+                let Value::List(units) = args.get(0).cloned().unwrap_or(Value::Null) else {
+                    return Err("turn(units) expects a list of dicts with .speed".into())
+                };
+                let mut sorted: Vec<Value> = units.iter().cloned().collect();
+                sorted.sort_by(|a, b| {
+                    let sa = if let Value::Dict(d) = a {
+                        d.get("speed").and_then(|v| match v { Value::Int(i) => Some(*i), Value::Float(f) => Some(*f as i64), _ => None }).unwrap_or(0)
+                    } else { 0 };
+                    let sb = if let Value::Dict(d) = b {
+                        d.get("speed").and_then(|v| match v { Value::Int(i) => Some(*i), Value::Float(f) => Some(*f as i64), _ => None }).unwrap_or(0)
+                    } else { 0 };
+                    sb.cmp(&sa)
+                });
+                Ok(Some(Value::List(sorted.into_iter().collect())))
+            }
+            "smoothstep" => {
+                let (e0, e1, x) = (num_at(args, 0)?, num_at(args, 1)?, num_at(args, 2)?);
+                let t = ((x - e0) / (e1 - e0).max(1e-9)).clamp(0.0, 1.0);
+                Ok(Some(Value::Float(t * t * (3.0 - 2.0 * t))))
+            }
+            "line_points" => {
+                // line_points(x1, y1, x2, y2) — Bresenham cells on the segment
+                let (x1, y1, x2, y2) = (num_at(args, 0)? as i64, num_at(args, 1)? as i64,
+                                       num_at(args, 2)? as i64, num_at(args, 3)? as i64);
+                let (dx, dy) = ((x2 - x1).abs(), (y2 - y1).abs());
+                let (sx, sy) = (if x1 < x2 { 1 } else { -1 }, if y1 < y2 { 1 } else { -1 });
+                let (mut x, mut y, mut err) = (x1, y1, dx - dy);
+                let mut out = Vec::new();
+                loop {
+                    out.push(Value::List(im::vector![Value::Int(x), Value::Int(y)]));
+                    if x == x2 && y == y2 { break; }
+                    let e2 = 2 * err;
+                    if e2 > -dy { err -= dy; x += sx; }
+                    if e2 < dx { err += dx; y += sy; }
+                }
+                Ok(Some(Value::List(out.into_iter().collect())))
+            }
+            "bezier" => {
+                // bezier(t, p0x,p0y, p1x,p1y, p2x,p2y, p3x,p3y) — cubic bezier [x,y]
+                let t = num_at(args, 0)?;
+                let (p0x, p0y, p1x, p1y, p2x, p2y, p3x, p3y) = (
+                    num_at(args, 1)?, num_at(args, 2)?, num_at(args, 3)?, num_at(args, 4)?,
+                    num_at(args, 5)?, num_at(args, 6)?, num_at(args, 7)?, num_at(args, 8)?);
+                let u = 1.0 - t;
+                let x = u*u*u*p0x + 3.0*u*u*t*p1x + 3.0*u*t*t*p2x + t*t*t*p3x;
+                let y = u*u*u*p0y + 3.0*u*u*t*p1y + 3.0*u*t*t*p2y + t*t*t*p3y;
+                Ok(Some(Value::List(im::vector![Value::Float(x), Value::Float(y)])))
+            }
+            "point_in_poly" => {
+                // point_in_poly(x, y, [[px,py],...]) — even-odd ray cast
+                let (px, py) = (num_at(args, 0)?, num_at(args, 1)?);
+                let Value::List(pts) = args.get(2).cloned().unwrap_or(Value::Null) else {
+                    return Err("point_in_poly(x, y, [[px,py],...]) expects a point list".into())
+                };
+                let mut inside = false;
+                let n = pts.len();
+                let f_of = |v: &Value| match v { Value::Int(i) => *i as f64, Value::Float(f) => *f, _ => 0.0 };
+                for i in 0..n {
+                    let (Value::List(a), Value::List(b)) = (&pts[i], &pts[(i + 1) % n]) else { continue };
+                    let (ax, ay) = (f_of(&a[0]), f_of(&a[1]));
+                    let (bx, by) = (f_of(&b[0]), f_of(&b[1]));
+                    if (ay > py) != (by > py)
+                        && px < (bx - ax) * (py - ay) / (by - ay) + ax {
+                        inside = !inside;
+                    }
+                }
+                Ok(Some(Value::Bool(inside)))
+            }
+            "convex_hull" => {
+                // convex_hull([[x,y],...]) — Andrew's monotone chain → hull
+                let Value::List(pts) = args.get(0).cloned().unwrap_or(Value::Null) else {
+                    return Err("convex_hull([[x,y],...]) expects a point list".into())
+                };
+                let f_of = |v: &Value| match v { Value::Int(i) => *i as f64, Value::Float(f) => *f, _ => 0.0 };
+                let mut p: Vec<(f64, f64)> = pts.iter().filter_map(|v| {
+                    if let Value::List(pair) = v {
+                        if pair.len() == 2 { return Some((f_of(&pair[0]), f_of(&pair[1]))); }
+                    }
+                    None
+                }).collect();
+                p.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+                p.dedup();
+                if p.len() <= 1 {
+                    return Ok(Some(Value::List(pts.iter().cloned().collect::<Vec<Value>>().into_iter().collect())));
+                }
+                let cross = |o: &(f64, f64), a: &(f64, f64), b: &(f64, f64)| (a.0 - o.0) * (b.1 - o.1) - (a.1 - o.1) * (b.0 - o.0);
+                let mut hull: Vec<(f64, f64)> = Vec::new();
+                // lower hull: left→right
+                for &pt in &p {
+                    while hull.len() >= 2 && cross(&hull[hull.len() - 2], &hull[hull.len() - 1], &pt) <= 0.0 {
+                        hull.pop();
+                    }
+                    hull.push(pt);
+                }
+                // upper hull: right→left, bounded by the lower hull's length
+                let lower_len = hull.len();
+                for &pt in p.iter().rev().skip(1) {
+                    while hull.len() > lower_len && cross(&hull[hull.len() - 2], &hull[hull.len() - 1], &pt) <= 0.0 {
+                        hull.pop();
+                    }
+                    hull.push(pt);
+                }
+                if !hull.is_empty() { hull.pop(); } // duplicated start
+                Ok(Some(Value::List(hull.into_iter()
+                    .map(|(x, y)| Value::List(im::vector![Value::Float(x), Value::Float(y)])).collect())))
+            }
+            "fbm" => {
+                // fbm(x, y, octaves) — fractal Brownian motion: octaves of
+                // noise2, halving amplitude, doubling frequency. In [-1,1]-ish.
+                let (x, y, octaves) = (num_at(args, 0)?, num_at(args, 1)?,
+                    args.get(2).and_then(|v| if let Value::Int(i) = v { Some(*i as usize) } else { None }).unwrap_or(4));
+                let hash = |ix: i64, iy: i64| -> f64 {
+                    let mut n = ix.wrapping_mul(374761393).wrapping_add(iy.wrapping_mul(668265263));
+                    n = (n ^ (n >> 13)).wrapping_mul(1274126177);
+                    ((n ^ (n >> 16)) as u64 & 0xffffff) as f64 / 0xffffff as f64
+                };
+                let s = |t: f64| t * t * (3.0 - 2.0 * t);
+                let noise = |x: f64, y: f64| -> f64 {
+                    let (ix, iy) = (x.floor() as i64, y.floor() as i64);
+                    let (fx, fy) = (x - x.floor(), y - y.floor());
+                    let (a, b, c, d) = (hash(ix, iy), hash(ix + 1, iy), hash(ix, iy + 1), hash(ix + 1, iy + 1));
+                    a + (b - a) * s(fx) + (c - a) * s(fy) + (a - b - c + d) * s(fx) * s(fy)
+                };
+                let (mut total, mut amp, mut freq, mut max) = (0f64, 1f64, 1f64, 0f64);
+                for _ in 0..octaves {
+                    total += noise(x * freq, y * freq) * amp;
+                    max += amp;
+                    amp *= 0.5;
+                    freq *= 2.0;
+                }
+                Ok(Some(Value::Float(if max > 0.0 { total / max } else { 0.0 })))
+            }
+            "canvas_circle" => {
+                // canvas_circle(c, cx, cy, r, ch) — midpoint circle
+                let (d, cx, cy, r, ch) = match (args.get(0), args.get(1), args.get(2), args.get(3), args.get(4)) {
+                    (Some(Value::Dict(d)), Some(Value::Int(cx)), Some(Value::Int(cy)),
+                     Some(Value::Int(r)), Some(Value::Str(ch)))
+                        => (d.clone(), *cx, *cy, *r, ch.clone()),
+                    _ => return Err("canvas_circle(c, cx, cy, r, ch) expects dict + 3 ints + str".into()),
+                };
+                let Some(Value::List(rows)) = d.get("cells") else { return Err("canvas: no cells".into()) };
+                let mut rows2 = rows.clone();
+                let (w, h) = (rows.get(0).and_then(|r| if let Value::List(r) = r { Some(r.len()) } else { None }), rows.len());
+                let Some(w) = w else { return Err("canvas: missing w".into()) };
+                let (mut x, mut y, mut err) = (-r, 0i64, 2 - 2 * r);
+                loop {
+                    for (px, py) in [(cx + x, cy + y), (cx - y, cy - x), (cx - x, cy - y), (cx + y, cy + x),
+                                     (cx + x, cy - y), (cx - y, cy + x), (cx - x, cy + y), (cx + y, cy - x)] {
+                        if px >= 0 && py >= 0 && (px as usize) < w && (py as usize) < h {
+                            if let Value::List(r) = &rows2[py as usize] {
+                                let mut nr = r.clone();
+                                nr[px as usize] = Value::Str(ch.clone());
+                                rows2[py as usize] = Value::List(nr);
+                            }
+                        }
+                    }
+                    if x >= 0 { break; }
+                    let r_err = err;
+                    if r_err <= y { err += { y += 1; y * 2 + 1 }; }
+                    if r_err > x || err > y { err += { x += 1; x * 2 + 1 }; }
+                }
+                let mut d2 = d.clone();
+                d2.insert("cells".to_string(), Value::List(rows2));
+                Ok(Some(Value::Dict(d2)))
+            }
+            "canvas_rect" => {
+                // canvas_rect(c, x, y, w, h, ch, fill?) — rect outline or filled
+                let (d, x0, y0, w, h, ch, fill) = match (args.get(0), args.get(1), args.get(2), args.get(3), args.get(4), args.get(5), args.get(6)) {
+                    (Some(Value::Dict(d)), Some(Value::Int(x)), Some(Value::Int(y)),
+                     Some(Value::Int(w)), Some(Value::Int(h)), Some(Value::Str(ch)), f)
+                        => (d.clone(), *x as usize, *y as usize, *w as usize, *h as usize, ch.clone(),
+                            matches!(f, Some(Value::Bool(true)))),
+                    _ => return Err("canvas_rect(c, x, y, w, h, ch, fill?) expects dict + 4 ints + str + bool".into()),
+                };
+                let Some(Value::List(rows)) = d.get("cells") else { return Err("canvas: no cells".into()) };
+                let mut rows2 = rows.clone();
+                for yy in y0..(y0 + h).min(rows2.len()) {
+                    if let Value::List(r) = &rows2[yy] {
+                        let mut nr = r.clone();
+                        for xx in x0..(x0 + w).min(nr.len()) {
+                            let edge = xx == x0 || xx == x0 + w - 1 || yy == y0 || yy == y0 + h - 1;
+                            if fill || edge { nr[xx] = Value::Str(ch.clone()); }
+                        }
+                        rows2[yy] = Value::List(nr);
+                    }
+                }
+                let mut d2 = d.clone();
+                d2.insert("cells".to_string(), Value::List(rows2));
+                Ok(Some(Value::Dict(d2)))
+            }
             "dist_stats" => {
                 // dist_stats(fn, trials) — mean/stddev/min/max over n samples
                 let (f, trials) = match (args.get(0), args.get(1)) {
