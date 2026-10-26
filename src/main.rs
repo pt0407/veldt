@@ -409,8 +409,19 @@ fn main() {
             let mut veldt = veldt::Veldt::new();
             if let Err(e) = veldt.load() { eprintln!("Error: {}", e); process::exit(1); }
             let needle = args[2].to_lowercase();
+            let or_groups: Option<Vec<Vec<&str>>> = args.iter()
+                .position(|a| a == "--filter")
+                .and_then(|p| args.get(p + 1))
+                .map(|expr| expr.split("||")
+                    .map(|g| g.split("&&").map(|s| s.trim()).collect())
+                    .collect());
             let hits: Vec<_> = veldt.functions.iter()
-                .filter(|(n, _)| n.to_lowercase().contains(&needle)).collect();
+                .filter(|(n, vs)| n.to_lowercase().contains(&needle)
+                    && or_groups.as_ref().map(|gs| vs.iter().any(|e|
+                        gs.iter().any(|g|
+                            g.iter().all(|c| veldt::variant_matches(e, c)))))
+                    .unwrap_or(true))
+                .collect();
             if args.iter().any(|a| a == "--json") {
                 println!("{}", serde_json::json!({
                     "matches": hits.iter().map(|(n, vs)| serde_json::json!({
