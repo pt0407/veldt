@@ -1644,6 +1644,62 @@ print(@N@([1, 3, 5, 7, 9], 7))
 print(@N@([[1, 2], [3, 4], [5]]))
 "#,
         },
+        Template {
+            keywords: &["chunk", "chunked", "batches"],
+            canonical: "chunk",
+            desc: "split a list into fixed-size chunks",
+            needs: &[],
+            make: r#"grow fn @N@(xs: list, n: int) test @N@([1,2,3,4,5], 2).len() == 3 {
+    let out = []
+    let cur = []
+    for x in xs {
+        cur.append(x)
+        if cur.len() == n {
+            out.append(cur)
+            cur = []
+        }
+    }
+    if cur.len() > 0 { out.append(cur) }
+    return out
+}
+
+print(@N@([1, 2, 3, 4, 5], 2))
+"#,
+        },
+        Template {
+            keywords: &["range", "range list", "count up", "upto"],
+            canonical: "range_list",
+            desc: "list of ints 0..n-1",
+            needs: &[],
+            make: r#"grow fn @N@(n: int) test @N@(4) == [0, 1, 2, 3], @N@(0) == [] {
+    let out = []
+    let i = 0
+    while i < n {
+        out.append(i)
+        i = i + 1
+    }
+    return out
+}
+
+print(@N@(6))
+"#,
+        },
+        Template {
+            keywords: &["count", "countif", "count by", "count_by"],
+            canonical: "count_by",
+            desc: "count items matching a predicate",
+            needs: &[],
+            make: r#"grow fn @N@(xs: list, pred: fn) test @N@([1,2,3,4], fn(x) { return x > 2 }) == 2 {
+    let n = 0
+    for x in xs {
+        if pred(x) { n = n + 1 }
+    }
+    return n
+}
+
+print(@N@([1, 2, 3, 4, 5], fn(x) { return x % 2 == 0 }))
+"#,
+        },
     ]
 }
 

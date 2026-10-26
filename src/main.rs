@@ -120,7 +120,11 @@ fn main() {
                 eprintln!("Usage: veldt import <file>");
                 process::exit(1);
             }
-            import_garden(&args[2]);
+            if args.iter().any(|a| a == "--merge") {
+                merge_garden_json(&read_garden_json(&args[2]));
+            } else {
+                import_garden(&args[2]);
+            }
         }
         "registry" => {
             let port: u16 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(7878);
@@ -172,6 +176,24 @@ fn main() {
         }
         "absorb" => {
             absorb_traces(args.get(2).map(|s| s.as_str()));
+        }
+        "find" => {
+            if args.len() < 3 {
+                eprintln!("Usage: veldt find <substr>  (find local families by name)");
+                process::exit(1);
+            }
+            let mut veldt = veldt::Veldt::new();
+            if let Err(e) = veldt.load() { eprintln!("Error: {}", e); process::exit(1); }
+            let needle = args[2].to_lowercase();
+            let hits: Vec<_> = veldt.functions.iter()
+                .filter(|(n, _)| n.to_lowercase().contains(&needle)).collect();
+            if hits.is_empty() {
+                println!("No families matching '{}'", args[2]);
+            }
+            for (name, vs) in hits {
+                let top = vs.iter().map(|e| e.fitness).fold(f64::NEG_INFINITY, f64::max);
+                println!("{} — {} variants, peak fitness {:.2}", name, vs.len(), top);
+            }
         }
         "search" => {
             if args.len() < 4 {
@@ -400,9 +422,39 @@ fn main() {
                     evolver.set_seed(n);
                 }
             }
-            let events = evolver.evolve(&mut veldt, cycles);
-            for event in &events {
-                eprintln!("{}", event.format());
+            // --until F: stop early when any variant reaches fitness F;
+            // --until-fam name:F — scoped to one family.
+            let until = args.iter().position(|a| a == "--until")
+                .and_then(|p| args.get(p + 1)).and_then(|s| s.parse::<f64>().ok());
+            let until_fam = args.iter().position(|a| a == "--until-fam")
+                .and_then(|p| args.get(p + 1))
+                .and_then(|s| s.split_once(':')
+                    .and_then(|(n, f)| Some((n.to_string(), f.parse::<f64>().ok()?))));
+            let mut run_cycles = 0usize;
+            while run_cycles < cycles {
+                let events = evolver.evolve(&mut veldt, 1);
+                for event in &events { eprintln!("{}", event.format()); }
+                run_cycles += 1;
+                if let Some(target) = until {
+                    let peak = veldt.functions.values()
+                        .flat_map(|vs| vs.iter().map(|e| e.fitness))
+                        .fold(f64::NEG_INFINITY, f64::max);
+                    if peak >= target {
+                        eprintln!("[EVOLVE] target fitness {} reached (peak {:.2}) — stopping after {} cycles",
+                            target, peak, run_cycles);
+                        break;
+                    }
+                }
+                if let Some((fam, target)) = &until_fam {
+                    let peak = veldt.functions.get(fam)
+                        .map(|vs| vs.iter().map(|e| e.fitness).fold(f64::NEG_INFINITY, f64::max))
+                        .unwrap_or(f64::NEG_INFINITY);
+                    if peak >= *target {
+                        eprintln!("[EVOLVE] {} hit target {} (peak {:.2}) — stopping after {} cycles",
+                            fam, target, peak, run_cycles);
+                        break;
+                    }
+                }
             }
             veldt.save().unwrap_or_else(|e| eprintln!("Save error: {}", e));
         }
@@ -727,6 +779,13 @@ fn merge_garden(url: &str) {
     let remote: serde_json::Value = match serde_json::from_str(&body) {
         Ok(v) => v, Err(e) => { eprintln!("Bad pool json: {}", e); process::exit(1); }
     };
+    let added = merge_garden_json(&remote);
+    println!("Merged {} immigrant variants from {}", added, url);
+}
+
+/// Merge remote garden JSON into the local garden — shared by
+/// `pull --merge` and `import --merge`. Returns immigrants added.
+fn merge_garden_json(remote: &serde_json::Value) -> usize {
     let mut veldt = veldt::Veldt::new();
     if let Err(e) = veldt.load() { eprintln!("Error: {}", e); process::exit(1); }
     let mut added = 0;
@@ -746,7 +805,7 @@ fn merge_garden(url: &str) {
         }
     }
     if let Err(e) = veldt.save() { eprintln!("Save failed: {}", e); process::exit(1); }
-    println!("Merged {} immigrant variants from {}", added, url);
+    added
 }
 
 fn search_registry(url: &str, needle: &str) {
@@ -1304,6 +1363,26 @@ fn import_garden(path: &str) {
         Ok(_) => println!("Garden imported from {}", path),
         Err(e) => eprintln!("Import failed: {}", e),
     }
+}
+
+/// Read a garden JSON from a file path or URL.
+fn read_garden_json(path: &str) -> serde_json::Value {
+    let body = if path.starts_with("http://") || path.starts_with("https://") {
+        let client = reqwest::blocking::Client::builder()
+            .user_agent("Veldt/0.3").timeout(std::time::Duration::from_secs(30))
+            .build().expect("http client");
+        client.get(path).send().and_then(|r| r.error_for_status())
+            .and_then(|r| r.text()).unwrap_or_else(|e| {
+                eprintln!("Fetch failed: {}", e); process::exit(1);
+            })
+    } else {
+        std::fs::read_to_string(path).unwrap_or_else(|e| {
+            eprintln!("Read failed: {}", e); process::exit(1);
+        })
+    };
+    serde_json::from_str(&body).unwrap_or_else(|e| {
+        eprintln!("Bad garden json in {}: {}", path, e); process::exit(1);
+    })
 }
 
 fn run_program(path: &str, trace: bool, evolve_after: bool) {
