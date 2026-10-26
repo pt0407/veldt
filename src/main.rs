@@ -3355,6 +3355,12 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                 if let Expr::Var(v) = e {
                     if v == name { out.push(format!("let {} = {} — self-assignment, likely a typo", name, name)); }
                 }
+                // dead let init — next mention of the var is an assign, not a read
+                let next = stmts.iter().skip(i + 1)
+                    .find(|s| stmt_mentions(s, name) || matches!(s, Stmt::Assign(n, _) if n == name));
+                if matches!(next, Some(Stmt::Assign(n, _)) if n == name) {
+                    out.push(format!("let {} = <init never read> — first mention is a re-assign", name));
+                }
             }
             Stmt::Assign(name, e) => {
                 if !bound.iter().any(|(_, b)| *b == name) && !outer.contains(name.as_str()) {
