@@ -2262,6 +2262,78 @@ impl Interpreter {
                 }
                 Ok(Some(Value::Int(total + modifier)))
             }
+            "rand_shuffle" => {
+                // rand_shuffle(list) — Fisher-Yates shuffle, returns new list
+                let Value::List(items) = args.get(0).cloned().unwrap_or(Value::Null) else {
+                    return Err("rand_shuffle(list) expects a list".into())
+                };
+                let mut out: Vec<Value> = items.iter().cloned().collect();
+                for i in (1..out.len()).rev() {
+                    let mut x = self.rng_state;
+                    x ^= x << 13; x ^= x >> 7; x ^= x << 17;
+                    self.rng_state = x;
+                    let j = (x % (i + 1) as u64) as usize;
+                    out.swap(i, j);
+                }
+                Ok(Some(Value::List(out.into_iter().collect())))
+            }
+            "astar_cost" => {
+                // astar_cost(c, sx, sy, tx, ty, cost_dict) — weighted pathfind:
+                // cost_dict maps cell char → step cost (missing = unwalkable).
+                // Diagonal = 1.4x straight cost. Returns [[x,y],...] or null.
+                let (d, sx, sy, tx, ty, costs) = match (args.get(0), args.get(1), args.get(2), args.get(3), args.get(4), args.get(5)) {
+                    (Some(Value::Dict(d)), Some(Value::Int(sx)), Some(Value::Int(sy)),
+                     Some(Value::Int(tx)), Some(Value::Int(ty)), Some(Value::Dict(c)))
+                        => (d, *sx, *sy, *tx, *ty, c.clone()),
+                    _ => return Err("astar_cost(c, sx, sy, tx, ty, cost_dict) expects 2 dicts + 4 ints".into()),
+                };
+                let (w, h) = (d.get("w").and_then(|v| if let Value::Int(w) = v { Some(*w) } else { None }),
+                              d.get("h").and_then(|v| if let Value::Int(h) = v { Some(*h) } else { None }));
+                let (Some(w), Some(h)) = (w, h) else { return Err("canvas: missing w/h".into()) };
+                let Some(Value::List(cells)) = d.get("cells") else { return Err("canvas: no cells".into()) };
+                let step_cost = |x: i64, y: i64| -> Option<i64> {
+                    if x < 0 || y < 0 || x >= w || y >= h { return None; }
+                    if let Value::List(r) = &cells[y as usize] {
+                        if let Some(Value::Str(s)) = r.get(x as usize) {
+                            return costs.get(s.as_ref() as &str)
+                                .and_then(|v| match v { Value::Int(i) => Some(*i), Value::Float(f) => Some(*f as i64), _ => None });
+                        }
+                    }
+                    None
+                };
+                let mut open: std::collections::BinaryHeap<(std::cmp::Reverse<i64>, i64, i64)> = std::collections::BinaryHeap::new();
+                let mut g: std::collections::HashMap<(i64, i64), i64> = std::collections::HashMap::new();
+                let mut prev: std::collections::HashMap<(i64, i64), (i64, i64)> = std::collections::HashMap::new();
+                let h_of = |x: i64, y: i64| ((tx - x).abs() + (ty - y).abs()) * 10;
+                g.insert((sx, sy), 0);
+                open.push((std::cmp::Reverse(h_of(sx, sy)), sx, sy));
+                while let Some((_, cx, cy)) = open.pop() {
+                    if cx == tx && cy == ty { break; }
+                    let cg = g[&(cx, cy)];
+                    for (dx, dy, diag) in [(0,-1,false),(0,1,false),(-1,0,false),(1,0,false),(-1,-1,true),(1,-1,true),(-1,1,true),(1,1,true)] {
+                        let (nx, ny) = (cx + dx, cy + dy);
+                        let Some(sc) = step_cost(nx, ny).or(if nx == tx && ny == ty { Some(1) } else { None }) else { continue };
+                        let ng = cg + sc * if diag { 14 } else { 10 };
+                        if g.get(&(nx, ny)).map(|&v| ng < v).unwrap_or(true) {
+                            g.insert((nx, ny), ng);
+                            prev.insert((nx, ny), (cx, cy));
+                            open.push((std::cmp::Reverse(ng + h_of(nx, ny)), nx, ny));
+                        }
+                    }
+                }
+                if !prev.contains_key(&(tx, ty)) && (sx, sy) != (tx, ty) {
+                    return Ok(Some(Value::Null));
+                }
+                let mut path = Vec::new();
+                let mut cur = (tx, ty);
+                loop {
+                    path.push(Value::List(im::vector![Value::Int(cur.0), Value::Int(cur.1)]));
+                    if cur == (sx, sy) { break; }
+                    cur = prev[&cur];
+                }
+                path.reverse();
+                Ok(Some(Value::List(path.into_iter().collect())))
+            }
             "dist_stats" => {
                 // dist_stats(fn, trials) — mean/stddev/min/max over n samples
                 let (f, trials) = match (args.get(0), args.get(1)) {
