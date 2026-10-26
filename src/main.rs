@@ -3746,6 +3746,15 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                             && !outer.contains(v.as_str()) {
                             out.push(format!("match pattern {} is unbound — never matches", v));
                         }
+                        // Var pattern bound to a literal — the pattern is a constant
+                        for (_, s) in stmts.iter().enumerate().take(i) {
+                            if let Stmt::Let(n, pe) = s {
+                                if n == v && matches!(pe, Expr::Int(_) | Expr::Str(_) | Expr::Bool(_) | Expr::Null) {
+                                    out.push(format!("match pattern {} is bound to a literal — inline it", v));
+                                    break;
+                                }
+                            }
+                        }
                     }
                 }
                 // else arm that just exits — the match adds no handling
