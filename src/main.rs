@@ -2294,6 +2294,15 @@ fn print_stats(veldt: &veldt::Veldt) {
                 let llms = vs.iter().filter(|e| e.origin.contains("llm")).count();
                 println!("  population: {} immigrant · {} seed · {} LLM · {} bred",
                     immigrants, seeds, llms, vs.len() - immigrants - seeds - llms);
+                // sick errors — the family's failure modes
+                let errs: Vec<_> = vs.iter().filter_map(|e|
+                    if let Health::Sick(err) = &e.health { Some(err) } else { None }).collect();
+                if !errs.is_empty() {
+                    println!("  sick errors:");
+                    for err in errs.iter().take(5) {
+                        println!("    {}", err);
+                    }
+                }
             }
         }
         if veldt.fitness_history.len() >= 2 {
