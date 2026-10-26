@@ -3307,6 +3307,20 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
             }
         }
     }
+    // deep nesting — blocks nested >4 levels are hard to reason about
+    fn depth_of(stmts: &[Stmt]) -> usize {
+        stmts.iter().map(|s| match s {
+            Stmt::If(_, a, b) => 1 + depth_of(a).max(b.as_ref().map(|x| depth_of(x)).unwrap_or(0)),
+            Stmt::While(_, body) | Stmt::For(_, _, body) => 1 + depth_of(body),
+            Stmt::Try(a, _, b) => 1 + depth_of(a).max(depth_of(b)),
+            Stmt::Match(_, arms, els) => 1 + arms.iter().map(|(_, b)| depth_of(b))
+                .chain(els.iter().map(|e| depth_of(e))).max().unwrap_or(0),
+            _ => 0,
+        }).max().unwrap_or(0)
+    }
+    if depth_of(stmts) > 4 {
+        out.push(format!("nesting depth {} — consider extracting a helper", depth_of(stmts)));
+    }
 }
 
 /// Does this block contain a loop-exit statement (break/return/continue)?
