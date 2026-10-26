@@ -57,6 +57,7 @@ pub async fn start_server(port: u16) {
         .route("/api/immigrants", get(immigrants))
         .route("/api/mutation", get(mutation))
         .route("/api/families", get(families))
+        .route("/api/variant", get(variant))
         .route("/api/run", post(run_program))
         .route("/api/evolve", post(evolve))
         .route("/api/clear", post(clear_veldt))
@@ -399,6 +400,31 @@ async fn families() -> Json<serde_json::Value> {
             "probes": veldt.probes.get(n).map(|p| p.len()).unwrap_or(0),
         })).collect();
     Json(serde_json::json!({"families": fams}))
+}
+
+#[derive(Deserialize)]
+struct VariantRequest { name: String, id: u32 }
+
+async fn variant(
+    axum::extract::Query(req): axum::extract::Query<VariantRequest>,
+) -> Json<serde_json::Value> {
+    let mut veldt = veldt::Veldt::new();
+    if veldt.load().is_err() {
+        return Json(serde_json::json!({"error": "garden load failed"}));
+    }
+    let v = veldt.functions.get(&req.name)
+        .and_then(|vs| vs.iter().find(|e| e.id == req.id));
+    match v {
+        Some(e) => Json(serde_json::json!({
+            "name": req.name, "id": e.id,
+            "fitness": e.fitness, "health": format!("{:?}", e.health),
+            "age": e.age, "lifespan": e.lifespan, "usage": e.usage_count,
+            "trust": format!("{:?}", e.trust), "origin": e.origin,
+            "niche_scores": e.niche_scores,
+            "source": crate::fmt::format_program(&e.body),
+        })),
+        None => Json(serde_json::json!({"error": format!("{}#{} not found", req.name, req.id)})),
+    }
 }
 
 #[derive(Deserialize)]
