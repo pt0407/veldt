@@ -442,43 +442,63 @@ fn main() {
                 eprintln!("Usage: veldt check <file.veldt>");
                 process::exit(1);
             }
-            // parse-only — no exec; exits 1 on any lex/parse error
-            let source = std::fs::read_to_string(&args[2])
-                .unwrap_or_else(|e| { eprintln!("Error reading {}: {}", args[2], e); process::exit(1); });
             let json_out = args.iter().any(|a| a == "--json");
             let strict = args.iter().any(|a| a == "--strict");
-            let report_err = |kind: &str, e: &dyn std::fmt::Display| {
-                if json_out {
-                    println!("{}", serde_json::json!({"file": args[2], "ok": false, "error": format!("{}: {}", kind, e)}));
-                } else {
-                    eprintln!("{}: {}", kind, e);
-                }
-                process::exit(1);
+            let watch = args.iter().any(|a| a == "--watch");
+            let run = |src: &str| -> Result<(usize, Vec<String>), String> {
+                let mut lx = lexer::Lexer::new(src);
+                let toks = lx.tokenize().map_err(|e| format!("Lex error: {}", e))?;
+                let mut p = parser::Parser::new_with_lines(toks, lx.token_lines.clone());
+                let stmts = p.parse_program().map_err(|e| format!("Parse error: {}", e))?;
+                let n = stmts.len();
+                if strict { Ok((n, lint(&stmts))) } else { Ok((n, vec![])) }
             };
-            let mut lx = lexer::Lexer::new(&source);
-            match lx.tokenize() {
-                Err(e) => report_err("Lex error", &e),
-                Ok(toks) => {
-                    let mut p = parser::Parser::new_with_lines(toks, lx.token_lines.clone());
-                    match p.parse_program() {
-                        Err(e) => report_err("Parse error", &e),
-                        Ok(stmts) => {
-                            if strict {
-                                let warnings = lint(&stmts);
-                                if json_out {
-                                    println!("{}", serde_json::json!({"file": args[2], "ok": true, "statements": stmts.len(), "warnings": warnings}));
-                                } else {
-                                    for w in &warnings { eprintln!("  ⚠ {}", w); }
-                                    println!("{} — ok ({} statements, {} warnings)", args[2], stmts.len(), warnings.len());
-                                }
-                            } else if json_out {
-                                println!("{}", serde_json::json!({"file": args[2], "ok": true, "statements": stmts.len()}));
+            let print = |path: &str, src: &str| {
+                match run(src) {
+                    Ok((n, warnings)) => {
+                        if strict {
+                            if json_out {
+                                println!("{}", serde_json::json!({"file": path, "ok": true, "statements": n, "warnings": warnings}));
                             } else {
-                                println!("{} — ok ({} statements)", args[2], stmts.len());
+                                for w in &warnings { eprintln!("  ⚠ {}", w); }
+                                println!("{} — ok ({} statements, {} warnings)", path, n, warnings.len());
                             }
+                        } else if json_out {
+                            println!("{}", serde_json::json!({"file": path, "ok": true, "statements": n}));
+                        } else {
+                            println!("{} — ok ({} statements)", path, n);
+                        }
+                    }
+                    Err(e) => {
+                        if json_out {
+                            println!("{}", serde_json::json!({"file": path, "ok": false, "error": e}));
+                        } else {
+                            eprintln!("{}", e);
                         }
                     }
                 }
+            };
+            let path = args[2].clone();
+            if watch {
+                let mut last_mtime = None;
+                loop {
+                    if let Ok(meta) = std::fs::metadata(&path) {
+                        if let Ok(mtime) = meta.modified() {
+                            if last_mtime != Some(mtime) {
+                                last_mtime = Some(mtime);
+                                let src = std::fs::read_to_string(&path)
+                                    .unwrap_or_else(|e| { eprintln!("Error reading {}: {}", path, e); String::new() });
+                                print!("\x1b[2J\x1b[H");
+                                print(&path, &src);
+                            }
+                        }
+                    }
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                }
+            } else {
+                let src = std::fs::read_to_string(&path)
+                    .unwrap_or_else(|e| { eprintln!("Error reading {}: {}", path, e); process::exit(1); });
+                print(&path, &src);
             }
         }
         "diff" => {
