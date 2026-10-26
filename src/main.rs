@@ -5391,19 +5391,25 @@ fn print_family_detail(veldt: &veldt::Veldt, fam: &String, vs: &[veldt::Function
     let died_n = veldt.obituaries.iter().filter(|o| o.name == *fam).count();
     if born_n + died_n > 0 {
         let churn = died_n as f64 / (born_n + died_n) as f64;
-        println!("  turnover: {} living · {} died ({:.0}% churn)", born_n, died_n, churn * 100.0);
+        println!("  turnover: {} living · {} died ({:.0}% churn)  {}",
+            born_n, died_n, churn * 100.0,
+            spark(&[born_n as f64, died_n as f64]));
     }
     // diversity — unique origins + niche breadth (the genetic diversity)
     let unique_origins: std::collections::HashSet<_> = vs.iter().map(|e| e.origin.as_str()).collect();
     let unique_niches: std::collections::HashSet<_> = vs.iter()
         .flat_map(|e| e.niche_scores.keys().map(|s| s.as_str())).collect();
-    println!("  diversity: {} origins · {} niches", unique_origins.len(), unique_niches.len());
+    println!("  diversity: {} origins · {} niches  {}",
+        unique_origins.len(), unique_niches.len(),
+        spark(&[unique_origins.len() as f64, unique_niches.len() as f64]));
     // immigrants — the family's foreign-garden influence
     let immigrants = vs.iter().filter(|e| e.origin.contains("immigrant")).count();
     let seeds = vs.iter().filter(|e| e.origin.starts_with("seed")).count();
     let llms = vs.iter().filter(|e| e.origin.contains("llm")).count();
-    println!("  population: {} immigrant · {} seed · {} LLM · {} bred",
-        immigrants, seeds, llms, vs.len() - immigrants - seeds - llms);
+    let bred = vs.len() - immigrants - seeds - llms;
+    println!("  population: {} immigrant · {} seed · {} LLM · {} bred  {}",
+        immigrants, seeds, llms, bred,
+        spark(&[immigrants as f64, seeds as f64, llms as f64, bred as f64]));
     // sick errors — the family's failure modes
     let errs: Vec<_> = vs.iter().filter_map(|e|
         if let Health::Sick(err) = &e.health { Some(err) } else { None }).collect();
@@ -5416,11 +5422,13 @@ fn print_family_detail(veldt: &veldt::Veldt, fam: &String, vs: &[veldt::Function
     // lifecycle — growing (age < lifespan) vs aging (age >= lifespan)
     let growing = vs.iter().filter(|e| (e.age as f64) < e.lifespan).count();
     let aging = vs.iter().filter(|e| (e.age as f64) >= e.lifespan).count();
-    println!("  lifecycle: {} growing · {} aging", growing, aging);
+    println!("  lifecycle: {} growing · {} aging  {}",
+        growing, aging, spark(&[growing as f64, aging as f64]));
     // workload — overworked (usage > lifespan) vs underused (usage < lifespan)
     let over = vs.iter().filter(|e| e.usage_count as f64 > e.lifespan).count();
     let under = vs.iter().filter(|e| (e.usage_count as f64) < e.lifespan).count();
-    println!("  workload: {} overworked · {} underused", over, under);
+    println!("  workload: {} overworked · {} underused  {}",
+        over, under, spark(&[over as f64, under as f64]));
     // source success — which mutation sources produced healthy variants
     let mut src_healthy: std::collections::HashMap<String, (usize, usize)> = std::collections::HashMap::new();
     for e in vs.iter() {
