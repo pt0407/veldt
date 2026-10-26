@@ -134,7 +134,7 @@ impl JitEngine {
     }
 
     /// Compile a pinned `name#id` variant (explicit `name#N` calls).
-    fn compile_pinned(&mut self, name: &str, id: u32, fns: &Fns)
+    pub(crate) fn compile_pinned(&mut self, name: &str, id: u32, fns: &Fns)
         -> Option<JitFn> {
         let chosen = fns.get(name)?.iter().find(|v| v.id == id)?;
         self.compile_variant(format!("{}#{}", name, id), chosen, fns)

@@ -1099,6 +1099,26 @@ impl Vm {
                         return Err(format!("{}#{} expects {} args",
                             name, vid, chosen.params.len()));
                     }
+                    // tier-2: pinned calls go native too — compile the
+                    // exact variant, not the fittest
+                    chosen.calls.set(chosen.calls.get() + 1);
+                    if chosen.calls.get() >= 64 && !chosen.jit_tried.get() {
+                        chosen.jit_tried.set(true);
+                        if self.jit_engine.is_none() {
+                            self.jit_engine = crate::jit::JitEngine::new();
+                        }
+                        if let Some(e) = self.jit_engine.as_mut() {
+                            *chosen.jit.borrow_mut() =
+                                e.compile_pinned(&name, vid, &self.fns);
+                        }
+                    }
+                    let spec = chosen.jit.borrow().as_ref()
+                        .map(|j| (j.code_ptr, j.mode, chosen.code.clone()));
+                    if let Some((p, m, code)) = spec {
+                        let v = self.jit_invoke(p, m, &code, args)?;
+                        stack.push(v);
+                        return Ok(());
+                    }
                     let env: Vec<Option<Value>> =
                         args.into_iter().map(Some).collect();
                     frames.push(Frame {
