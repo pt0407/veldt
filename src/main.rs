@@ -1021,15 +1021,27 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>) {
     for (i, s) in stmts.iter().enumerate() {
         if returned { out.push("unreachable code after return".into()); }
         match s {
-            Stmt::Grow(GrowItem::Fn(name, _, body, tests)) => {
+            Stmt::Grow(GrowItem::Fn(name, params, body, tests)) => {
                 if tests.is_empty() {
                     out.push(format!("grow fn {} has no test clause — no birth-check", name));
+                }
+                for p in params {
+                    if !p.name.starts_with('_')
+                        && !body.iter().any(|s| stmt_mentions(s, &p.name)) {
+                        out.push(format!("{}: param {} never used", name, p.name));
+                    }
                 }
                 let mut sub = Vec::new();
                 lint_block(body, &mut sub);
                 out.extend(sub.into_iter().map(|w| format!("{}: {}", name, w)));
             }
-            Stmt::FnDef(name, _, body) => {
+            Stmt::FnDef(name, params, body) => {
+                for p in params {
+                    if !p.name.starts_with('_')
+                        && !body.iter().any(|s| stmt_mentions(s, &p.name)) {
+                        out.push(format!("{}: param {} never used", name, p.name));
+                    }
+                }
                 let mut sub = Vec::new();
                 lint_block(body, &mut sub);
                 out.extend(sub.into_iter().map(|w| format!("{}: {}", name, w)));
