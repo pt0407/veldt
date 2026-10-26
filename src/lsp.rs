@@ -58,6 +58,7 @@ pub fn run_lsp() {
                         "hoverProvider": true,
                         "definitionProvider": true,
                         "documentSymbolProvider": true,
+                        "workspaceSymbolProvider": true,
                         "completionProvider": {"triggerCharacters": [".", ":"]}
                     },
                     "serverInfo": {"name": "veldt-lsp", "version": env!("CARGO_PKG_VERSION")}
@@ -68,6 +69,7 @@ pub fn run_lsp() {
                 "textDocument/definition" => definition(params, &docs),
                 "textDocument/completion" => completion(params, &docs),
                 "textDocument/documentSymbol" => document_symbol(params, &docs),
+                "workspace/symbol" => workspace_symbol(params, &docs),
                 _ => None,
             };
 
@@ -203,6 +205,36 @@ fn document_symbol(params: &Value, docs: &HashMap<String, Doc>) -> Option<Value>
             "selectionRange": {"start": {"line": line as u32, "character": 0},
                                "end": {"line": line as u32, "character": text.len() as u32}},
         }));
+    }
+    Some(Value::Array(out))
+}
+
+/// Project-wide symbol search — scans every open doc for decls matching
+/// the query; SymbolInformation uses the legacy LSP shape most clients
+/// still accept (kind/location/containerName).
+fn workspace_symbol(params: &Value, docs: &HashMap<String, Doc>) -> Option<Value> {
+    let q = params["query"].as_str().unwrap_or("").to_lowercase();
+    let mut out = Vec::new();
+    for (uri, doc) in docs {
+        for (line, text) in doc.text.lines().enumerate() {
+            let t = text.trim_start();
+            let (kind, name) = if t.starts_with("grow fn ") || t.starts_with("fn ") {
+                (12u32, t.trim_start_matches("grow fn ").trim_start_matches("fn ")
+                    .split(|c: char| c == '(' || c == '<' || c.is_whitespace()).next().unwrap_or(""))
+            } else if t.starts_with("struct ") {
+                (23u32, t[7..].split(|c: char| c == '{' || c.is_whitespace()).next().unwrap_or(""))
+            } else if t.starts_with("let ") {
+                (13u32, t[4..].split(|c: char| c == '=' || c == ':' || c.is_whitespace()).next().unwrap_or(""))
+            } else { continue };
+            if name.is_empty() || (!q.is_empty() && !name.to_lowercase().contains(&q)) { continue; }
+            out.push(json!({
+                "name": name, "kind": kind,
+                "location": {"uri": uri,
+                    "range": {"start": {"line": line as u32, "character": 0},
+                              "end": {"line": line as u32, "character": text.len() as u32}}},
+                "containerName": uri.split('/').last().unwrap_or(uri),
+            }));
+        }
     }
     Some(Value::Array(out))
 }
