@@ -2441,6 +2441,20 @@ fn print_stats(veldt: &veldt::Veldt) {
                     let timeline: Vec<_> = runs.iter().map(|(r, n)| format!("{}:{}", r % 100, n)).collect();
                     println!("  birth timeline: {}", timeline.join(" "));
                 }
+                // siblings — variants sharing a parent (the sibling map)
+                let mut parents_map: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+                for e in vs.iter() {
+                    let key = e.origin.split(' ').last().unwrap_or("seed").to_string();
+                    parents_map.entry(key).or_default().push(format!("{}#{}", e.name, e.id));
+                }
+                let sibling_groups: Vec<_> = parents_map.values()
+                    .filter(|kids| kids.len() > 1).collect();
+                if !sibling_groups.is_empty() {
+                    println!("  siblings:");
+                    for kids in sibling_groups.iter().take(4) {
+                        println!("    {}", kids.join(" "));
+                    }
+                }
             }
         }
         if veldt.fitness_history.len() >= 2 {
