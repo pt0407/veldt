@@ -71,6 +71,7 @@ pub async fn start_server(port: u16) {
         .route("/api/mutation_rate", get(mutation_rate))
         .route("/api/turnover", get(turnover))
         .route("/api/diversity", get(diversity))
+        .route("/api/pressure", get(pressure))
         .route("/api/run", post(run_program))
         .route("/api/evolve", post(evolve))
         .route("/api/clear", post(clear_veldt))
@@ -654,6 +655,24 @@ async fn diversity() -> Json<serde_json::Value> {
         "avg_family_size": avg_fam, "avg_niches": avg_niches,
         "immigrants": immigrants,
     }))
+}
+
+async fn pressure() -> Json<serde_json::Value> {
+    let mut veldt = veldt::Veldt::new();
+    if veldt.load().is_err() {
+        return Json(serde_json::json!({"error": "garden load failed"}));
+    }
+    let per_family: Vec<serde_json::Value> = veldt.functions.iter()
+        .map(|(n, vs)| {
+            let usage: u64 = vs.iter().map(|e| e.usage_count).sum();
+            let peak: f64 = vs.iter().map(|e| e.fitness)
+                .fold(f64::NEG_INFINITY, f64::max);
+            serde_json::json!({
+                "name": n, "probes": veldt.probes.get(n).map(|p| p.len()).unwrap_or(0),
+                "usage": usage, "peak_fitness": peak,
+            })
+        }).collect();
+    Json(serde_json::json!({"pressure": per_family}))
 }
 
 #[derive(Deserialize)]
