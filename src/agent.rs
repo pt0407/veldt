@@ -490,6 +490,7 @@ fn help_intent() -> AgentResponse {
          • \"fib#216 siblings\" — shared-parent variants\n\
          • \"what's stale\" · \"forgotten\" — dormant variants\n\
          • \"dead code\" — dead-code-removal variants\n\
+         • \"lint fib\" · \"code health\" — strict-lint warnings per variant\n\
          • \"who's winning\" · \"best fib\" — fitness leaderboard\n\
          • \"what's proven\" · \"production-ready\" — deployment subset\n\
          • \"what's risky\" · \"experimental\" — untested + unstable\n\
