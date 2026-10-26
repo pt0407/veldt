@@ -985,9 +985,58 @@ impl JitEngine {
                             fail_pc = pc; ok = false; break; };
                         let op = b.ins().iconst(types::I64,
                             matches!(chunk.code[pc], Instr::Not) as i64);
+                        // Neg on Int: ineg, but MIN must hit the helper
+                        // (interpreter -i64::MIN semantics). Not on Bool:
+                        // !payload (tag 3, u8 @8).
+                        let is_neg = matches!(chunk.code[pc], Instr::Neg);
+                        let tagc = if is_neg {
+                            b.ins().iconst(types::I8, 0)
+                        } else {
+                            b.ins().iconst(types::I8, 3)
+                        };
+                        let tg = b.ins().load(types::I8,
+                            cranelift_codegen::ir::MemFlagsData::trusted(), v, 0);
+                        let hit = b.ins().icmp(IntCC::Equal, tg, tagc);
+                        let fb = b.create_block();
+                        let hb = b.create_block();
+                        let mb = b.create_block();
+                        let arg = b.append_block_param(mb, types::I64);
+                        b.ins().brif(hit, fb, &[], hb, &[]);
+                        b.seal_block(fb);
+                        b.switch_to_block(fb);
+                        let fv = if is_neg {
+                            let a = b.ins().load(types::I64,
+                                cranelift_codegen::ir::MemFlagsData::trusted(), v, 8);
+                            let min = b.ins().iconst(types::I64, i64::MIN);
+                            let is_min = b.ins().icmp(IntCC::Equal, a, min);
+                            let db = b.create_block();
+                            b.ins().brif(is_min, db, &[], hb, &[]);
+                            b.seal_block(db);
+                            b.switch_to_block(db);
+                            let neg = b.ins().ineg(a);
+                            let bv = ecall!(rt.intbox, rtv, neg)
+                                .unwrap_or_else(|| b.ins().iconst(types::I64, 0));
+                            b.ins().jump(mb, &[cranelift_codegen::ir::BlockArg::Value(bv)]);
+                            a // placeholder — used only for the fv binding
+                        } else {
+                            let bv = b.ins().load(types::I8,
+                                cranelift_codegen::ir::MemFlagsData::trusted(), v, 8);
+                            let z = b.ins().iconst(types::I8, 0);
+                            let nz = b.ins().icmp(IntCC::Equal, bv, z);
+                            let nv = b.ins().uextend(types::I64, nz);
+                            let bv = ecall!(rt.boolbox, rtv, nv)
+                                .unwrap_or_else(|| b.ins().iconst(types::I64, 0));
+                            b.ins().jump(mb, &[cranelift_codegen::ir::BlockArg::Value(bv)]);
+                            nv
+                        };
+                        b.switch_to_block(hb);
                         if let Some(r) = ecall!(rt.unop, rtv, op, v) {
-                            stack.push(r);
-                        }
+                            catch_check!(r);
+                            b.ins().jump(mb, &[cranelift_codegen::ir::BlockArg::Value(r)]);
+                        } else { b.ins().jump(mb, &[cranelift_codegen::ir::BlockArg::Value(fv)]); }
+                        b.switch_to_block(mb);
+                        b.seal_block(mb);
+                        stack.push(arg);
                     }
                     Instr::AndOp | Instr::OrOp => {
                         let (Some(r), Some(l)) = (stack.pop(), stack.pop())
