@@ -1148,3 +1148,9 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 - [Devin] veldt stats --lint: garden code-health census —
   per-family warning counts next to [verified]/[exact].
   fib is the lint-heaviest family (246/372 warnings).
+- [Devin] evolve lint-gate: mutants introducing NEW real-bug
+  warnings (arity/unbound/null-bind/fn-shadow/unreachable/
+  wrong-test/never-matching) are rejected at birth — [LINT]
+  event, same slot as CloneRejected. Fired on first run:
+  culled a fib child assigning undeclared `a`. Lint is now
+  selection pressure, not just reporting.
