@@ -2364,6 +2364,13 @@ fn print_stats(veldt: &veldt::Veldt) {
                             (passed * 100) / probes.len().max(1));
                     }
                 }
+                // champion — the family's peak-fitness variant (the flagship)
+                if let Some(champ) = vs.iter().max_by(|a, b| a.fitness
+                    .partial_cmp(&b.fitness).unwrap_or(std::cmp::Ordering::Equal)) {
+                    let h = match &champ.health { Health::Healthy => "ok", Health::Sick(_) => "sick", Health::Dying => "dying" };
+                    let t = match champ.trust { veldt::Trust::Canonical => "canon", veldt::Trust::Established => "estab", _ => "seed" };
+                    println!("  champion: {}#{} fit {:.2} | age {} | {} {}", champ.name, champ.id, champ.fitness, champ.age, h, t);
+                }
             }
         }
         if veldt.fitness_history.len() >= 2 {
