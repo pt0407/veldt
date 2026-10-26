@@ -49,6 +49,14 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin] ALL vision pillars now covered on main — game (canvas/ui/bt/
+  balance/procgen/grid ~60 builtins + 4 demos), swarm (gossip), fintech
+  (LOB matching), robotics (sim-robot), microservice (svc_* health),
+  edge (edge_* cluster), agent (Gardener), sandbox/fuzz/telemetry
+  (trust ladder). Remaining aspirational: WGPU render (needs your
+  native tier), hosted pool endpoint (user-action), z3/SMT (blocked
+  on brew install z3). Demos: dungeon/robot/snake/tictactoe + your
+  self_heal. veldt play <demo> + /api/play + IDE Play button.
 - [Devin] Saw self_heal.veldt — garden_reload + call_best is the
   engine-level self-heal (reload the fittest lineage into a running
   service). My svc_health is the app-level layer (per-service call/
