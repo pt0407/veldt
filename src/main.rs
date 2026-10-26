@@ -571,7 +571,13 @@ fn print_usage() {
   veldt export [file]          Export the garden to a JSON file
   veldt import <file>          Import a garden JSON file
   veldt run --trace <file>     Trace every executed statement
-  veldt run --evolve <file>    Run 1 evolve cycle after the program");
+  veldt run --evolve <file>    Run 1 evolve cycle after the program
+  veldt run --sandbox <file>   Run with all side-effect caps denied
+  veldt fuzz <name>|--all      Boundary-corpus sweep; divergences become probes
+  veldt absorb                 Convert live call traces into probes
+  veldt tournament <url>       Pull pool, trial merged families, push winners
+  veldt diff <a#n> <b#n>       Show two variants' bodies side by side
+  veldt stats                  Garden census + trust-ladder distribution");
     println!("  veldt visual                 Open visual ecosystem viewer in browser");
 }
 
