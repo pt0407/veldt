@@ -3531,6 +3531,17 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                 if matches!(scrut, Expr::Int(_) | Expr::Str(_) | Expr::Bool(_) | Expr::Null) {
                     out.push("match on a literal — deterministic, use if or remove".into());
                 }
+                // match on a let-bound literal — constant propagation
+                if let Expr::Var(v) = scrut {
+                    for (_, s) in stmts.iter().enumerate().take(i) {
+                        if let Stmt::Let(n, e) = s {
+                            if n == v && matches!(e, Expr::Int(_) | Expr::Str(_) | Expr::Bool(_) | Expr::Null) {
+                                out.push(format!("match on {} — bound to a constant literal", v));
+                                break;
+                            }
+                        }
+                    }
+                }
                 if arms.is_empty() { out.push("match with no arms — dead statement".into()); }
                 if arms.len() == 1 && els.is_some() {
                     out.push("match with one arm + else — use if/else instead".into());
