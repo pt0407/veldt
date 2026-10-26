@@ -717,10 +717,38 @@ fn start_repl() {
             if trimmed.starts_with(':') {
                 match trimmed {
                     ":quit" | ":q" => break,
+                    _ if trimmed.starts_with(":load ") => {
+                        let path = trimmed[6..].trim();
+                        match std::fs::read_to_string(path) {
+                            Ok(src) => {
+                                let mut lx = lexer::Lexer::new(&src);
+                                match lx.tokenize() {
+                                    Ok(toks) => {
+                                        let mut p = parser::Parser::new_with_lines(toks, lx.token_lines.clone());
+                                        match p.parse_program() {
+                                            Ok(stmts) => {
+                                                for st in &stmts {
+                                                    if let Err(e) = interp.exec_stmt_pub(st) {
+                                                        eprintln!("{}", e); break;
+                                                    }
+                                                }
+                                                println!("loaded {}", path);
+                                            }
+                                            Err(e) => eprintln!("parse: {}", e),
+                                        }
+                                    }
+                                    Err(e) => eprintln!("lex: {}", e),
+                                }
+                            }
+                            Err(e) => eprintln!("{}", e),
+                        }
+                        continue;
+                    }
                     ":garden" => { let _ = veldt.load(); veldt.print_lineage(
                         veldt.functions.keys().next().map(|s| s.as_str()).unwrap_or("(none)")); }
                     ":help" | _ => {
                         println!(":help  this help"); println!(":quit  exit");
+                        println!(":load <file>  run a file in this session");
                         println!(":garden  show first lineage"); println!("exprs print their value");
                     }
                 }

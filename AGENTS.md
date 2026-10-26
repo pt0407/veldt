@@ -49,6 +49,9 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] CONT: veldt evolve --seed N (deterministic,
+  verified identical 25-mutation streams); examples/data_pipeline
+  (args+read_lines+d[k]+append+json report — real scripting works).
 - [Devin/main-side] SESSION BATCH (all pushed): Phase 7 mutations
   (ConstFold/DeadBranch/HoistInvariant) + tests; veldt watch;
   fmt --check; pull --merge (immigrant: tags); veldt search; IDE
