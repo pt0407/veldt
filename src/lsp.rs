@@ -198,24 +198,65 @@ fn doc_of<'a>(params: &Value, docs: &'a HashMap<String, Doc>) -> Option<&'a Doc>
     docs.get(params["textDocument"]["uri"].as_str()?)
 }
 
-/// Anchor a lint warning to the enclosing fn's definition line.
-/// Fn-scoped warnings are "name: msg"; program-level warnings
-/// mention the fn as "grow fn name" / "fn name". Falls back to
-/// the top of file for file-level diagnostics.
+/// Anchor a lint warning as close to the offending statement as
+/// we can get without source spans: fn-scoped warnings ("name:
+/// msg") resolve to the fn's def line, then we scan forward for
+/// the warning's subject — `let x`, `f(`, `x =`, or a keyword —
+/// stopping at the next top-level fn. Program-level warnings
+/// mention "grow fn name" / "fn name". Fallback: top of file.
 fn warn_anchor(text: &str, w: &str) -> u32 {
-    if let Some((head, _)) = w.split_once(": ") {
-        if !head.contains(' ') {
-            if let Some(l) = find_defs(text, head).first() { return *l; }
+    let (fname, msg) = match w.split_once(": ") {
+        Some((h, m)) if !h.contains(' ') => (h, m),
+        _ => ("", w),
+    };
+    let def = if !fname.is_empty() {
+        find_defs(text, fname).first().copied()
+    } else { None };
+    let def = def.or_else(|| {
+        for marker in ["grow fn ", "fn "] {
+            if let Some(rest) = w.strip_prefix(marker) {
+                let name = rest.split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+                    .next().unwrap_or("");
+                return find_defs(text, name).first().copied();
+            }
+        }
+        None
+    }).unwrap_or(0);
+    if let Some(tok) = warn_token(msg) {
+        for (i, l) in text.lines().enumerate().skip(def as usize + 1) {
+            let t = l.trim_start();
+            if t.starts_with("fn ") || t.starts_with("grow fn ") { break; }
+            if l.contains(&tok) { return i as u32; }
         }
     }
-    for marker in ["grow fn ", "fn "] {
-        if let Some(rest) = w.strip_prefix(marker) {
-            let name = rest.split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
-                .next().unwrap_or("");
-            if let Some(l) = find_defs(text, name).first() { return *l; }
-        }
+    def
+}
+
+/// The searchable subject of a warning message — `let x`, `f(`,
+/// `x =`, or the construct keyword. First hit wins.
+fn warn_token(msg: &str) -> Option<String> {
+    if let Some(i) = msg.find("let ") {
+        let name: String = msg[i + 4..].chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
+        if !name.is_empty() { return Some(format!("let {}", name)); }
     }
-    0
+    if let Some(i) = msg.find("()") {
+        let name: String = msg[..i].chars().rev()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+            .collect::<String>().chars().rev().collect();
+        if !name.is_empty() { return Some(format!("{}(", name)); }
+    }
+    if let Some(i) = msg.find(" assigned") {
+        let name: String = msg[..i].chars().rev()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+            .collect::<String>().chars().rev().collect();
+        if !name.is_empty() { return Some(format!("{} =", name)); }
+    }
+    for kw in ["match", "while", "for ", "catch", "test ", "return",
+               "break", "continue", "print", "if "] {
+        if msg.contains(kw) { return Some(kw.trim_end().to_string()); }
+    }
+    None
 }
 
 /// `fn name(` / `grow fn name(` definitions in the doc → line numbers.
