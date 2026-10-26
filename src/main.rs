@@ -2228,6 +2228,32 @@ fn print_stats(veldt: &veldt::Veldt) {
                     let stale = veldt.run_count.saturating_sub(*max);
                     println!("  last_used: {} – {} ({} runs stale)", min, max, stale);
                 }
+                // trial_score + lifespan — the quality + longevity profile
+                let trials: Vec<f64> = vs.iter().map(|e| e.trial_score).collect();
+                if !trials.is_empty() {
+                    let avg = trials.iter().sum::<f64>() / trials.len() as f64;
+                    println!("  trial_score: avg {:.2}", avg);
+                }
+                let lifespans: Vec<f64> = vs.iter().map(|e| e.lifespan).collect();
+                if !lifespans.is_empty() {
+                    let avg = lifespans.iter().sum::<f64>() / lifespans.len() as f64;
+                    let max = lifespans.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+                    println!("  lifespan: avg {:.1} (peak {:.1})", avg, max);
+                }
+                // args distribution — the signature profile
+                let args_counts: Vec<usize> = vs.iter().map(|e| e.params.len()).collect();
+                if !args_counts.is_empty() {
+                    let avg = args_counts.iter().sum::<usize>() as f64 / args_counts.len() as f64;
+                    let max = args_counts.iter().max().unwrap();
+                    println!("  args: avg {:.1} params (peak {})", avg, max);
+                }
+                // niche count — the coverage breadth
+                let niche_counts: Vec<usize> = vs.iter().map(|e| e.niche_scores.len()).collect();
+                if !niche_counts.is_empty() {
+                    let avg = niche_counts.iter().sum::<usize>() as f64 / niche_counts.len() as f64;
+                    let max = niche_counts.iter().max().unwrap();
+                    println!("  niches: avg {:.1} (peak {})", avg, max);
+                }
             }
         }
         if veldt.fitness_history.len() >= 2 {
