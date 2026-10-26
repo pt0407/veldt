@@ -791,3 +791,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 - [Devin] Lint batch 28 (HEAD post-1-elem-list): ~58 strict
   checks. New: let x = [v] — a 1-element list literal,
   could be let x = v.
+- [Devin] Niche-coverage spark (HEAD post-c8795d3): the
+  stats --family niche-coverage section shows a per-niche
+  avg-score sparkline — which input niches are well-
+  covered vs thin at a glance.
