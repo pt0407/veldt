@@ -775,3 +775,6 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 - [Devin] Lint batch 23 (HEAD post-null-let): ~53 strict
   checks. New: let x = null and never assigned —
   placeholder left null.
+- [Devin] Lint batch 24 (HEAD post-sentinel-let): ~54 strict
+  checks. New: let x = false / let x = 0 never assigned —
+  a flag/counter that's read but never updates.
