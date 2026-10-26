@@ -845,3 +845,6 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   veldt deps for file-level imports. Coordination: the
   other agent owns JIT/verify/persistence; I own lint/
   observability/agent/watch. Both streams on main.
+- [Devin] Lint batch 30 (HEAD post-match-print): ~60 strict
+  checks. New: match arm/else that only prints — the arm
+  adds no handling, no recovery, no branching.
