@@ -900,3 +900,6 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   strict checks. New: let a = b where b is bound to a
   list/struct — the let copies a container that could
   be reused.
+- [Devin] Lint batch 39 (HEAD post-match-alias-pattern): ~70
+  strict checks. New: match Var pattern bound to another
+  var — the pattern is an alias, could inline.
