@@ -324,6 +324,9 @@ fn main() {
         }
         "evolve" => {
             let cycles: usize = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(1);
+            // std:telemetry — absorb live call traces into probes first,
+            // so production evidence participates in this selection round.
+            absorb_traces(None);
             let mut veldt = veldt::Veldt::new();
             if let Err(e) = veldt.load() {
                 eprintln!("Error loading veldt: {}", e);
