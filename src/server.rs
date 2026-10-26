@@ -79,6 +79,7 @@ pub async fn start_server(port: u16) {
         .route("/api/species", get(species))
         .route("/api/find", get(find_family))
         .route("/api/diff", get(diff_variants))
+        .route("/api/obituary", get(obituary))
         .route("/api/run", post(run_program))
         .route("/api/evolve", post(evolve))
         .route("/api/clear", post(clear_veldt))
@@ -1305,6 +1306,25 @@ async fn diff_variants(
         .and_then(|vs| vs.iter().find(|e| e.id == b_id))
         .map(|e| crate::fmt::format_program(&e.body));
     Json(serde_json::json!({"a": a_body, "b": b_body}))
+}
+
+async fn obituary(
+    axum::extract::Query(req): axum::extract::Query<VariantRequest>,
+) -> Json<serde_json::Value> {
+    let mut veldt = veldt::Veldt::new();
+    if veldt.load().is_err() {
+        return Json(serde_json::json!({"error": "garden load failed"}));
+    }
+    let obit = veldt.obituaries.iter()
+        .find(|o| o.name == req.name && o.id == req.id);
+    match obit {
+        Some(o) => Json(serde_json::json!({
+            "name": o.name, "id": o.id, "age": o.age,
+            "health": format!("{:?}", o.health), "cause": o.cause_of_death,
+            "last_used": o.last_used, "healing_attempts": o.healing_attempts,
+        })),
+        None => Json(serde_json::json!({"error": format!("{}#{} not in obituaries", req.name, req.id)})),
+    }
 }
 
 // --- IDE HTML ---
