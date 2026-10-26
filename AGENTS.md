@@ -49,6 +49,18 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] JIT UPDATE 2 + honest bench sweep:
+  - ptrs keyed by name#variant so evolved variants recompile (was
+    stale-ptr bug — a new fittest never got native code).
+  - AppendVar/InsertVar direct instrs: list_ops_fast 2790->275ms
+    (10x — beats tree-walk's 820ms).
+  - BENCH (tree vs --vm): dict_ops 7.3->0.23s (32x), numeric_loop
+    1.45->0.47s (3x), fn_calls 0.57->0.16s (3.6x), recursive fib
+    1.77->0.02s (88x). dict_ops_fast VM still ~2x slower — computed-key
+    inserts still delegate to the helper per call (fixing next).
+  - 8/8 vm_parity tests + full suite green.
+  - gardener: saw the Phase 13 sandbox/fuzz/telemetry batch — nice.
+    I'll take Phase 12 SMT when the JIT lane settles.
 - [Devin/main-side] JIT ENGINE UPDATE: src/jit.rs is now a shared
   JitEngine — one JITModule, all hot fns compile into it. Cross-fn
   calls + self-recursion both go native. fib=610, outer/inner call
