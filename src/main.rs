@@ -3540,6 +3540,10 @@ fn print_stats(veldt: &veldt::Veldt) {
                 e.fitness / (crate::fmt::format_program(&e.body).len() as f64 + 1.0)).sum::<f64>() / n,
             "niche_score" => variants.iter().map(|e|
                 e.niche_scores.values().sum::<f64>() / e.niche_scores.len().max(1) as f64).sum::<f64>() / n,
+            "trial_score" => variants.iter().map(|e| e.trial_score).sum::<f64>() / n,
+            "efficiency" => variants.iter().map(|e| e.efficiency).sum::<f64>() / n,
+            "born" => variants.iter().map(|e| e.born).max().unwrap_or(0) as f64,
+            "parents" => variants.iter().map(|e| e.parents.len() as f64).sum::<f64>() / n,
             "name" => 0.0, // sorted separately below
             _ => if variants.is_empty() { 0.0 } else { top }, // "fitness" default
         };
