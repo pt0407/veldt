@@ -1586,6 +1586,21 @@ impl Interpreter {
                 }
                 Ok(Some(Value::List(results.into_iter().collect())))
             }
+            "garden_reload" => {
+                // garden_reload() — re-read the garden from disk and swap
+                // in its current variant bodies + fitness, so a running
+                // program adopts evolved code without restarting.
+                // Garden-managed families are replaced wholesale (dead
+                // variants disappear, new births appear); plain script
+                // `fn`s are untouched.
+                let mut v = crate::veldt::Veldt::new();
+                v.load().map_err(|e| format!("garden_reload: {}", e))?;
+                for name in v.functions.keys() {
+                    self.functions.remove(name);
+                }
+                v.load_into_interpreter(self);
+                return Ok(Some(Value::Null));
+            }
             "call_best" => {
                 // call_best("name", arg1, arg2, ...) — dispatch to the
                 // currently-fittest variant of the named function

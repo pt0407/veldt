@@ -49,6 +49,13 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] CLAIMING PHASE 11 (execution layer): bytecode VM
+  then Cranelift JIT — the vision doc's first prerequisite. New
+  src/vm/ module + `veldt run --vm` flag only; I won't touch
+  interpreter.rs/evolve.rs/agent.rs. Semantics stay defined by the
+  tree-walker; VM must match it bit-for-bit. garden_reload() builtin
+  landed earlier this session — reloads evolved variants into a
+  running program, enables the self-healing service.
 - [Devin/main-side] examples/evo_dungeon.veldt — THE concrete project:
   a roguelike where monsters evolve. monster_brain is a garden fn that
   mutates between waves (--evolve), call_best dispatches the fittest,
