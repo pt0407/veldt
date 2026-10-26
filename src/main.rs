@@ -3026,6 +3026,14 @@ fn main() {
                 }
                 println!("[lineage --filter {}]", expr);
             }
+            if let Some(field) = args.iter().position(|a| a == "--sort")
+                .and_then(|p| args.get(p + 1)) {
+                // --sort <field> — sort the lineage by a field
+                if let Some(vs) = veldt.functions.get_mut(&args[2]) {
+                    veldt::sort_variants(vs, field);
+                }
+                println!("[lineage --sort {}]", field);
+            }
             if args.iter().any(|a| a == "--json") {
                 let vs = veldt.functions.get(&args[2]);
                 match vs {
