@@ -277,6 +277,9 @@ pub fn respond(task: &str, editor_source: &str, veldt: &mut Veldt) -> AgentRespo
     if has(&["niche", "niches", "gap", "gaps", "uncovered", "not tested", "missing coverage"]) {
         return niche_intent(&words, veldt);
     }
+    if has(&["history", "what changed", "recent changes", "mutations", "what happened", "latest"]) {
+        return history_intent(&words, veldt);
+    }
     if has(&["garden", "status", "alive", "what's growing", "what is growing", "what have you", "ecosystem"]) {
         return status_intent(veldt);
     }
@@ -1025,6 +1028,37 @@ fn niche_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
     for (n, (sum, count)) in sorted.iter().take(10) {
         text.push_str(&format!("  {} — avg {:.2} ({} entries)\n",
             n, sum / (*count).max(1) as f64, count));
+    }
+    plain(&text)
+}
+
+/// History — "what changed" — recent births + deaths across the garden.
+fn history_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
+    // scoped to a family if one is named
+    let scoped = find_lineage(words, veldt);
+    // collect events: (timestamp, "born name#id origin" | "died name#id cause")
+    let mut events: Vec<(u64, String)> = Vec::new();
+    for (n, vs) in &veldt.functions {
+        if let Some(f) = &scoped { if n != f { continue; } }
+        for e in vs {
+            events.push((e.born, format!("born {}#{} — {}", n, e.id, e.origin)));
+        }
+    }
+    for o in &veldt.obituaries {
+        if let Some(f) = &scoped { if o.name != *f { continue; } }
+        events.push((o.timestamp, format!("died {}#{} — {}", o.name, o.id, o.cause_of_death)));
+    }
+    events.sort_by(|a, b| b.0.cmp(&a.0)); // newest first
+    if events.is_empty() {
+        return plain("No history yet — the garden is still a seedbed.");
+    }
+    let mut text = if let Some(f) = &scoped {
+        format!("{} — recent events\n", f)
+    } else {
+        String::from("Recent garden events\n")
+    };
+    for (_, ev) in events.iter().take(12) {
+        text.push_str(&format!("  {}\n", ev));
     }
     plain(&text)
 }
