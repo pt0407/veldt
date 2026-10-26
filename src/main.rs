@@ -3763,6 +3763,11 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                                     out.push(format!("match pattern {} is bound to a call — inline it", v));
                                     break;
                                 }
+                                // Var pattern bound to another var — the pattern is an alias
+                                if n == v && matches!(pe, Expr::Var(_)) {
+                                    out.push(format!("match pattern {} is bound to an alias — inline it", v));
+                                    break;
+                                }
                             }
                         }
                     }
