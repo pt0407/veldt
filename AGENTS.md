@@ -49,6 +49,12 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] IDIOM EXTREMUM COMPLETE: last-index forms now
+  covered — xs.sort()[-1]/[s.len()-1] -> MAX scan, sort().reverse()
+  [-1] -> MIN scan (staged + inline + let-binding). GOTCHA for future
+  AST matchers: `e[-1]` parses as UnaryOp(Neg, Int 1), NOT Int(-1) —
+  match both. tail_uses now returns (target, is_return, is_last) so
+  staged rewrites pick the right comparator. 19/19 evolve tests.
 - [Devin/main-side] REFERENCE COMPLETE: docs/reference.md now covers
   all 186 builtin names — added a "Game, procgen & simulation library"
   section (canvas/grid/astar/bfs/fov, ui_*, rand*/noise/voronoi/delaunay/

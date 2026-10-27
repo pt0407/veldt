@@ -862,26 +862,59 @@ impl Evolver {
 
     /// Match one idiom window at the head of `win`; returns (span, replacement).
     fn idiom_window(win: &[Stmt]) -> Option<(usize, Vec<Stmt>)> {
-        // is e an `Index(sort/rev chain, 0)`? -> (base expr, is_max)
+        // is e an `Index(sort/rev chain, 0|last)`? -> (base expr, is_max)
         fn extremum(e: &Expr) -> Option<(Expr, bool)> {
             if let Expr::Index(recv, idx) = e {
-                if matches!(idx.as_ref(), Expr::Int(0)) {
-                    match recv.as_ref() {
-                        Expr::MethodCall(inner, m, a) if m == "reverse" && a.is_empty() => {
-                            if let Expr::MethodCall(base, sm, sa) = inner.as_ref() {
-                                if sm == "sort" && sa.is_empty() {
-                                    return Some(((**base).clone(), true));
-                                }
+                // last-element index: -1 or <same recv>.len() - 1
+                let is_last = |idx: &Expr, recv: &Expr| -> bool {
+                    if matches!(idx, Expr::Int(-1))
+                        || matches!(idx, Expr::UnaryOp(UnaryOp::Neg, i)
+                            if matches!(i.as_ref(), Expr::Int(1))) { return true; }
+                    if let Expr::BinOp(l, BinOp::Sub, r) = idx {
+                        if matches!(r.as_ref(), Expr::Int(1)) {
+                            if let Expr::MethodCall(base, m, a) = l.as_ref() {
+                                return m == "len" && a.is_empty() && base.as_ref() == recv;
                             }
                         }
-                        Expr::MethodCall(base, sm, sa) if sm == "sort" && sa.is_empty() => {
-                            return Some(((**base).clone(), false));
-                        }
-                        _ => {}
                     }
+                    false
+                };
+                match (recv.as_ref(), idx.as_ref()) {
+                    // xs.sort().reverse()[0] | xs.sort()[-1 | len-1] -> max
+                    (Expr::MethodCall(inner, m, a), _)
+                        if m == "reverse" && a.is_empty()
+                            && matches!(idx.as_ref(), Expr::Int(0)) =>
+                    {
+                        if let Expr::MethodCall(base, sm, sa) = inner.as_ref() {
+                            if sm == "sort" && sa.is_empty() {
+                                return Some(((**base).clone(), true));
+                            }
+                        }
+                        None
+                    }
+                    (Expr::MethodCall(inner, m, a), _)
+                        if m == "reverse" && a.is_empty() && is_last(idx, recv) =>
+                    {
+                        // sort().reverse()[last] -> min
+                        if let Expr::MethodCall(base, sm, sa) = inner.as_ref() {
+                            if sm == "sort" && sa.is_empty() {
+                                return Some(((**base).clone(), false));
+                            }
+                        }
+                        None
+                    }
+                    (Expr::MethodCall(base, sm, sa), _)
+                        if sm == "sort" && sa.is_empty()
+                            && matches!(idx.as_ref(), Expr::Int(0)) =>
+                        Some(((**base).clone(), false)),
+                    (Expr::MethodCall(base, sm, sa), _)
+                        if sm == "sort" && sa.is_empty() && is_last(idx, recv) =>
+                        Some(((**base).clone(), true)),
+                    _ => None,
                 }
+            } else {
+                None
             }
-            None
         }
         // 3-stmt staged: let s = xs.sort(); let r = s.reverse(); <tail r[0]>
         if win.len() >= 3 {
@@ -889,8 +922,8 @@ impl Evolver {
                     Stmt::Let(r, Expr::MethodCall(recv, rm, ra))) = (&win[0], &win[1]) {
                 if sm == "sort" && sa.is_empty() && rm == "reverse" && ra.is_empty()
                     && matches!(recv.as_ref(), Expr::Var(v) if v == s) {
-                    if let Some((tgt, ret)) = tail_uses(&win[2], r) {
-                        let mut out = Self::scan_binding(base, &tgt, true);
+                    if let Some((tgt, ret, is_last)) = tail_uses(&win[2], r) {
+                        let mut out = Self::scan_binding(base, &tgt, !is_last);
                         if ret { out.push(Stmt::Return(Some(Expr::Var(tgt)))); }
                         return Some((3, out));
                     }
@@ -901,8 +934,8 @@ impl Evolver {
         if win.len() >= 2 {
             if let Stmt::Let(s, Expr::MethodCall(base, sm, sa)) = &win[0] {
                 if sm == "sort" && sa.is_empty() {
-                    if let Some((tgt, ret)) = tail_uses(&win[1], s) {
-                        let mut out = Self::scan_binding(base, &tgt, false);
+                    if let Some((tgt, ret, is_last)) = tail_uses(&win[1], s) {
+                        let mut out = Self::scan_binding(base, &tgt, is_last);
                         if ret { out.push(Stmt::Return(Some(Expr::Var(tgt)))); }
                         return Some((2, out));
                     }
@@ -1899,16 +1932,31 @@ fn type_str(t: &Type) -> String {
     }
 }
 
-/// `return var[0]` -> ("m", true); `let x = var[0]` -> (x, false).
-fn tail_uses(stmt: &Stmt, var: &str) -> Option<(String, bool)> {
-    let is_var_idx0 = |e: &Expr| -> bool {
-        matches!(e, Expr::Index(recv, idx)
-            if matches!(idx.as_ref(), Expr::Int(0))
-               && matches!(recv.as_ref(), Expr::Var(v) if v == var))
+/// `return var[0|last]` -> (target, is_return, is_last); same for `let x =`.
+fn tail_uses(stmt: &Stmt, var: &str) -> Option<(String, bool, bool)> {
+    let var_idx_kind = |e: &Expr| -> Option<bool> {
+        if let Expr::Index(recv, idx) = e {
+            if !matches!(recv.as_ref(), Expr::Var(v) if v == var) { return None; }
+            match idx.as_ref() {
+                Expr::Int(0) => Some(false),
+                Expr::Int(-1) => Some(true),
+                Expr::UnaryOp(UnaryOp::Neg, i)
+                    if matches!(i.as_ref(), Expr::Int(1)) => Some(true),
+                // s[s.len() - 1]
+                Expr::BinOp(l, BinOp::Sub, r) if matches!(r.as_ref(), Expr::Int(1)) => {
+                    if matches!(l.as_ref(), Expr::MethodCall(b, m, a)
+                        if m == "len" && a.is_empty()
+                           && matches!(b.as_ref(), Expr::Var(v) if v == var)) {
+                        Some(true)
+                    } else { None }
+                }
+                _ => None,
+            }
+        } else { None }
     };
     match stmt {
-        Stmt::Return(Some(e)) if is_var_idx0(e) => Some(("m".into(), true)),
-        Stmt::Let(name, e) if is_var_idx0(e) => Some((name.clone(), false)),
+        Stmt::Return(Some(e)) => var_idx_kind(e).map(|l| ("m".into(), true, l)),
+        Stmt::Let(name, e) => var_idx_kind(e).map(|l| (name.clone(), false, l)),
         _ => None,
     }
 }
@@ -2411,6 +2459,23 @@ mod asymptotic_proof {
         let out = evolver.mutate_body(&body, Mutation::IdiomRewrite);
         let src = crate::fmt::format_program(&out);
         assert!(src.contains("for"), "unsafe rewrite:\n{}", src);
+    }
+
+    #[test]
+    fn idiom_rewrite_last_index_extrema() {
+        let mut evolver = Evolver::new();
+        // sort()[-1] -> MAX scan (>); sort()[0] -> min (<)
+        let body = parse_fn_body("let s = xs.sort()\nreturn s[s.len() - 1]");
+        let out = evolver.mutate_body(&body, Mutation::IdiomRewrite);
+        let src = crate::fmt::format_program(&out);
+        assert!(src.contains("while") && src.contains(">") && !src.contains(".sort()"),
+            "sort()[len-1] not rewritten to max scan:\n{}", src);
+        // sort().reverse()[-1] -> MIN scan (<)
+        let body = parse_fn_body("let s = xs.sort()\nlet r = s.reverse()\nreturn r[-1]");
+        let out = evolver.mutate_body(&body, Mutation::IdiomRewrite);
+        let src = crate::fmt::format_program(&out);
+        assert!(src.contains("while") && src.contains("<") && !src.contains(".sort()"),
+            "sort().reverse()[-1] not rewritten to min scan:\n{}", src);
     }
 
     #[test]
