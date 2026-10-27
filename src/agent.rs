@@ -498,6 +498,7 @@ fn help_intent() -> AgentResponse {
          • \"most used fib\" · \"hot functions\" — workload leaders\n\
          • \"fastest fib\" · \"most efficient\" — speed ranking\n\
          • \"rewrite fib#3\" — algorithmic idiom rewrite\n\
+         • \"probe fib\" · \"probe all\" — plant probes on bare lineages\n\
          • \"fib trust\" · \"what's canonical\" — trust levels\n\
          • \"newest fib\" · \"oldest\" — age-sorted variants\n\
          • \"fib niche gaps\" · \"uncovered\" — niche coverage\n\
