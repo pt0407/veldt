@@ -203,6 +203,26 @@ fn main() {
             // idiom rewrite (sort-extremum scans, closed-form
             // accumulation, linsearch -> index_of)
             let target = args.get(2).map(|s| s.as_str()).unwrap_or("");
+            let show = args.iter().any(|a| a == "--show");
+            if show && target.contains('#') || target == "--show" {
+                let t = args.iter().find(|a| a.contains('#'))
+                    .map(|s| s.as_str()).unwrap_or("");
+                let (name, vid) = match t.split_once('#') {
+                    Some((n, i)) => (n.to_string(), i.parse::<u32>().unwrap_or(0)),
+                    None => { eprintln!("usage: veldt rewrite <name#N> --show"); process::exit(1); }
+                };
+                let mut veldt = veldt::Veldt::new();
+                if let Err(e) = veldt.load() { eprintln!("Error: {}", e); process::exit(1); }
+                if let Some(e) = veldt.functions.get(&name)
+                    .and_then(|vs| vs.iter().find(|e| e.id == vid)) {
+                    let mut ev = evolve::Evolver::new();
+                    let nb = ev.rewrite_idioms(&e.body);
+                    if nb == e.body { println!("{}#{} — no idiom matched", name, vid); return; }
+                    println!("{}#{} ->", name, vid);
+                    print!("{}", crate::fmt::format_program(&nb));
+                } else { eprintln!("{}#{} not found", name, vid); process::exit(1); }
+                return;
+            }
             if target == "--all" {
                 let dry = args.iter().any(|a| a == "--dry");
                 let mut veldt = veldt::Veldt::new();
