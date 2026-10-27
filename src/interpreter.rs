@@ -136,6 +136,20 @@ pub struct GameIo {
     /// headless frame counter — after a cap, the session ends so a
     /// non-winnable game doesn't flood the terminal forever
     pub frames: std::sync::atomic::AtomicU64,
+    /// pressed-this-frame keys — POSTed press events land here once, so
+    /// key_pressed() is edge-triggered (jump on press, not hold-to-jump)
+    pub pressed: std::sync::Mutex<std::collections::HashSet<String>>,
+}
+
+impl GameIo {
+    /// was a key pressed this frame? (edge-triggered — consumed on read)
+    pub fn take_pressed(&self, key: &str) -> bool {
+        self.pressed.lock().unwrap().remove(key)
+    }
+    /// record a one-shot press event (the browser POSTs key-down once)
+    pub fn note_pressed(&self, key: &str) {
+        self.pressed.lock().unwrap().insert(key.to_string());
+    }
 }
 
 impl GameIo {
@@ -148,6 +162,7 @@ impl GameIo {
             running: std::sync::atomic::AtomicBool::new(true),
             cli_render: std::sync::atomic::AtomicBool::new(false),
             frames: std::sync::atomic::AtomicU64::new(0),
+            pressed: std::sync::Mutex::new(std::collections::HashSet::new()),
         })
     }
     /// `veldt play` — headless session: the loop runs, frames render to stdout
@@ -3135,6 +3150,45 @@ impl Interpreter {
                         serde_json::json!({"kind": name, "x": x, "y": y}));
                 }
                 Ok(Some(Value::Null))
+            }
+            "scene_each" | "each_entity" => {
+                // scene_each(scene, fn_name) → call fn_name(entity, index) on
+                // each entity in the scene — "for each actor, do X". The fn
+                // returns the entity (possibly mutated) which replaces it.
+                let (scene, fname) = match (args.get(0), args.get(1)) {
+                    (Some(Value::Dict(s)), Some(Value::Str(f))) => (s.clone(), f.to_string()),
+                    _ => return Err("scene_each(scene, fn_name) expects dict + str".into()),
+                };
+                let mut s2 = scene.clone();
+                let mut ents = match s2.get("entities") {
+                    Some(Value::Dict(m)) => m.clone(), _ => im::HashMap::new() };
+                let mut idx = 0i64;
+                let keys: Vec<String> = ents.keys().cloned().collect();
+                for k in keys {
+                    if let Some(Value::Dict(e)) = ents.get(&k) {
+                        let out = self.call_function(&fname, None,
+                            vec![Value::Dict(e.clone()), Value::Int(idx)]);
+                        match out {
+                            Ok(Value::Dict(ne)) => { ents.insert(k.clone(), Value::Dict(ne)); }
+                            Ok(v) => { ents.insert(k.clone(), v); }
+                            Err(e) => return Err(e),
+                        }
+                    }
+                    idx += 1;
+                }
+                s2.insert("entities".into(), Value::Dict(ents));
+                Ok(Some(Value::Dict(s2)))
+            }
+            "key_pressed" => {
+                // key_pressed(name) → bool — edge-triggered: true only on the
+                // frame the key went down (jump on press, not hold-to-jump).
+                let name = match args.get(0) {
+                    Some(Value::Str(s)) => s.to_string(),
+                    _ => return Err("key_pressed(name) expects a string".into()),
+                };
+                let hit = self.game_io.as_ref()
+                    .map(|io| io.take_pressed(&name)).unwrap_or(false);
+                Ok(Some(Value::Bool(hit)))
             }
             "beep" => {
                 // beep(freq, ms) → a terminal bell / tone for CLI games
