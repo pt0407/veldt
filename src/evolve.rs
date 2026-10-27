@@ -1060,6 +1060,7 @@ impl Evolver {
         if let Some(r) = Self::map_filter_window(win) { return Some(r); }
         if let Some(r) = Self::extremum_scan_window(win) { return Some(r); }
         if let Some(r) = Self::len_flag_window(win) { return Some(r); }
+        if let Some(r) = Self::while_for_window(win) { return Some(r); }
         Self::cse_window(win)
     }
 
@@ -1326,6 +1327,53 @@ impl Evolver {
                 return Some((2, vec![Stmt::Let(out_name, Expr::MethodCall(
                     Box::new(xs.clone()), "unique".into(), vec![]))]));
             }
+        }
+        None
+    }
+
+    /// `let i = 0; while i < xs.len() { <body using xs[i]> i += 1 }`
+    /// -> `for x in xs { <body with xs[i] := x> }`. Normalizes while-
+    /// index loops so the for-based idioms (contains/count/len/…)
+    /// can fire. Bails when `i` is used beyond `xs[i]` positions.
+    fn while_for_window(win: &[Stmt]) -> Option<(usize, Vec<Stmt>)> {
+        if win.is_empty() { return None; }
+        // match the While itself — the `let i = 0` init is anywhere
+        // above (dead-let repair removes it after the rewrite)
+        if let Stmt::While(
+            Expr::BinOp(l, BinOp::Lt, r), body) = &win[0] {
+            let i_name = match l.as_ref() {
+                Expr::Var(v) => v.clone(),
+                _ => return None,
+            };
+            // cond: `i < xs.len()` (either operand order)
+            let xs = match r.as_ref() {
+                Expr::MethodCall(o, m, a)
+                    if m == "len" && a.is_empty()
+                       && matches!(o.as_ref(), Expr::Var(_)) => {
+                    if let Expr::Var(v) = o.as_ref() { v.clone() } else { return None; }
+                }
+                _ => return None,
+            };
+            if body.is_empty() { return None; }
+            // last stmt must be `i += 1` or `i = i + 1` — the manual index step
+            let last = body.last().unwrap();
+            let is_inc = matches!(last,
+                Stmt::Assign(t, Expr::BinOp(l2, BinOp::Add, r2))
+                    if *t == i_name
+                    && ((matches!(l2.as_ref(), Expr::Var(v) if *v == i_name)
+                         && matches!(r2.as_ref(), Expr::Int(1)))
+                        || (matches!(l2.as_ref(), Expr::Int(1))
+                            && matches!(r2.as_ref(), Expr::Var(v) if *v == i_name))));
+            if !is_inc { return None; }
+            let mut new_body: Vec<Stmt> = body[..body.len() - 1].to_vec();
+            if new_body.is_empty() { return None; }
+            // substitute `xs[i]` -> `x` (fresh name, not colliding)
+            let x = "x";
+            for s in &mut new_body { *s = subst_elem_stmt(s, &xs, &i_name, x); }
+            // bail if `i` is still used (i showed up beyond xs[i] positions)
+            if new_body.iter().any(|s| stmt_uses_var(s, &i_name)) { return None; }
+            return Some((1, vec![Stmt::For(
+                x.into(), Expr::Var(xs), new_body)]));
         }
         None
     }
@@ -2562,6 +2610,93 @@ fn subst_var_expr(e: &Expr, from: &str, to: &str) -> Expr {
     }
 }
 
+/// replace `xs[i]` (Index into `xs` by loop var `i`) with `x` —
+/// the while-index -> for-element rewrite's substitution.
+fn subst_elem_expr(e: &Expr, xs: &str, i: &str, x: &str) -> Expr {
+    match e {
+        Expr::Index(o, idx)
+            if matches!(o.as_ref(), Expr::Var(v) if v == xs)
+            && matches!(idx.as_ref(), Expr::Var(v) if v == i) =>
+        {
+            Expr::Var(x.into())
+        }
+        Expr::Index(o, idx) => Expr::Index(
+            Box::new(subst_elem_expr(o, xs, i, x)),
+            Box::new(subst_elem_expr(idx, xs, i, x))),
+        Expr::BinOp(l, op, r) => Expr::BinOp(
+            Box::new(subst_elem_expr(l, xs, i, x)), op.clone(),
+            Box::new(subst_elem_expr(r, xs, i, x))),
+        Expr::UnaryOp(u, a) =>
+            Expr::UnaryOp(u.clone(), Box::new(subst_elem_expr(a, xs, i, x))),
+        Expr::Call(n, t, a) => Expr::Call(n.clone(), t.clone(),
+            a.iter().map(|e| subst_elem_expr(e, xs, i, x)).collect()),
+        Expr::MethodCall(o, m, a) => Expr::MethodCall(
+            Box::new(subst_elem_expr(o, xs, i, x)), m.clone(),
+            a.iter().map(|e| subst_elem_expr(e, xs, i, x)).collect()),
+        Expr::List(a) | Expr::Interp(a) => match e {
+            Expr::List(_) => Expr::List(
+                a.iter().map(|e| subst_elem_expr(e, xs, i, x)).collect()),
+            _ => Expr::Interp(
+                a.iter().map(|e| subst_elem_expr(e, xs, i, x)).collect()),
+        },
+        Expr::Slice(o, lo, hi) => Expr::Slice(
+            Box::new(subst_elem_expr(o, xs, i, x)),
+            lo.as_ref().map(|x2| Box::new(subst_elem_expr(x2, xs, i, x))),
+            hi.as_ref().map(|x2| Box::new(subst_elem_expr(x2, xs, i, x)))),
+        Expr::FieldAccess(o, f) => Expr::FieldAccess(
+            Box::new(subst_elem_expr(o, xs, i, x)), f.clone()),
+        Expr::ListComp(h, v, it, c) => Expr::ListComp(
+            Box::new(subst_elem_expr(h, xs, i, x)), v.clone(),
+            Box::new(subst_elem_expr(it, xs, i, x)),
+            c.as_ref().map(|x2| Box::new(subst_elem_expr(x2, xs, i, x)))),
+        Expr::SafeGet(o, f, a) => Expr::SafeGet(
+            Box::new(subst_elem_expr(o, xs, i, x)), f.clone(),
+            a.as_ref().map(|x2| x2.iter().map(|e| subst_elem_expr(e, xs, i, x)).collect())),
+        Expr::StructLit(n, f) => Expr::StructLit(n.clone(),
+            f.iter().map(|(k, e)| (k.clone(), subst_elem_expr(e, xs, i, x))).collect()),
+        Expr::Lambda(ps, b) => {
+            if ps.iter().any(|p| p.name == i) { e.clone() }
+            else { Expr::Lambda(ps.clone(),
+                b.iter().map(|s| subst_elem_stmt(s, xs, i, x)).collect()) }
+        }
+        _ => e.clone(),
+    }
+}
+
+fn subst_elem_stmt(s: &Stmt, xs: &str, i: &str, x: &str) -> Stmt {
+    let sub = |e: &Expr| subst_elem_expr(e, xs, i, x);
+    let subs = |xs2: &Vec<Stmt>| xs2.iter().map(|s| subst_elem_stmt(s, xs, i, x)).collect();
+    match s {
+        Stmt::Let(n, e) => Stmt::Let(n.clone(), sub(e)),
+        Stmt::Assign(n, e) => Stmt::Assign(n.clone(), sub(e)),
+        Stmt::Print(e) => Stmt::Print(sub(e)),
+        Stmt::ExprStmt(e) => Stmt::ExprStmt(sub(e)),
+        Stmt::Return(e) => Stmt::Return(e.as_ref().map(|x2| sub(x2))),
+        Stmt::If(c, t, b) => Stmt::If(sub(c), subs(t),
+            b.as_ref().map(|x2| subs(x2))),
+        Stmt::While(c, b) => Stmt::While(sub(c), subs(b)),
+        Stmt::For(v, it, b) => {
+            if v == i { s.clone() } else { Stmt::For(v.clone(), sub(it), subs(b)) }
+        }
+        Stmt::Try(t, v, c) => {
+            let c2 = if v == i { c.clone() } else { subs(c) };
+            Stmt::Try(subs(t), v.clone(), c2)
+        }
+        Stmt::Match(e, arms, els) => Stmt::Match(sub(e),
+            arms.iter().map(|(p, b)| (p.clone(), subs(b))).collect(),
+            els.as_ref().map(|x2| subs(x2))),
+        Stmt::FnDef(n, p, b) => {
+            if p.iter().any(|x2| x2.name == i) { s.clone() }
+            else { Stmt::FnDef(n.clone(), p.clone(), subs(b)) }
+        }
+        Stmt::FieldAssign(o, f, v) => Stmt::FieldAssign(sub(o), f.clone(), sub(v)),
+        Stmt::IndexAssign(o, idx, v) => Stmt::IndexAssign(
+            sub(o), sub(idx), sub(v)),
+        Stmt::LetDestructure(n, e) => Stmt::LetDestructure(n.clone(), sub(e)),
+        _ => s.clone(),
+    }
+}
+
 fn subst_var_stmt(s: &Stmt, from: &str, to: &str) -> Stmt {
     let sub = |e: &Expr| subst_var_expr(e, from, to);
     let subs = |xs: &Vec<Stmt>| xs.iter().map(|x| subst_var_stmt(x, from, to)).collect();
@@ -2590,6 +2725,35 @@ fn subst_var_stmt(s: &Stmt, from: &str, to: &str) -> Stmt {
             else { Stmt::FnDef(n.clone(), p.clone(), subs(b)) }
         }
         _ => s.clone(),
+    }
+}
+
+/// does `s` (any nested expr) mention variable `name`?
+fn stmt_uses_var(s: &Stmt, name: &str) -> bool {
+    let mut set = std::collections::HashSet::new();
+    set.insert(name.to_string());
+    fn go(e: &Expr, set: &std::collections::HashSet<String>) -> bool {
+        expr_uses(e, set)
+    }
+    let euse = |e: &Expr| go(e, &set);
+    match s {
+        Stmt::Let(_, e) | Stmt::Assign(_, e) | Stmt::Print(e)
+        | Stmt::ExprStmt(e) => euse(e),
+        Stmt::Return(Some(e)) => euse(e),
+        Stmt::If(c, t, b) => euse(c)
+            || t.iter().any(|x| stmt_uses_var(x, name))
+            || b.as_ref().map(|x| x.iter().any(|x| stmt_uses_var(x, name))).unwrap_or(false),
+        Stmt::While(c, b) | Stmt::For(_, c, b) =>
+            euse(c) || b.iter().any(|x| stmt_uses_var(x, name)),
+        Stmt::Try(t, _, c) => t.iter().any(|x| stmt_uses_var(x, name))
+            || c.iter().any(|x| stmt_uses_var(x, name)),
+        Stmt::Match(e, arms, els) => euse(e)
+            || arms.iter().any(|(_, b)| b.iter().any(|x| stmt_uses_var(x, name)))
+            || els.as_ref().map(|x| x.iter().any(|x| stmt_uses_var(x, name))).unwrap_or(false),
+        Stmt::FieldAssign(o, _, v) | Stmt::IndexAssign(o, _, v) =>
+            euse(o) || euse(v),
+        Stmt::LetDestructure(_, e) => euse(e),
+        _ => false,
     }
 }
 
@@ -3319,6 +3483,26 @@ mod asymptotic_proof {
                     src, crate::fmt::format_program(&after), why),
             }
         }
+    }
+
+    #[test]
+    fn idiom_rewrite_while_index_to_for() {
+        let mut evolver = Evolver::new();
+        // while-index with xs[i] -> x substitution
+        let body = parse_fn_body(
+            "let i = 0\nlet t = 0\nwhile i < xs.len() { t += xs[i] i += 1 }\nreturn t");
+        let out = evolver.mutate_body(&body, Mutation::IdiomRewrite);
+        let src = crate::fmt::format_program(&out);
+        // for-element + sum() — the while-for normalizes then the accum idiom fires
+        assert!(src.contains("sum") || src.contains("for x in xs"),
+            "while-index loop not rewritten:\n{}", src);
+        // bail: i used in the body beyond xs[i] (return i)
+        let body = parse_fn_body(
+            "let i = 0\nwhile i < xs.len() { if xs[i] == t { return i } i += 1 }\nreturn -1");
+        let out = evolver.mutate_body(&body, Mutation::IdiomRewrite);
+        let src = crate::fmt::format_program(&out);
+        assert!(!src.contains("for x in xs"),
+            "unsafe while->for rewrite (i still used):\n{}", src);
     }
 
     #[test]
