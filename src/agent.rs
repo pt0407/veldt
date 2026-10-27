@@ -3072,7 +3072,8 @@ fn generate_intent(t: &str, words: &[&str], veldt: &mut Veldt) -> AgentResponse 
     // "make a game" — a whole program, not a function: scaffold a
     // playable game (maze + canvas render + ui HUD + bt AI + turn loop)
     // with an evolve-able `game_step` policy the Gardener can breed.
-    if t.contains("game") || t.contains("platformer") || t.contains("topdown") {
+    if t.contains("game") || t.contains("platformer") || t.contains("topdown")
+        || t.contains("shooter") || t.contains("shmup") || t.contains("shoot-'em-up") {
         let name = extract_name(words).unwrap_or_else(|| "quest".to_string());
         let path = format!("examples/{}.veldt", name);
         let existed = std::path::Path::new(&path).exists();
@@ -3084,8 +3085,12 @@ fn generate_intent(t: &str, words: &[&str], veldt: &mut Veldt) -> AgentResponse 
         let realtime = platformer || t.contains("topdown")
             || t.contains("realtime") || t.contains("real-time")
             || t.contains("real time");
+        let shooter = t.contains("shooter") || t.contains("shoot")
+            || t.contains("shmup") || t.contains("bullet hell");
         let src = if platformer {
             crate::platformer_template(&name)
+        } else if shooter {
+            crate::shooter_template(&name)
         } else if realtime {
             crate::realtime_game_template(&name)
         } else {
