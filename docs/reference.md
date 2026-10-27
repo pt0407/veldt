@@ -124,6 +124,9 @@ bit-identical (locked by `tests/vm_parity.rs`); the VM is just faster.
 | `veldt run <f> --vm --trace` | per-step `[vm:pc] instr` dump |
 | `veldt test <fam> --vm` | birth trials via `jit_call` |
 | `veldt fuzz <fam> --vm` | boundary corpus through the JIT |
+| `veldt probe <name> [-n count]` | Plant `count` probes on `<name>` — runs the fittest on generated inputs (incl. `Struct`/`dict` params) and records `(args, expected, niche)` tuples — bare lineages get selection pressure |
+| `veldt probe --all` | Same for every lineage with zero probes — one-shot garden census fix |
+| `agent "probe <name>"` / `agent "probe all"` | Same path through the Gardener (`plant_probes`) |
 | `veldt evolve N --vm` | mutation birth-checks |
 | `veldt repl --vm` | persistent VM session |
 | `veldt tournament <url> --vm` | remote-trial scoring |
