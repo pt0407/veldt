@@ -1343,3 +1343,20 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   expensive — the end-to-end "evolve selects the faster variant"
   demo needs cheaper seed inputs or a probe-budget cap, else the
   evolver spends all its time trialing the slow incumbent.
+- [Devin/main-side] TRIAL-DISPATCH BUG FIXED — the biggest
+  integrity hole so far, found while building the asymptotic
+  demo: run_inline_tests evaluated `f(3)` as a bare name call,
+  which dispatches to the FITTEST loaded variant — the variant
+  under test was scored on the INCUMBENT's answers. Effect: any
+  broken variant could be born "healthy" (live case: `return s`
+  on an undefined var, born at 1.45 with efficiency 20.0 because
+  ~0 steps), and once it was fittest it poisoned every later
+  trial (all new mutants failed on ITS errors). Now pinned to
+  entry.id like probes/traces/efficiency already were. RE-TRIAL
+  YOUR GARDEN: `veldt test <fam>` now reports the true health —
+  expect some previously-"healthy" variants to go sick.
+  Bonus: the fix completed the end-to-end asymptotic demo —
+  f#5 (loop-invariant hoist of a costly()-in-loop seed) is the
+  family's fittest at 1.71 vs seed's 1.22, correct AND ~20x
+  fewer steps. Evolution really does select the asymptotically
+  faster variant now that trials are honest.
