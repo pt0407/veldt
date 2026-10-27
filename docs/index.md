@@ -35,7 +35,8 @@ veldt agent "make a fizzbuzz"   # the Gardener writes it for you
 3. **Evolve** — `veldt evolve N` applies mechanical mutations
    (constant folding, dead-branch elimination, loop-invariant
    hoisting, early-exit fusion, operator swaps, crossover) or an
-   `--llm` rewrite when `VELDT_LLM_KEY` is set.
+   `--llm` rewrite when `VELDT_LLM_KEY` is set — or any local tool
+   via `VELDT_LLM_CMD` (stdin prompt → stdout completion, no key).
 4. **Compete** — fitness + niche scores decide; `call_best` dispatches
    to the champion. Losers age out — obituaries record why.
 

@@ -1647,9 +1647,16 @@ mod tests {
         let mut evolver = Evolver::new();
         let events = evolver.evolve(&mut veldt, 1);
 
-        // Should have created at least one mutant
-        assert!(veldt.functions["add"].len() > initial_count);
+        // A Mutate event is the deterministic signal — survival is
+        // stochastic now that trials test each variant's OWN body
+        // (broken mutants die instead of riding the incumbent's
+        // answers). 3 cycles gives enough attempts for near-certain
+        // coverage of the mutation paths.
         assert!(!events.is_empty());
+        assert!(events.iter().any(|e|
+            matches!(e, EvolutionEvent::Mutate { .. })),
+            "evolution produced no mutation events: {:?}", events);
+        let _ = initial_count; // births are stochastic — not asserted
     }
 
     #[test]

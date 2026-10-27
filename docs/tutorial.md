@@ -21,7 +21,10 @@ Each cycle a parent gets a mutation — constant folding, dead-branch
 elimination, loop-invariant hoisting, early-exit fusion, operator
 swaps, crossover between healthy parents — and the child is born as
 `double#2`, trialed, and scored. With `VELDT_LLM_KEY` set,
-`veldt evolve 20 --llm` adds model rewrites into the mix.
+`veldt evolve 20 --llm` adds model rewrites into the mix — or point
+`VELDT_LLM_CMD` at any local command that reads a prompt on stdin
+and writes a `fn` definition on stdout (a script, a local model,
+devin itself) for key-free LLM mutations.
 
 ## 3. Call the family, not the variant
 

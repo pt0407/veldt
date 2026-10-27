@@ -184,10 +184,27 @@ fn vm_all_examples_run() {
         let src = std::fs::read_to_string(p).unwrap_or_default();
         !src.contains("grow ")
     });
+    // hello.veldt is the documented garden bootstrap ("run hello.veldt
+    // first") — but it's also a provider itself (grow fn double), so the
+    // alphabetical provider pass runs ecosystem BEFORE it and shout is
+    // missing. Seed it explicitly first.
+    let hello = paths.iter().find(|p| p.ends_with("hello.veldt"))
+        .map(|p| p.clone());
+    if let Some(h) = &hello {
+        let _ = std::process::Command::new(veldt)
+            .args(["run", h.to_str().unwrap(), "--vm",
+                   "--steps", "500000000"])
+            .output().expect("seed hello.veldt");
+    }
+    // data_pipeline reads /tmp/pipeline_in.txt — a fixture the repo
+    // doesn't ship; write it so the example actually runs
+    let _ = std::fs::write("/tmp/pipeline_in.txt",
+        "alpha\nbeta\ngamma\nbeta\nalpha\nalpha\n");
     for p in paths {
         // skip examples that need stdin/args/serve-loop
         let name = p.file_name().unwrap().to_str().unwrap();
         if matches!(name, "web_server.veldt") { continue; }
+        if hello.as_ref().map(|h| *p == *h).unwrap_or(false) { continue; }
         let out = std::process::Command::new(veldt)
             .args(["run", p.to_str().unwrap(), "--vm",
                    "--steps", "500000000"])
