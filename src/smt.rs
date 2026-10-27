@@ -964,7 +964,10 @@ fn expr_to_smt_raw(
                 return None;
             }
             let mut sub_st = SymState::new(callee_env);
-            sub_st.steps = state.steps;
+            // fresh budget per callee — recursion depth is still
+            // bounded by `fuel`, but a caller's unrolls shouldn't
+            // starve an inlined callee's encoding window.
+            sub_st.steps = 0;
             if exec_stmts(&entry.body, &mut sub_st, veldt, fuel - 1).is_none() {
                 if let Some(r) = sub_st.bail_reason.clone() {
                     state.note(format!("{}(): {}", name, r));
