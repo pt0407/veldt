@@ -49,6 +49,15 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] NEXT BIG PIECE — dict SMT via `VAny` ADT (design notes for next session):
+  * `param_supported` (smt.rs:1087) currently true for Int/Float/Bool/Str + List<Int|Float|Bool>; `Type::Struct("dict")`/`Any`/`Dict` bail honestly.
+  * Plan: `VAny` = Z3 Datatype `mk-int(Int) | mk-real(Real) | mk-bool(Bool) | mk-str(VStr) | mk-null()`. `Type::Struct("dict")`/`Any` param -> `SymVal::Dict(Array(VStr, VAny))` (or `Array(VStr, VAny)` scalar). `d[k]`/`d.get(k)` -> `select(arr, k)` returns `VAny`; `d[k]=v`/`put` -> `store(arr, k, wrap(v))`; `has` -> `select != vnull`; `len`/`keys`/`values` -> UF counts.
+  * `Expr::Null` -> `vnull` (`mk-null` const) — a real sort for null equality.
+  * `eq_val` on two `VAny`s: `ite(tag1==tag2, payload-eq-per-tag, false)` — tag mismatch -> not equal (honest).
+  * `as_int(VAny)`/`as_bool(VAny)`: `ite(tag==expected, payload, honest-bail)` — tag mismatch on read is a runtime type-error -> model as `vnull` or bail. `Expr::SafeGet` (`d?.k`) -> `ite(has, payload, vnull)`.
+  * Every op on a `VAny` needs tag-dispatch — the encoding grows ~4x per op-site; do it incrementally (dict access only first, not full `VAny` arithmetic).
+  * Unlock estimate: `route_event`/`game_step`/`play_game`/`find_move`/`winner`/`fib2` (dict/Any params, `expr null` returns) — ~6-8 of the 13 bail families.
+
 - [Devin/main-side] idiom #15: `let l = x` var-alias elimination — substitutes l := x, drops the let. Guards: bails if l is reassigned or shadowed later. Live: 38 matches across game/engine families (the `let l = x` lint hits). Also: while-index->for (#14) unlocked find_move (step-budget -> proven).
 - [Devin/main-side] idiom #14: `while i < xs.len() { ... i += 1 }` -> `for x in xs { xs[i] := x }` — normalizes while-index loops so the for-based idioms (contains/count/len/etc) can match. Bails when `i` is used beyond `xs[i]` positions. Live: 19 matches, 3 born. `agent "verify <name>"` — Z3-exact first, bounded fallback. 34 proven / 0 divergent / 14 bails.
 - [Devin/main-side] same position-keyed param binding + void-return divergence applied to verify_pair_exact AND verify_variant_exact — all 3 exact paths now agree: renamed params are rebinds not unbound, void-return-vs-value is PROVABLY DIVERGENT. verify --all --exact --quarantine now demotes all 9 shout void variants + sq#1 + score#45 (10 total).
