@@ -724,7 +724,7 @@ fn main() {
             let mut planted = 0usize;
             for _ in 0..count {
                 let args_v: Vec<crate::interpreter::Value> = entry.params.iter()
-                    .filter_map(|p| ev.gen_value(&p.typ)).collect();
+                    .filter_map(|p| ev.gen_value_in(&p.typ, &veldt.structs)).collect();
                 if args_v.len() != entry.params.len() { continue; }
                 if let Ok(v) = health::HealthChecker::call_one(
                     &mut interp, &mut vm, &name, Some(entry.id), args_v.clone()) {

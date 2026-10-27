@@ -468,9 +468,23 @@ impl Evolver {
         self.gen_value_scaled(typ, 0)
     }
 
+    /// Struct-aware variant — probes on game-engine fns need struct
+    /// values; synthesizes each field recursively from veldt.structs.
+    pub(crate) fn gen_value_in(&mut self, typ: &Type,
+        structs: &std::collections::HashMap<String, crate::veldt::StructEntry>)
+        -> Option<crate::interpreter::Value> {
+        self.gen_value_scaled_in(typ, 0, structs)
+    }
+
     /// scale 0 = small inputs; scale 1 = big inputs that amplify
     /// step-count differences so algorithmic complexity shows up.
     fn gen_value_scaled(&mut self, typ: &Type, scale: u32) -> Option<crate::interpreter::Value> {
+        self.gen_value_scaled_in(typ, scale, &std::collections::HashMap::new())
+    }
+
+    fn gen_value_scaled_in(&mut self, typ: &Type, scale: u32,
+        structs: &std::collections::HashMap<String, crate::veldt::StructEntry>)
+        -> Option<crate::interpreter::Value> {
         use crate::interpreter::Value;
         match typ {
             Type::Int => {
@@ -495,16 +509,47 @@ impl Evolver {
                 Some(Value::List(items.into_iter().collect()))
             }
             Type::Any => {
-                // pick a random concrete type
-                let t = match self.rand_range(4) {
-                    0 => Type::Int,
-                    1 => Type::Str,
-                    2 => Type::Bool,
-                    _ => Type::Int,
-                };
-                self.gen_value(&t)
+                // pick a random concrete type — Dict too since
+                // `dict` params land here (no Type::Dict variant)
+                match self.rand_range(5) {
+                    0..=2 => {
+                        let t = match self.rand_range(3) {
+                            0 => Type::Int, 1 => Type::Str, _ => Type::Bool,
+                        };
+                        self.gen_value(&t)
+                    }
+                    _ => {
+                        let mut d = std::collections::HashMap::new();
+                        for k in ["a", "x", "turn", "step"] {
+                            if let Some(v) = self.gen_value(&Type::Int) {
+                                d.insert(k.into(), v);
+                            }
+                        }
+                        Some(Value::Dict(d.into_iter().collect()))
+                    }
+                }
             }
-            _ => None, // Fn, Struct — can't generate
+            Type::Struct(name) => {
+                // `dict` params parse as Struct("dict") — produce
+                // a real dict value, not a struct lookup.
+                if name == "dict" {
+                    let mut d = std::collections::HashMap::new();
+                    for k in ["a", "x", "turn", "step"] {
+                        if let Some(v) = self.gen_value_scaled_in(&Type::Int, 0, structs) {
+                            d.insert(k.into(), v);
+                        }
+                    }
+                    return Some(Value::Dict(d.into_iter().collect()));
+                }
+                let Some(def) = structs.get(name) else { return None; };
+                let mut fields = std::collections::HashMap::new();
+                for (fname, ftyp) in &def.fields {
+                    let v = self.gen_value_scaled_in(ftyp, 0, structs)?;
+                    fields.insert(fname.clone(), v);
+                }
+                Some(Value::Struct(name.clone(), fields))
+            }
+            _ => None, // Fn — can't generate
         }
     }
 
