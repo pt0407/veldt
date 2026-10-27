@@ -293,7 +293,29 @@ fn exec_stmts(
             state.note("step budget (nested/oversized loops)");
             return None;
         }
-        match s {
+        if exec_one(s, state, veldt, fuel).is_none() {
+            state.note(format!("stmt {}", stmt_kind(s)));
+            return None;
+        }
+    }
+    Some(())
+}
+
+fn exec_one(
+    s: &Stmt,
+    state: &mut SymState,
+    veldt: &veldt::Veldt,
+    fuel: u32,
+) -> Option<()> {
+    macro_rules! run_sub {
+        ($st:expr, $b:expr) => {
+            if exec_stmts($b, &mut $st, veldt, fuel).is_none() {
+                if let Some(r) = $st.bail_reason.clone() { state.note(r); }
+                return None;
+            }
+        }
+    }
+    match s {
             Stmt::Let(name, e) | Stmt::Assign(name, e) => {
                 let v = expr_to_smt(e, state, veldt, fuel)?;
                 let act = state.active();
@@ -320,13 +342,53 @@ fn exec_stmts(
                 state.note("bare return");
                 return None;
             }
+            Stmt::Print(e) => {
+                // prints can't affect the return value — still evaluate
+                // the arg so genuinely unsupported exprs still bail.
+                let _ = expr_to_smt(e, state, veldt, fuel)?;
+            }
             Stmt::ExprStmt(e) => {
+                // in-place list mutators: xs.append(v) / xs.pop_in()
+                // rebind the var in env (the expr result is discarded
+                // anyway at statement level).
+                if let Expr::MethodCall(obj, m, margs) = e {
+                    if let Expr::Var(n) = obj.as_ref() {
+                        let mut rebound = false;
+                        match (m.as_str(), margs.len()) {
+                            ("append", 1) => {
+                                if let Some(SymVal::List(items)) =
+                                    state.env.get(n).cloned()
+                                {
+                                    let mut items = items;
+                                    items.push(expr_to_smt(
+                                        &margs[0], state, veldt, fuel)?);
+                                    state.env.insert(
+                                        n.clone(), SymVal::List(items));
+                                    rebound = true;
+                                }
+                            }
+                            ("pop_in", 0) => {
+                                if let Some(SymVal::List(items)) =
+                                    state.env.get(n).cloned()
+                                {
+                                    let mut items = items;
+                                    items.pop();
+                                    state.env.insert(
+                                        n.clone(), SymVal::List(items));
+                                    rebound = true;
+                                }
+                            }
+                            _ => {}
+                        }
+                        if rebound { return Some(()); }
+                    }
+                }
                 state.last = Some(expr_to_smt(e, state, veldt, fuel)?);
             }
             Stmt::If(cond, then_stmts, else_stmts) => {
                 let c = expr_to_smt(cond, state, veldt, fuel)?
-                    .into_scalar()?
-                    .as_bool()?;
+                    .into_scalar().or_else(|| { state.note("aggregate where scalar expected"); None })?
+                    .as_bool().or_else(|| { state.note("expected bool"); None })?;
                 let mut then_st = state.clone();
                 let mut else_st = state.clone();
                 run_sub!(then_st, then_stmts);
@@ -387,8 +449,8 @@ fn exec_stmts(
             Stmt::While(cond, body) => {
                 for _ in 0..UNROLL_BOUND {
                     let c = expr_to_smt(cond, state, veldt, fuel)?
-                        .into_scalar()?
-                        .as_bool()?;
+                        .into_scalar().or_else(|| { state.note("aggregate where scalar expected"); None })?
+                        .as_bool().or_else(|| { state.note("expected bool"); None })?;
                     let go = (state.active() & &c).simplify();
                     if go.as_bool() == Some(false) {
                         break;
@@ -398,8 +460,8 @@ fn exec_stmts(
                     *state = merge_states(&go, body_st, state.clone())?;
                 }
                 let c_after = expr_to_smt(cond, state, veldt, fuel)?
-                    .into_scalar()?
-                    .as_bool()?;
+                    .into_scalar().or_else(|| { state.note("aggregate where scalar expected"); None })?
+                    .as_bool().or_else(|| { state.note("expected bool"); None })?;
                 let exited = (state.active() & &c_after).not();
                 state.assumptions.push(exited);
             }
@@ -408,8 +470,7 @@ fn exec_stmts(
                 return None;
             }
         }
-    }
-    Some(())
+        Some(())
 }
 
 fn float_to_real(f: f64) -> Option<Real> {
@@ -453,9 +514,23 @@ fn expr_to_smt(
     veldt: &veldt::Veldt,
     fuel: u32,
 ) -> Option<SymVal> {
+    let r = expr_to_smt_raw(e, state, veldt, fuel);
+    if r.is_none() {
+        // innermost un-instrumented bail gets labeled by expr kind
+        state.note(format!("expr {}", expr_kind(e)));
+    }
+    r
+}
+
+fn expr_to_smt_raw(
+    e: &Expr,
+    state: &mut SymState,
+    veldt: &veldt::Veldt,
+    fuel: u32,
+) -> Option<SymVal> {
     match e {
         Expr::Int(n) => Some(SymVal::Scalar(Int::from_i64(*n).into())),
-        Expr::Float(f) => Some(SymVal::Scalar(float_to_real(*f)?.into())),
+        Expr::Float(f) => Some(SymVal::Scalar(float_to_real(*f).or_else(|| { state.note("non-finite float"); None })?.into())),
         Expr::Bool(b) => Some(SymVal::Scalar(Bool::from_bool(*b).into())),
         Expr::Str(v) => Some(SymVal::Scalar(vstr_const(&format!("lit_{}", v)))),
         Expr::Var(name) => match state.env.get(name) {
@@ -469,14 +544,14 @@ fn expr_to_smt(
             let lst = expr_to_smt(o, state, veldt, fuel)?;
             if let SymVal::List(items) = lst {
                 let lo_n = match lo {
-                    Some(e) => match expr_to_smt(e, state, veldt, fuel)?.into_scalar()?.as_int()?.as_i64() {
+                    Some(e) => match expr_to_smt(e, state, veldt, fuel)?.into_scalar().or_else(|| { state.note("aggregate where scalar expected"); None })?.as_int().or_else(|| { state.note("expected int"); None })?.as_i64() {
                         Some(n) if n >= 0 => n as usize,
                         _ => return None,
                     },
                     None => 0,
                 };
                 let hi_n = match hi {
-                    Some(e) => match expr_to_smt(e, state, veldt, fuel)?.into_scalar()?.as_int()?.as_i64() {
+                    Some(e) => match expr_to_smt(e, state, veldt, fuel)?.into_scalar().or_else(|| { state.note("aggregate where scalar expected"); None })?.as_int().or_else(|| { state.note("expected int"); None })?.as_i64() {
                         Some(n) if n >= 0 => n as usize,
                         _ => return None,
                     },
@@ -500,7 +575,7 @@ fn expr_to_smt(
                 let d = match p {
                     Expr::Str(v) => vstr_const(&format!("lit_{}", v)),
                     other => {
-                        let sv = expr_to_smt(other, state, veldt, fuel)?.into_scalar()?;
+                        let sv = expr_to_smt(other, state, veldt, fuel)?.into_scalar().or_else(|| { state.note("aggregate where scalar expected"); None })?;
                         if sv.get_sort() == vstr_sort() {
                             sv
                         } else {
@@ -529,8 +604,8 @@ fn expr_to_smt(
                 return None;
             }
             let idx_i = expr_to_smt(idx, state, veldt, fuel)?
-                .into_scalar()?
-                .as_int()?
+                .into_scalar().or_else(|| { state.note("aggregate where scalar expected"); None })?
+                .as_int().or_else(|| { state.note("expected int"); None })?
                 .simplify();
             if let Some(k) = idx_i.as_i64() {
                 if k >= 0 && (k as usize) < items.len() {
@@ -565,11 +640,11 @@ fn expr_to_smt(
                     // exact: x0 + x1 + ... + xN
                     let mut acc: Option<Dynamic> = None;
                     for it in items {
-                        let d = it.into_scalar()?;
+                        let d = it.into_scalar().or_else(|| { state.note("aggregate where scalar expected"); None })?;
                         acc = Some(match acc {
                             None => d,
                             Some(a) if a.as_int().is_some() && d.as_int().is_some() =>
-                                (a.as_int()? + d.as_int()?).into(),
+                                (a.as_int().or_else(|| { state.note("expected int"); None })? + d.as_int().or_else(|| { state.note("expected int"); None })?).into(),
                             Some(a) => {
                                 let ar = as_real_coerced(&a)?;
                                 let br = as_real_coerced(&d)?;
@@ -580,10 +655,10 @@ fn expr_to_smt(
                     Some(SymVal::Scalar(acc?))
                 }
                 (SymVal::List(items), "contains", 1) => {
-                    let needle = expr_to_smt(&args[0], state, veldt, fuel)?.into_scalar()?;
+                    let needle = expr_to_smt(&args[0], state, veldt, fuel)?.into_scalar().or_else(|| { state.note("aggregate where scalar expected"); None })?;
                     let mut acc = Bool::from_bool(false);
                     for it in items {
-                        let d = it.into_scalar()?;
+                        let d = it.into_scalar().or_else(|| { state.note("aggregate where scalar expected"); None })?;
                         acc = acc | d.eq(&needle);
                     }
                     Some(SymVal::Scalar(acc.into()))
@@ -591,9 +666,9 @@ fn expr_to_smt(
                 (SymVal::List(items), m @ ("min" | "max"), 0) => {
                     // pairwise ite reduction: min = ite(x1<x0, x1, x0)...
                     let mut it = items.into_iter();
-                    let mut acc = it.next()?.into_scalar()?;
+                    let mut acc = it.next()?.into_scalar().or_else(|| { state.note("aggregate where scalar expected"); None })?;
                     for item in it {
-                        let d = item.into_scalar()?;
+                        let d = item.into_scalar().or_else(|| { state.note("aggregate where scalar expected"); None })?;
                         let c = if let (Some(di), Some(ai)) = (d.as_int(), acc.as_int()) {
                             if m == "min" { di.lt(&ai) } else { di.gt(&ai) }
                         } else {
@@ -628,12 +703,12 @@ fn expr_to_smt(
                 }
                 (SymVal::List(items), "index_of", 1) => {
                     // ite chain: (x0==v ? 0 : (x1==v ? 1 : ... : -1))
-                    let needle = expr_to_smt(&args[0], state, veldt, fuel)?.into_scalar()?;
+                    let needle = expr_to_smt(&args[0], state, veldt, fuel)?.into_scalar().or_else(|| { state.note("aggregate where scalar expected"); None })?;
                     let mut acc: Dynamic = Int::from_i64(-1).into();
                     for (i, it) in items.iter().enumerate().rev() {
-                        let d = it.clone().into_scalar()?;
+                        let d = it.clone().into_scalar().or_else(|| { state.note("aggregate where scalar expected"); None })?;
                         acc = d.eq(&needle)
-                            .ite(&Int::from_i64(i as i64), &acc.as_int()?)
+                            .ite(&Int::from_i64(i as i64), &acc.as_int().or_else(|| { state.note("expected int"); None })?)
                             .into();
                     }
                     Some(SymVal::Scalar(acc))
@@ -666,7 +741,7 @@ fn expr_to_smt(
                     let mut sorts: Vec<Sort> = vec![sv.get_sort()];
                     let mut vals: Vec<Dynamic> = vec![sv];
                     for a in args {
-                        let av = expr_to_smt(a, state, veldt, fuel)?.into_scalar()?;
+                        let av = expr_to_smt(a, state, veldt, fuel)?.into_scalar().or_else(|| { state.note("aggregate where scalar expected"); None })?;
                         sorts.push(av.get_sort());
                         vals.push(av);
                     }
@@ -684,7 +759,7 @@ fn expr_to_smt(
         Expr::BinOp(l, op, r) => {
             let a_sv = expr_to_smt(l, state, veldt, fuel)?;
             let b_sv = expr_to_smt(r, state, veldt, fuel)?;
-            let (a, b) = (a_sv.into_scalar()?, b_sv.into_scalar()?);
+            let (a, b) = (a_sv.into_scalar().or_else(|| { state.note("aggregate where scalar expected"); None })?, b_sv.into_scalar().or_else(|| { state.note("aggregate where scalar expected"); None })?);
             use BinOp::*;
             if let (Some(ai), Some(bi)) = (a.as_int(), b.as_int()) {
                 let d: Dynamic = match op {
@@ -733,8 +808,8 @@ fn expr_to_smt(
             let d: Dynamic = match op {
                 Eq => a.eq(&b).into(),
                 Neq => a.eq(&b).not().into(),
-                And => (a.as_bool()? & b.as_bool()?).into(),
-                Or => (a.as_bool()? | b.as_bool()?).into(),
+                And => (a.as_bool().or_else(|| { state.note("expected bool"); None })? & b.as_bool().or_else(|| { state.note("expected bool"); None })?).into(),
+                Or => (a.as_bool().or_else(|| { state.note("expected bool"); None })? | b.as_bool().or_else(|| { state.note("expected bool"); None })?).into(),
                 // string + string: uninterpreted concat (same-sort VStr pair)
                 Add if a.get_sort() == b.get_sort()
                     && a.as_int().is_none() && a.as_real().is_none()
@@ -749,17 +824,17 @@ fn expr_to_smt(
             Some(SymVal::Scalar(d))
         }
         Expr::UnaryOp(op, e) => {
-            let a = expr_to_smt(e, state, veldt, fuel)?.into_scalar()?;
+            let a = expr_to_smt(e, state, veldt, fuel)?.into_scalar().or_else(|| { state.note("aggregate where scalar expected"); None })?;
             use UnaryOp::*;
             let d: Dynamic = match op {
                 Neg => {
                     if let Some(ai) = a.as_int() {
                         ai.unary_minus().into()
                     } else {
-                        a.as_real()?.unary_minus().into()
+                        a.as_real().or_else(|| { state.note("expected real"); None })?.unary_minus().into()
                     }
                 }
-                Not => a.as_bool()?.not().into(),
+                Not => a.as_bool().or_else(|| { state.note("expected bool"); None })?.not().into(),
             };
             Some(SymVal::Scalar(d))
         }
@@ -770,9 +845,9 @@ fn expr_to_smt(
                     ("range", 1) => {
                         // concrete trip count only — symbolic lengths bail
                         let n = expr_to_smt(&args[0], state, veldt, fuel)?
-                            .into_scalar()?
-                            .as_int()?
-                            .as_i64()?;
+                            .into_scalar().or_else(|| { state.note("aggregate where scalar expected"); None })?
+                            .as_int().or_else(|| { state.note("expected int"); None })?
+                            .as_i64().or_else(|| { state.note("non-const int bound"); None })?;
                         if !(0..=64).contains(&n) { return None; }
                         let items: Vec<SymVal> = (0..n)
                             .map(|i| SymVal::Scalar(Int::from_i64(i).into()))
@@ -780,7 +855,7 @@ fn expr_to_smt(
                         return Some(SymVal::List(items));
                     }
                     ("abs", 1) => {
-                        let x = expr_to_smt(&args[0], state, veldt, fuel)?.into_scalar()?;
+                        let x = expr_to_smt(&args[0], state, veldt, fuel)?.into_scalar().or_else(|| { state.note("aggregate where scalar expected"); None })?;
                         if let Some(xi) = x.as_int() {
                             let neg = xi.unary_minus();
                             return Some(SymVal::Scalar(xi.lt(Int::from_i64(0)).ite(&neg, &xi).into()));
@@ -794,8 +869,8 @@ fn expr_to_smt(
                         return None;
                     }
                     ("min", 2) | ("max", 2) => {
-                        let a = expr_to_smt(&args[0], state, veldt, fuel)?.into_scalar()?;
-                        let b = expr_to_smt(&args[1], state, veldt, fuel)?.into_scalar()?;
+                        let a = expr_to_smt(&args[0], state, veldt, fuel)?.into_scalar().or_else(|| { state.note("aggregate where scalar expected"); None })?;
+                        let b = expr_to_smt(&args[1], state, veldt, fuel)?.into_scalar().or_else(|| { state.note("aggregate where scalar expected"); None })?;
                         let is_min = name == "min";
                         if let (Some(ai), Some(bi)) = (a.as_int(), b.as_int()) {
                             let c = if is_min { ai.le(&bi) } else { ai.ge(&bi) };
@@ -807,7 +882,7 @@ fn expr_to_smt(
                         return Some(SymVal::Scalar(c.ite(&ar, &br).into()));
                     }
                     ("sqrt", 1) => {
-                        let x = expr_to_smt(&args[0], state, veldt, fuel)?.into_scalar()?;
+                        let x = expr_to_smt(&args[0], state, veldt, fuel)?.into_scalar().or_else(|| { state.note("aggregate where scalar expected"); None })?;
                         let xr = as_real_coerced(&x)?;
                         let r_sort = Sort::real();
                         let decl = FuncDecl::new("sqrt", &[&r_sort], &r_sort);
@@ -850,6 +925,7 @@ fn expr_to_smt(
                 callee_env.insert(p.name.clone(), a);
             }
             if calls_itself(&entry.body, name) {
+                state.note(format!("{}() recursive (no induction)", name));
                 return None;
             }
             let mut sub_st = SymState::new(callee_env);
@@ -864,6 +940,28 @@ fn expr_to_smt(
             let (val, mut a_sub) = sub_st.final_value()?;
             state.assumptions.append(&mut a_sub);
             Some(val)
+        }
+        Expr::ListComp(head, var, iter, cond) => {
+            if cond.is_some() {
+                state.note("list-comp with filter (variable length)");
+                return None;
+            }
+            let SymVal::List(items) = expr_to_smt(iter, state, veldt, fuel)? else {
+                return None;
+            };
+            let mut out = Vec::with_capacity(items.len());
+            for it in items {
+                let mut st = state.clone();
+                st.env.insert(var.clone(), it);
+                match expr_to_smt(head, &mut st, veldt, fuel) {
+                    Some(v) => out.push(v),
+                    None => {
+                        if let Some(r) = st.bail_reason.clone() { state.note(r); }
+                        return None;
+                    }
+                }
+            }
+            Some(SymVal::List(out))
         }
         _ => {
             state.note(format!("expr {}", expr_kind(e)));
@@ -995,12 +1093,18 @@ pub fn verify_exact_on_veldt(
         let (f_smt, f_assumptions) = body_to_smt(&f_body, base_env.clone(), veldt, 8)
             .map_err(|r| format!("fittest: {}", r))?;
 
+        let mut bail_notes: Vec<String> = Vec::new();
         for v in &v_cloned {
             if v.id == f_id || !matches!(v.health, veldt::Health::Healthy) {
                 continue;
             }
-            let (v_smt, v_assumptions) = body_to_smt(&v.body, base_env.clone(), veldt, 8)
-                .map_err(|r| format!("{}#{}: {}", name, v.id, r))?;
+            let (v_smt, v_assumptions) = match body_to_smt(&v.body, base_env.clone(), veldt, 8) {
+                Ok(x) => x,
+                Err(r) => {
+                    bail_notes.push(format!("{}#{}: {}", name, v.id, r));
+                    continue;
+                }
+            };
             let eq = f_smt
                 .eq_val(&v_smt)
                 .ok_or_else(|| format!("{}#{} return sort mismatch", name, v.id))?;
@@ -1037,7 +1141,11 @@ pub fn verify_exact_on_veldt(
                 }
             }
         }
-        Ok(None)
+        if bail_notes.is_empty() {
+            Ok(None)
+        } else {
+            Err(bail_notes.join("; "))
+        }
     })
 }
 
