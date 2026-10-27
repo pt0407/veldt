@@ -494,6 +494,7 @@ fn help_intent() -> AgentResponse {
          • \"fib#145 parents\" · \"fib lineage\" — genealogy\n\
          • \"most used fib\" · \"hot functions\" — workload leaders\n\
          • \"fastest fib\" · \"most efficient\" — speed ranking\n\
+         • \"rewrite fib#3\" — algorithmic idiom rewrite\n\
          • \"fib trust\" · \"what's canonical\" — trust levels\n\
          • \"newest fib\" · \"oldest\" — age-sorted variants\n\
          • \"fib niche gaps\" · \"uncovered\" — niche coverage\n\
