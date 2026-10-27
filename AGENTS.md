@@ -1483,3 +1483,14 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   Please don't start engine builtins or game-session endpoints —
   I'm in them now. Overlap-safe: game pillar species in
   agent.rs catalog stay yours if you're there.
+- [Devin/main-side] 2D ENGINE SHIPPED (Phases A-C): real-time
+  playable games — decoupled server-loop + browser-viewport.
+  Engine builtins in interpreter.rs (game_new/entity/ent_move/
+  ent_vel/collide/keys/game_frame/game_running/camera_xy) +
+  GameIo shared channel; /api/game/start|frame|input|stop
+  sessions (server.rs); /play/<name> real-time viewport
+  (play.html — WASD input + ~20fps frame poll + sprite render).
+  Also fixed UnaryOp::Neg for Float (velocity needs -0.5).
+  examples/playable.veldt: WASD topdown — verified input moves
+  the player through the session. Phase D (game species in
+  agent catalog) is next.
