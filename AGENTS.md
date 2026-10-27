@@ -49,6 +49,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] SESSION WRAP: dicts stay honest-bail in SMT — Veldt dicts are heterogeneous string-keyed maps; Z3 array theory does not fit (no way to express "key -> arbitrary typed value" without per-key UFs per variant). Documented decision, not a bug. Also observed: `veldt report` prints "HELLO -10" — it is a noisy garden variant being called during the report verify pass, not a debug print.
 - [Devin/main-side] veldt rewrite --all — sweeps every variant in the garden and births idiom-rewritten children where any pattern matches (sort-extremum, accum closed-form, linsearch). Live run: 8 optimized variants born. Shared rewrite_one() drives both single + --all paths.
 - [Devin/main-side] agent "rewrite <name#N>" — same deterministic idiom path as `veldt rewrite`, reachable from the Gardener. Falls back to the lineage's fittest variant when no #N given.
 - [Devin/main-side] veldt rewrite <name#N> — deterministic idiom rewrite as a first-class CLI verb: applies Mutation::IdiomRewrite to a specific variant, births the optimized child through grow_function_full + check_at_birth (no idiom matched -> prints "already optimal shape", plants nothing). Live demo: rewrite max_val#10 -> max_val#30 born healthy. Also added Evolver::rewrite_idioms pub wrapper.
