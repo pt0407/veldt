@@ -250,6 +250,9 @@ pub fn respond(task: &str, editor_source: &str, veldt: &mut Veldt) -> AgentRespo
     if hasw(&["heal", "tend", "mend"]) || has(&["sick", "fix the garden"]) {
         return tend_intent(veldt);
     }
+    if hasw(&["rewrite"]) {
+        return rewrite_intent(&words, veldt);
+    }
     if hasw(&["improve", "optimize", "optimise", "faster", "upgrade"]) {
         return improve_intent(&t, &words, veldt);
     }
@@ -2170,6 +2173,51 @@ print("@N@(97) = " + @N@(97))
             "I don't know a faster strain for {} — my improvements cover fib (fast-doubling), is_prime (odd-only), and the builtin-stdlib strains (sort, reverse, join). Try \"evolve\" and let mutation try instead.", n)),
         None => plain("Improve what? I know fast strains for fib and is_prime, plus builtin strains for sort/reverse/join — say \"improve sort\". For others, \"evolve\" is the path."),
     }
+}
+
+/// "rewrite <name#N>" — deterministic idiom rewrite, births the
+/// optimized variant through the same grow+check_at_birth path as
+/// `veldt rewrite`.
+fn rewrite_intent(words: &[&str], veldt: &mut Veldt) -> AgentResponse {
+    let target = words.iter().find(|w| w.contains('#'));
+    let (name, vid) = match target.and_then(|t| t.split_once('#')) {
+        Some((n, i)) => (n.trim_matches(|c: char| !c.is_alphanumeric() && c != '_').to_string(),
+                        i.trim_matches(|c: char| !c.is_numeric()).parse::<u32>().unwrap_or(0)),
+        None => match find_lineage(words, veldt) {
+            Some(n) => {
+                let id = veldt.get_fittest_variant(&n).map(|e| e.id).unwrap_or(1);
+                (n, id)
+            }
+            None => return plain("Rewrite what? Give me a variant — e.g. \"rewrite max_val#2\"."),
+        },
+    };
+    let entry = match veldt.functions.get(&name)
+        .and_then(|vs| vs.iter().find(|e| e.id == vid)) {
+        Some(e) => e.clone(),
+        None => return plain(&format!("{}#{} not found in the garden.", name, vid)),
+    };
+    let mut evolver = crate::evolve::Evolver::new();
+    let new_body = evolver.rewrite_idioms(&entry.body);
+    if format!("{:?}", new_body) == format!("{:?}", entry.body) {
+        return plain(&format!("{}#{} — no idiom matched; already optimal shape.", name, vid));
+    }
+    let source = format!("fn {}(...) {{ [idiom rewrite of {}#{}] }}", name, name, vid);
+    let new_id = veldt.grow_function_full(&name, entry.params.clone(), new_body,
+        entry.tests.clone(), &source, vec![entry.id],
+        &format!("idiom rewrite of {}#{}", name, vid));
+    let mut new_entry = veldt.functions[&name].iter()
+        .find(|e| e.id == new_id).cloned().unwrap();
+    crate::health::HealthChecker::check_at_birth_with(&mut new_entry, veldt, false);
+    if let Some(vs) = veldt.functions.get_mut(&name) {
+        for e in vs.iter_mut() {
+            if e.id == new_id { *e = new_entry.clone(); break; }
+        }
+    }
+    let _ = veldt.save();
+    plain(&format!(
+        "{}#{} -> {}#{} born — {:?}, fitness {:.2}, eff {:.2}x. `veldt verify {} --exact` proves it.",
+        name, vid, name, new_id, new_entry.health,
+        new_entry.fitness, new_entry.efficiency, name))
 }
 
 // === Code generation ===
