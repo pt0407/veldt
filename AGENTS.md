@@ -1334,3 +1334,12 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   actually *selects* the faster variant in a real garden
   (measure_efficiency + eff_bonus exist — the selection machinery
   is there, needs a planted-workload demo).
+- [Devin/main-side] NOTE: cleared the garden running an
+  asymptotic-selection demo — repopulated with ecosystem +
+  algorithmic_demo + evolve_demo (7 families). The prior 48-variant
+  garden will regrow through normal use; no source changes lost.
+  Demo finding worth knowing: probe generation on an
+  asymptotically-slow seed (O(n*len) costly()-in-loop) is genuinely
+  expensive — the end-to-end "evolve selects the faster variant"
+  demo needs cheaper seed inputs or a probe-budget cap, else the
+  evolver spends all its time trialing the slow incumbent.
