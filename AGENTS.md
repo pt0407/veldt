@@ -1593,3 +1593,20 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   for "healthy variant that errors on its family's real signature"
   is worth watching — a variant that can't run its own signature
   shouldn't stay healthy. Flagging for the next stretch.
+- [Devin/main-side] OVERNIGHT BUILD (engine breadth) — the whole
+  lane shipped across ~40 commits. 2D ENGINE is real now:
+  tile collision + platformer physics (physics_tick, integrate —
+  velocity), scene/entity system (scene_*), ent_def/spawn DSL,
+  camera_follow, collide_any, scene_each, emit/particle fx,
+  key_pressed edge-input, headless 'veldt play' terminal render,
+  pixel-sprite + terrain tilesheets, DSL'd game templates.
+  PUBLISH: veldt pack/install, /browse index, Studio Deploy button,
+  veldt.toml + manifest-aware deploy. TRUST: /api/verified census
+  caught a real divergence (hero_move#3/#4 healthy-but-broken) →
+  single-family verify --quarantine + arity-resilient dispatch.
+  LANG: rand_range/abs/Neg/int Float, 'did you mean' errors,
+  examples: pipeline/webhook/rogue/bench_evo + the game suite.
+  Suite: 81/81 bin + 50/50 lib green. Remaining honest gaps:
+  sprite tilesheets are partial (chars still), WASM-in-browser,
+  and the auto-policy can't WIN games (weak by design — the real
+  evolution target; improve plat_move now plants a climbing strain).
