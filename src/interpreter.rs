@@ -2831,6 +2831,74 @@ impl Interpreter {
                 e2.insert("vy".into(), Value::Float(vy));
                 Ok(Some(Value::Dict(e2)))
             }
+            "scene_new" => {
+                // scene_new(w, h) → a scene dict {w, h, entities: {}} —
+                // managed entity container for a 2D game
+                let (w, h) = match (args.get(0), args.get(1)) {
+                    (Some(Value::Int(w)), Some(Value::Int(h))) => (*w as f64, *h as f64),
+                    _ => return Err("scene_new(w, h) expects two ints".into()),
+                };
+                let mut d = im::HashMap::new();
+                d.insert("w".into(), Value::Float(w));
+                d.insert("h".into(), Value::Float(h));
+                d.insert("camera_x".into(), Value::Float(0.0));
+                d.insert("camera_y".into(), Value::Float(0.0));
+                d.insert("t".into(), Value::Int(0));
+                d.insert("entities".into(), Value::Dict(im::HashMap::new()));
+                Ok(Some(Value::Dict(d)))
+            }
+            "scene_spawn" => {
+                // scene_spawn(scene, e) → add entity e to the scene
+                let (d, e) = match (args.get(0), args.get(1)) {
+                    (Some(Value::Dict(d)), Some(Value::Dict(e))) => (d.clone(), e.clone()),
+                    _ => return Err("scene_spawn(scene, e) expects dict + entity dict".into()),
+                };
+                let name = match e.get("name") { Some(Value::Str(n)) => n.to_string(), _ => return Err("entity needs a name".into()) };
+                let mut d2 = d.clone();
+                let mut ents = match d.get("entities") {
+                    Some(Value::Dict(m)) => m.clone(), _ => im::HashMap::new() };
+                ents.insert(name.into(), Value::Dict(e));
+                d2.insert("entities".into(), Value::Dict(ents));
+                Ok(Some(Value::Dict(d2)))
+            }
+            "scene_despawn" => {
+                // scene_despawn(scene, name) → remove the named entity
+                let (d, name) = match (args.get(0), args.get(1)) {
+                    (Some(Value::Dict(d)), Some(Value::Str(n))) => (d.clone(), n.to_string()),
+                    _ => return Err("scene_despawn(scene, name) expects dict + str".into()),
+                };
+                let mut d2 = d.clone();
+                let mut ents = match d.get("entities") {
+                    Some(Value::Dict(m)) => m.clone(), _ => im::HashMap::new() };
+                ents.remove(&*name);
+                d2.insert("entities".into(), Value::Dict(ents));
+                Ok(Some(Value::Dict(d2)))
+            }
+            "scene_entities" => {
+                // scene_entities(scene) → list of entity dicts (for game_frame)
+                let d = match args.get(0) {
+                    Some(Value::Dict(d)) => d.clone(),
+                    _ => return Err("scene_entities(scene) expects a scene dict".into()),
+                };
+                let ents: im::Vector<Value> = match d.get("entities") {
+                    Some(Value::Dict(m)) => m.values().cloned().collect(),
+                    _ => im::Vector::new() };
+                Ok(Some(Value::List(ents)))
+            }
+            "scene_find" => {
+                // scene_find(scene, tag) → list of entities with that tag
+                let (d, tag) = match (args.get(0), args.get(1)) {
+                    (Some(Value::Dict(d)), Some(Value::Str(t))) => (d.clone(), t.to_string()),
+                    _ => return Err("scene_find(scene, tag) expects dict + str".into()),
+                };
+                let out: im::Vector<Value> = match d.get("entities") {
+                    Some(Value::Dict(m)) => m.values().filter(|v| {
+                        matches!(v, Value::Dict(ed)
+                            if ed.get("tag").map(|t| matches!(t, Value::Str(ts) if ts.as_ref() == tag)).unwrap_or(false))
+                    }).cloned().collect(),
+                    _ => im::Vector::new() };
+                Ok(Some(Value::List(out)))
+            }
             "keys" => {
                 // keys() → list of held keys from the session input queue
                 let pressed: Vec<String> = self.game_io.as_ref()
