@@ -15,7 +15,7 @@ const BUILTINS: &[&str] = &[
     "sin", "cos", "tan", "log", "exp", "pi", "random", "random_int",
     "type_of", "str", "int", "float", "bool", "dict", "list", "input",
     "print", "eprint", "args", "exit", "env", "read_file",
-    "write_file", "append_file", "exists", "read_dir", "spawn",
+    "write_file", "append_file", "exists", "read_dir", "home", "spawn",
     "join", "pmap", "fetch", "post", "json_parse", "json_stringify",
     "re_match", "re_find", "re_replace", "re_split", "re_captures",
     "b64_encode", "b64_decode", "url_encode", "url_decode", "sha256",

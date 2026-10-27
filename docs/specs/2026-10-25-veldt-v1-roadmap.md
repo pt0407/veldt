@@ -44,17 +44,17 @@ Every one of these is hit within the first hour of writing real scripts.
 - [x] Dicts (devin): `values()`, `items()`, `keys()`, `merge`, `delete`,
       `get_or(k, default)` — immutable-style, returns new dict
 - [~devin] `format("{0} {1}", a, b)` positional builtin
-- [ ] OS/files: `ls(dir)`, `mkdir`, `rm`, `cp`, `mv`, `exists(path)`,
+- [x] OS/files: `ls(dir)`, `mkdir`, `rm`, `cp`, `mv`, `exists(path)`,
       `cwd()`, `home()`, `read_lines`, `write_lines`, `file_size`
-- [ ] Encoding: `b64_encode`, `b64_decode`, `url_encode`, `url_decode`,
-      `sha256` (tiny crate or vendored impl)
+- [x] Encoding: `b64_encode`, `b64_decode`, `url_encode`, `url_decode`,
+      `sha256` — all vendored, no new crates
 - [x] `re_captures(str, pat)` — capture groups -> list (devin)
 - [x] `parse_date(str) -> ts`, `date_add(ts, n[, unit])`, `date_fmt(ts[, fmt])` — real datetime math
 - [~devin] `serve` ergonomics: `match_path(pattern, path)` -> params dict
       or null (path params like `/users/:id` work; full `route()` table
       still open)
-- [ ] HTTP client: headers param on fetch, `fetch(url, {headers: dict})`,
-      timeout, `post` exists — verify body types
+- [x] HTTP client: `fetch(url[, {headers: dict}])` + `post` — 30s
+      timeout, dict headers, returns `{status, body}`
 
 ## Phase 2 — Modules & namespacing (~1 week)
 

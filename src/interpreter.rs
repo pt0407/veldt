@@ -3940,13 +3940,16 @@ impl Interpreter {
                 }
             }
 
-            "exists" | "file_size" | "ls" | "mkdir" | "rm" | "cp" | "mv" | "cwd" => {
+            "exists" | "file_size" | "ls" | "mkdir" | "rm" | "cp" | "mv" | "cwd" | "home" => {
                 let path = match args.get(0) {
                     Some(Value::Str(p)) => p.clone(),
-                    None if name == "cwd" => String::new().into(),
+                    None if name == "cwd" || name == "home" => String::new().into(),
                     _ => return Err(format!("{}() expects a path string", name)),
                 };
                 match name {
+                    "home" => Ok(Some(Value::Str(
+                        std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE"))
+                            .unwrap_or_else(|_| ".".into()).into()))),
                     "exists" => Ok(Some(Value::Bool(std::path::Path::new(&*path).exists()))),
                     "file_size" => Ok(Some(Value::Int(
                         std::fs::metadata(&*path).map(|m| m.len() as i64).unwrap_or(0)))),

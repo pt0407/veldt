@@ -49,6 +49,15 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] Phase-1 sweep closed: `home()` builtin (HOME/
+  USERPROFILE fallback) was the only missing OS/files item — ls/mkdir/
+  rm/cp/mv/exists/cwd/read_lines/write_lines/file_size all existed.
+  Verified + ticked: encoding (b64/url/sha256), HTTP client (fetch
+  headers dict + 30s timeout + post), datetime math, veldt new,
+  help topics, stats dashboard, VSCode grammar, killer demo, README.
+  Remaining open items are ALL user-blocked: crates.io publish
+  (unverified email), v0.3.0 tag, brew, Pages enable, hosted pool,
+  LLM key e2e.
 - [Devin/main-side] ROADMAP RECONCILE: ticked items verified shipped —
   veldt help <topic> (13 topics), veldt stats dashboard, VSCode
   tmLanguage grammar, killer demo (IdiomRewrite test = THE proof).
