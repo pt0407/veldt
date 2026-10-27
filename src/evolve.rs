@@ -927,8 +927,103 @@ impl Evolver {
                 _ => {}
             }
         }
+        Self::accum_window(win)
+    }
+
+    /// O(n) accumulate loop -> O(1) closed form:
+    ///   `let t = init; for x in ITER { t = t + k }`
+    ///     -> `let t = init + k * len(ITER)`   (k loop-invariant)
+    ///   `let i = 0; let t = init; while i < n { t += k; i += 1 }`
+    ///     -> `let t = init + k * n; let i = n`
+    fn accum_window(win: &[Stmt]) -> Option<(usize, Vec<Stmt>)> {
+        // `t = t + k` / `t = t - k` / `t = k + t` -> (t, op, k)
+        fn accum_parts(s: &Stmt) -> Option<(String, BinOp, Expr)> {
+            if let Stmt::Assign(t, Expr::BinOp(l, op, r)) = s {
+                if !matches!(op, BinOp::Add | BinOp::Sub) { return None; }
+                if matches!(l.as_ref(), Expr::Var(v) if v == t) {
+                    return Some((t.clone(), op.clone(), (**r).clone()));
+                }
+                if *op == BinOp::Add && matches!(r.as_ref(), Expr::Var(v) if v == t) {
+                    return Some((t.clone(), BinOp::Add, (**l).clone()));
+                }
+            }
+            None
+        }
+        let uses = |e: &Expr, names: &[&str]| {
+            let set: std::collections::HashSet<String> =
+                names.iter().map(|n| n.to_string()).collect();
+            expr_uses(e, &set)
+        };
+        let mul = |a: Expr, b: Expr| Expr::BinOp(Box::new(a), BinOp::Mul, Box::new(b));
+        let count_of = |iter: &Expr| match iter {
+            Expr::Call(n, _, a) if n == "range" && a.len() == 1 => a[0].clone(),
+            other => Expr::MethodCall(Box::new(other.clone()), "len".into(), vec![]),
+        };
+        // for-form: [Let/Assign(t, init), For(x, iter, [t = t +- k])]
+        if win.len() >= 2 {
+            let init_bind = match &win[0] {
+                Stmt::Let(t, e) | Stmt::Assign(t, e) => Some((t.clone(), e.clone())),
+                _ => None,
+            };
+            if let (Some((t, init)), Stmt::For(x, iter, body)) = (init_bind, &win[1]) {
+                if body.len() == 1 {
+                    if let Some((t2, op, k)) = accum_parts(&body[0]) {
+                        if t2 == t && !uses(&k, &[&t, x]) {
+                            let closed = Expr::BinOp(
+                                Box::new(init), op,
+                                Box::new(mul(k, count_of(iter))));
+                            return Some((2, vec![Stmt::Let(t, closed)]));
+                        }
+                    }
+                }
+            }
+        }
+        // while-form: two lets (i=0, t=init either order) + while
+        if win.len() >= 3 {
+            let bind = |s: &Stmt| -> Option<(String, Expr)> {
+                match s { Stmt::Let(t, e) | Stmt::Assign(t, e) => Some((t.clone(), e.clone())), _ => None }
+            };
+            if let (Some((v1, e1)), Some((v2, e2))) = (bind(&win[0]), bind(&win[1])) {
+                let (i_name, t, init) = if matches!(e1, Expr::Int(0)) {
+                    (v1, v2, e2)
+                } else if matches!(e2, Expr::Int(0)) {
+                    (v2, v1, e1)
+                } else { return None; };
+                if let Stmt::While(cond, body) = &win[2] {
+                    if let Expr::BinOp(l, BinOp::Lt, n) = cond {
+                        if matches!(l.as_ref(), Expr::Var(v) if *v == i_name)
+                            && !uses(n, &[&i_name, &t]) && body.len() == 2 {
+                            let is_incr = |s: &Stmt| matches!(s,
+                                Stmt::Assign(t2, Expr::BinOp(l2, BinOp::Add, r2))
+                                    if *t2 == i_name
+                                    && matches!(l2.as_ref(), Expr::Var(v) if *v == i_name)
+                                    && matches!(r2.as_ref(), Expr::Int(1)));
+                            let (acc_s, inc_ok) = if is_incr(&body[0]) {
+                                (Some(&body[1]), true)
+                            } else if is_incr(&body[1]) {
+                                (Some(&body[0]), true)
+                            } else { (None, false) };
+                            if inc_ok {
+                                if let Some((t2, op, k)) = acc_s.and_then(accum_parts) {
+                                    if t2 == t && !uses(&k, &[&i_name, &t]) {
+                                        let closed = Expr::BinOp(
+                                            Box::new(init), op,
+                                            Box::new(mul(k, (**n).clone())));
+                                        return Some((3, vec![
+                                            Stmt::Let(t, closed),
+                                            Stmt::Let(i_name, (**n).clone()),
+                                        ]));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
         None
     }
+
 
     /// O(n) scan binding `tgt` to the extremum of `xs` (arbitrary expr —
     /// non-Var receivers hoist into a `let __xs` first).
@@ -2291,6 +2386,31 @@ mod asymptotic_proof {
         let src = crate::fmt::format_program(&out);
         assert!(src.contains("while") && !src.contains(".sort()"),
             "nested idiom not rewritten:\n{}", src);
+    }
+
+    #[test]
+    fn idiom_rewrite_closes_accumulate_loops() {
+        let mut evolver = Evolver::new();
+        // for-accumulate: let t = 0; for x in xs { t += k } -> let t = 0 + k*xs.len()
+        let body = parse_fn_body(
+            "let total = 0\nfor x in xs {\n  total += rate\n}\nreturn total");
+        let out = evolver.mutate_body(&body, Mutation::IdiomRewrite);
+        let src = crate::fmt::format_program(&out);
+        assert!(!src.contains("for"), "for-loop survived:\n{}", src);
+        assert!(src.contains("*") && src.contains("len"),
+            "no closed form:\n{}", src);
+        // while-accumulate: let i = 0; let t = 0; while i < n { t += k; i += 1 }
+        let body = parse_fn_body(
+            "let i = 0\nlet t = 0\nwhile i < n {\n  t += step\n  i += 1\n}\nreturn t");
+        let out = evolver.mutate_body(&body, Mutation::IdiomRewrite);
+        let src = crate::fmt::format_program(&out);
+        assert!(!src.contains("while"), "while survived:\n{}", src);
+        // invariant violation: k uses the loop var -> must NOT rewrite
+        let body = parse_fn_body(
+            "let total = 0\nfor x in xs {\n  total += x\n}\nreturn total");
+        let out = evolver.mutate_body(&body, Mutation::IdiomRewrite);
+        let src = crate::fmt::format_program(&out);
+        assert!(src.contains("for"), "unsafe rewrite:\n{}", src);
     }
 
     #[test]

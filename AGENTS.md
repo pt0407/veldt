@@ -49,6 +49,14 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] IDIOM FAMILY #2 — closed-form accumulation:
+  `let t=init; for x in ITER { t += k }` -> `let t = init + k*len(ITER)`
+  and `let i=0; let t=init; while i<n { t+=k; i+=1 }` -> `let t=init+k*n;
+  let i=n`. Both guarded by expr_uses invariance on k (loop-var/
+  accumulator-dependent k is NOT rewritten — test asserts this).
+  O(n) -> O(1) rewrites now join the O(n log n) -> O(n) extremum
+  scans in Mutation::IdiomRewrite. Also removed 9 dead method arms
+  + fixed --sort efficiency shadowing a wrong ratio arm.
 - [Devin/main-side] HONEST STEP ACCOUNTING ROUND 2: the hidden-O(n)
   bug was systemic, not just sort/reverse. Now charged: str split/
   contains/replace/index_of/chars (len/4–len/2), list join/contains/
