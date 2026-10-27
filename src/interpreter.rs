@@ -4797,6 +4797,7 @@ impl Interpreter {
                 Ok(Value::Bool(items.contains(&args[0])))
             }
             (Value::List(items), "reverse") => {
+                self.step_count += (items.len() as u64) * 4;
                 let mut new_items = items.clone();
                 new_items = new_items.iter().rev().cloned().collect();
                 Ok(Value::List(new_items))
@@ -4831,14 +4832,19 @@ impl Interpreter {
             }
             (Value::List(items), "sort") => {
                 let mut sorted = items.clone();
-                sorted.sort_by(|a, b| match (a, b) {
-                    (Value::Int(a), Value::Int(b)) => a.cmp(b),
-                    (Value::Float(a), Value::Float(b)) => a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal),
-                    (Value::Int(a), Value::Float(b)) => (*a as f64).partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal),
-                    (Value::Float(a), Value::Int(b)) => a.partial_cmp(&(*b as f64)).unwrap_or(std::cmp::Ordering::Equal),
-                    (Value::Str(a), Value::Str(b)) => a.cmp(b),
-                    _ => std::cmp::Ordering::Equal,
+                let cmp_steps = std::cell::Cell::new((items.len() as u64) * 4);
+                sorted.sort_by(|a, b| {
+                    cmp_steps.set(cmp_steps.get() + 6);
+                    match (a, b) {
+                        (Value::Int(a), Value::Int(b)) => a.cmp(b),
+                        (Value::Float(a), Value::Float(b)) => a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal),
+                        (Value::Int(a), Value::Float(b)) => (*a as f64).partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal),
+                        (Value::Float(a), Value::Int(b)) => a.partial_cmp(&(*b as f64)).unwrap_or(std::cmp::Ordering::Equal),
+                        (Value::Str(a), Value::Str(b)) => a.cmp(b),
+                        _ => std::cmp::Ordering::Equal,
+                    }
                 });
+                self.step_count += cmp_steps.get();
                 Ok(Value::List(sorted.into_iter().collect()))
             }
             (Value::List(items), "map") => {

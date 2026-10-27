@@ -557,7 +557,7 @@ impl Evolver {
     }
 
     fn pick_mutation(&mut self) -> Mutation {
-        match self.rand_range(10) {
+        match self.rand_range(11) {
             0 => Mutation::Constant,
             1 => Mutation::Operator,
             2 => Mutation::StatementSwap,
@@ -567,6 +567,7 @@ impl Evolver {
             6 => Mutation::ConstProp,
             7 => Mutation::HoistInvariant,
             8 => Mutation::EarlyExit,
+            9 => Mutation::IdiomRewrite,
             _ => Mutation::Simplify,
         }
     }
@@ -583,6 +584,7 @@ impl Evolver {
             Mutation::ConstProp => format!("constant propagation on {}#{}", name, id),
             Mutation::HoistInvariant => format!("loop-invariant hoist on {}#{}", name, id),
             Mutation::EarlyExit => format!("early-exit fusion on {}#{}", name, id),
+            Mutation::IdiomRewrite => format!("algorithmic idiom rewrite on {}#{}", name, id),
         }
     }
 
@@ -591,6 +593,10 @@ impl Evolver {
     /// no-op children only burn budget downstream (clone rejection).
     fn mutate_retry(&mut self, body: &[Stmt]) -> (Vec<Stmt>, Mutation) {
         let parent_key = format!("{:?}", body);
+        let rewritten = self.mutate_body(body, Mutation::IdiomRewrite);
+        if format!("{:?}", rewritten) != parent_key {
+            return (rewritten, Mutation::IdiomRewrite);
+        }
         let mut last = Mutation::Simplify;
         let mut out = body.to_vec();
         for _ in 0..6 {
@@ -745,9 +751,133 @@ impl Evolver {
                     }
                 }
             }
+            Mutation::IdiomRewrite => {
+                if let Some((xs, is_max)) = Self::detect_sort_extremum(&new_body) {
+                    new_body = Self::make_linear_extremum_scan(&xs, is_max);
+                }
+            }
         }
 
         new_body
+    }
+
+    /// Detect O(n log n) sort-to-find-extremum idioms:
+    /// - `return xs.sort().reverse()[0]` or `let s = xs.sort(); let r = s.reverse(); return r[0]` -> Some((xs, true))
+    /// - `return xs.sort()[0]` or `let s = xs.sort(); return s[0]` -> Some((xs, false))
+    fn detect_sort_extremum(stmts: &[Stmt]) -> Option<(String, bool)> {
+        match stmts {
+            // Inline: return xs.sort().reverse()[0] or return xs.sort()[0]
+            [Stmt::Return(Some(Expr::Index(recv, idx)))] if matches!(idx.as_ref(), Expr::Int(0)) => {
+                match recv.as_ref() {
+                    Expr::MethodCall(inner, rev_m, rev_args)
+                        if rev_m == "reverse" && rev_args.is_empty() =>
+                    {
+                        if let Expr::MethodCall(base, sort_m, sort_args) = inner.as_ref() {
+                            if sort_m == "sort" && sort_args.is_empty() {
+                                if let Expr::Var(xs) = base.as_ref() {
+                                    return Some((xs.clone(), true));
+                                }
+                            }
+                        }
+                        None
+                    }
+                    Expr::MethodCall(base, sort_m, sort_args)
+                        if sort_m == "sort" && sort_args.is_empty() =>
+                    {
+                        if let Expr::Var(xs) = base.as_ref() {
+                            return Some((xs.clone(), false));
+                        }
+                        None
+                    }
+                    _ => None,
+                }
+            }
+            // Staged max: let s = xs.sort(); let r = s.reverse(); return r[0]
+            [Stmt::Let(s, Expr::MethodCall(base, sort_m, sort_args)),
+             Stmt::Let(r, Expr::MethodCall(s_var, rev_m, rev_args)),
+             Stmt::Return(Some(Expr::Index(r_var, idx)))]
+                if sort_m == "sort"
+                    && sort_args.is_empty()
+                    && rev_m == "reverse"
+                    && rev_args.is_empty()
+                    && matches!(idx.as_ref(), Expr::Int(0)) =>
+            {
+                if let (Expr::Var(xs), Expr::Var(s2), Expr::Var(r2)) =
+                    (base.as_ref(), s_var.as_ref(), r_var.as_ref())
+                {
+                    if s == s2 && r == r2 {
+                        return Some((xs.clone(), true));
+                    }
+                }
+                None
+            }
+            // Staged min: let s = xs.sort(); return s[0]
+            [Stmt::Let(s, Expr::MethodCall(base, sort_m, sort_args)),
+             Stmt::Return(Some(Expr::Index(s_var, idx)))]
+                if sort_m == "sort"
+                    && sort_args.is_empty()
+                    && matches!(idx.as_ref(), Expr::Int(0)) =>
+            {
+                if let (Expr::Var(xs), Expr::Var(s2)) = (base.as_ref(), s_var.as_ref()) {
+                    if s == s2 {
+                        return Some((xs.clone(), false));
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
+    fn make_linear_extremum_scan(xs: &str, is_max: bool) -> Vec<Stmt> {
+        let cmp = if is_max { BinOp::Gt } else { BinOp::Lt };
+        vec![
+            Stmt::Let(
+                "m".into(),
+                Expr::Index(Box::new(Expr::Var(xs.into())), Box::new(Expr::Int(0))),
+            ),
+            Stmt::Let("i".into(), Expr::Int(1)),
+            Stmt::While(
+                Expr::BinOp(
+                    Box::new(Expr::Var("i".into())),
+                    BinOp::Lt,
+                    Box::new(Expr::MethodCall(
+                        Box::new(Expr::Var(xs.into())),
+                        "len".into(),
+                        vec![],
+                    )),
+                ),
+                vec![
+                    Stmt::If(
+                        Expr::BinOp(
+                            Box::new(Expr::Index(
+                                Box::new(Expr::Var(xs.into())),
+                                Box::new(Expr::Var("i".into())),
+                            )),
+                            cmp,
+                            Box::new(Expr::Var("m".into())),
+                        ),
+                        vec![Stmt::Assign(
+                            "m".into(),
+                            Expr::Index(
+                                Box::new(Expr::Var(xs.into())),
+                                Box::new(Expr::Var("i".into())),
+                            ),
+                        )],
+                        None,
+                    ),
+                    Stmt::Assign(
+                        "i".into(),
+                        Expr::BinOp(
+                            Box::new(Expr::Var("i".into())),
+                            BinOp::Add,
+                            Box::new(Expr::Int(1)),
+                        ),
+                    ),
+                ],
+            ),
+            Stmt::Return(Some(Expr::Var("m".into()))),
+        ]
     }
 
     /// Evaluate a constant expression to a literal Expr (Int/Float/Bool/Str).
@@ -1400,6 +1530,7 @@ enum Mutation {
     ConstProp,
     HoistInvariant,
     EarlyExit,
+    IdiomRewrite,
 }
 
 /// Fuzz boundary corpus — canonical edge cases per type (std:fuzz).
@@ -1543,6 +1674,7 @@ fn mutation_name(m: Mutation) -> &'static str {
         Mutation::ConstProp => "constant propagation",
         Mutation::HoistInvariant => "loop-invariant hoisting",
         Mutation::EarlyExit => "early-exit fusion",
+        Mutation::IdiomRewrite => "algorithmic idiom rewrite",
     }
 }
 
@@ -1936,5 +2068,46 @@ mod asymptotic_proof {
             "not asymptotic: seed {} vs hoisted {} ({}x)",
             seed_steps, hoist_steps,
             seed_steps as f64 / hoist_steps.max(1) as f64);
+    }
+
+    #[test]
+    fn evolve_discovers_and_selects_linear_scan_over_sort_reverse() {
+        use crate::lexer::Lexer;
+        use crate::parser::Parser;
+        use crate::health::HealthChecker;
+        use crate::interpreter::Value;
+
+        let mut veldt = Veldt::new();
+        let src = "grow fn max_val(xs: list<int>) test max_val([3, 1, 2]) == 3 {\n let s = xs.sort()\n let r = s.reverse()\n return r[0]\n}";
+        let tokens = Lexer::new(src).tokenize().unwrap();
+        let stmts = Parser::new(tokens).parse_program().unwrap();
+        for s in stmts {
+            if let Stmt::Grow(crate::ast::GrowItem::Fn(name, params, body, tests)) = s {
+                veldt.grow_function(&name, params, body, tests, src);
+            }
+        }
+        // Plant scaled list probe (scale=64) so measure_efficiency compares O(n) vs O(n log n)
+        let big_list = Value::List((0..64).map(|i| Value::Int((i * 37) % 100)).collect());
+        let max_expected = Value::Int(99);
+        veldt.probes.insert("max_val".into(), vec![crate::veldt::Probe {
+            args: vec![serde_json::to_string(&big_list).unwrap()],
+            expected: serde_json::to_string(&max_expected).unwrap(),
+            niche: "list:big".into(),
+            born: 0,
+            scale: 64,
+        }]);
+        let mut seed_entry = veldt.functions["max_val"][0].clone();
+        HealthChecker::check_at_birth_with(&mut seed_entry, &veldt, false);
+        veldt.functions.get_mut("max_val").unwrap()[0] = seed_entry.clone();
+
+        let mut evolver = Evolver::new();
+        evolver.evolve(&mut veldt, 1);
+
+        let fittest = veldt.get_fittest_variant("max_val").unwrap();
+        assert_ne!(fittest.id, seed_entry.id,
+            "expected evolved O(n) scan to beat the O(n log n) sort.reverse[0] seed");
+        assert!(fittest.efficiency > 2.0,
+            "expected evolved O(n) scan efficiency > 2.0x over sort.reverse[0], got {:.2}x",
+            fittest.efficiency);
     }
 }

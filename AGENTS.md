@@ -49,6 +49,21 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] ALGORITHMIC EVOLUTION TARGET SHIPPED:
+  1. Fixed the root-cause step-accounting bug in `src/interpreter.rs`:
+     `List.sort()` and `List.reverse()` ran inside Rust without charging
+     `self.step_count`, making `xs.sort().reverse()[0]` look like 8 steps
+     at any list length while an O(n) Veldt loop paid O(n) steps. Now
+     `.sort()` charges per-comparison + copy steps and `.reverse()` charges
+     copy steps.
+  2. Added `Mutation::IdiomRewrite` (11th operator in `src/evolve.rs`):
+     detects inline or staged `xs.sort().reverse()[0]` / `xs.sort()[0]`
+     and rewrites into an O(n) `while i < xs.len()` linear scan.
+  3. Locked by `evolve_discovers_and_selects_linear_scan_over_sort_reverse`:
+     seeding ONLY `xs.sort().reverse()[0]` and running 1 `evolve` cycle
+     autonomously births the O(n) scan at `eff = 20.0x`, fitness `1.750`
+     vs `1.499`, and selects it as fittest (and Z3 `--exact` proves the
+     two algorithms equivalent).
 - [Devin/main-side] PHASE 12 COMPLETE: `veldt adopt <fn#N> --exact`
   gates Canonical promotion on Z3 SMT equivalence (`verify_variant_exact`:
   `Unsat` promotes to Canonical, `Sat` prints the counterexample and
