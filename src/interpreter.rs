@@ -1138,6 +1138,13 @@ impl Interpreter {
             .min_by_key(|(_, d)| *d).map(|(c, _)| c)
     }
 
+    /// ent_tile_collide — is the entity's (x,y) inside a solid map cell?
+    fn ent_tile_collide(e: &im::HashMap<String, Value>, map: &im::HashMap<String, Value>) -> bool {
+        let ex = e.get("x").map(|v| Self::num_f(v).unwrap_or(0.0)).unwrap_or(0.0) as i64;
+        let ey = e.get("y").map(|v| Self::num_f(v).unwrap_or(0.0)).unwrap_or(0.0) as i64;
+        Self::cell_solid(map, ex, ey)
+    }
+
     fn cell_solid(d: &im::HashMap<String, Value>, x: i64, y: i64) -> bool {
         let Some(Value::List(rows)) = d.get("cells") else { return true };
         if y < 0 || y as usize >= rows.len() { return true }
@@ -2880,6 +2887,33 @@ impl Interpreter {
                 let ex = Self::num_f(e.get("x").unwrap_or(&Value::Int(0)))? as i64;
                 let ey = Self::num_f(e.get("y").unwrap_or(&Value::Int(0)))? as i64;
                 Ok(Some(Value::Bool(Self::cell_solid(d, ex, ey + 1))))
+            }
+            "integrate" => {
+                // integrate(e, map, dt) — velocity physics: apply vx/vy to the
+                // position scaled by dt, then resolve tile collisions on both
+                // axes. The real movement step — entities carry vx/vy, this
+                // moves them. Returns the integrated entity dict.
+                let (e, d, dt) = match (args.get(0), args.get(1), args.get(2)) {
+                    (Some(Value::Dict(e)), Some(Value::Dict(d)), Some(dt)) =>
+                        (e.clone(), d.clone(), Self::num_f(dt)?),
+                    _ => return Err("integrate(e, map, dt) expects dict + dict + num".into()),
+                };
+                let vx = e.get("vx").map(|v| Self::num_f(v).unwrap_or(0.0)).unwrap_or(0.0);
+                let vy = e.get("vy").map(|v| Self::num_f(v).unwrap_or(0.0)).unwrap_or(0.0);
+                let mut x = e.get("x").map(|v| Self::num_f(v).unwrap_or(0.0)).unwrap_or(0.0);
+                let mut y = e.get("y").map(|v| Self::num_f(v).unwrap_or(0.0)).unwrap_or(0.0);
+                // sweep the x-step then the y-step so collision stays axis-resolved
+                let nx = x + vx * dt;
+                let mut probe = e.clone();
+                probe.insert("x".into(), Value::Float(nx));
+                if !Self::ent_tile_collide(&probe, &d) { x = nx; }
+                let ny = y + vy * dt;
+                probe.insert("y".into(), Value::Float(ny));
+                if !Self::ent_tile_collide(&probe, &d) { y = ny; }
+                let mut out = e.clone();
+                out.insert("x".into(), Value::Float(x));
+                out.insert("y".into(), Value::Float(y));
+                Ok(Some(Value::Dict(out)))
             }
             "physics_tick" => {
                 // physics_tick(e, map, grav) — apply gravity to e.vy, move e.y,
