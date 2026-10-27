@@ -1,0 +1,107 @@
+# pong.veldt — a breakout (engine builtins)
+# Left/right arrows move the paddle. The grown paddle_move policy tracks
+#   the ball when no key is held — `agent "improve paddle_move"` breeds it.
+
+grow fn paddle_move(px: int, bx: float, bvx: float)
+        test paddle_move(15, 10.0, 1.0) == [-1] {
+    # slide the paddle under the ball — lead slightly with the velocity
+    let aim = bx + bvx * 2.0
+    let dx = 0
+    if aim > px { dx = 1 }
+    if aim < px { dx = -1 }
+    return [dx]
+}
+
+# --- world (the DSL: paddle, ball, a grid of bricks) ---
+let g = game_new(30, 15)
+ent_def("paddle", dict().put("sprite", "paddle").put("tag", "paddle"))
+ent_def("ball",   dict().put("sprite", "ball").put("tag", "ball"))
+ent_def("brick",  dict().put("sprite", "brick").put("tag", "brick"))
+let s = scene_new(30, 15)
+let s = spawn(s, "paddle", 15, 13)
+let s = spawn(s, "ball", 15, 10)
+# brick wall rows
+let bx = 2
+while bx < 28 {
+    let by = 2
+    while by < 5 {
+        s = spawn(s, "brick", bx, by)
+        by = by + 1
+    }
+    bx = bx + 3
+}
+let score = 0
+let lives = 3
+let lost = false
+# ball velocity in the dict
+let ball = scene_find(s, "ball")[0]
+ball["vx"] = 0.6
+ball["vy"] = 0.8
+
+# --- real-time breakout loop ---
+while game_running() and lives > 0 {
+    let p = scene_find(s, "paddle")[0]
+    let b = scene_find(s, "ball")[0]
+    let k = keys()
+    let dx = 0
+    if k.contains("left") { dx = -1 }
+    if k.contains("right") { dx = 1 }
+    if dx == 0 {
+        let m = paddle_move(p["x"], b["x"], b["vx"])
+        dx = m[0]
+    }
+    let np = ent_move(p, dx, 0)
+    np["x"] = clamp(np["x"], 1, 28)
+    s = scene_despawn(s, p["name"])
+    s = scene_spawn(s, np)
+    p = np
+
+    # ball physics — velocity integrate + wall/paddle bounce
+    let nx = b["x"] + b["vx"]
+    let ny = b["y"] + b["vy"]
+    let nvx = b["vx"]
+    let nvy = b["vy"]
+    if nx <= 0 or nx >= 29 { nvx = -nvx }
+    if ny <= 0 { nvy = -nvy }
+    # paddle bounce — ball hits the paddle and goes up
+    if ny >= p["y"] and abs(nx - p["x"]) <= 1.0 { nvy = -abs(nvy); sfx("bounce") }
+    # fell past the paddle — lose a life
+    if ny > 14 {
+        lives = lives - 1
+        b["x"] = 15.0
+        b["y"] = 10.0
+        sfx("death")
+    } else {
+        b["x"] = nx
+        b["y"] = ny
+        b["vx"] = nvx
+        b["vy"] = nvy
+    }
+    s = scene_despawn(s, b["name"])
+    s = scene_spawn(s, b)
+
+    # ball hits a brick — collide_any finds it, brick pops
+    let hit = collide_any(b, s)
+    if hit != null and hit["tag"] == "brick" {
+        s = scene_despawn(s, hit["name"])
+        b["vy"] = -b["vy"]
+        s = scene_despawn(s, b["name"])
+        s = scene_spawn(s, b)
+        score = score + 20
+        emit("hit", hit["x"], hit["y"])
+        sfx("hit")
+    }
+    let bricks = scene_find(s, "brick")
+    if bricks.len() == 0 {
+        print("cleared — " + score)
+        game_over(dict().put("won", true))
+        lives = 0
+    }
+
+    let hud = dict()
+    hud["score"] = score
+    hud["lives"] = lives
+    game_frame(g, scene_entities(s), hud)
+    sleep(70)
+}
+if lives <= 0 { print("out of lives — score " + score) }

@@ -1,0 +1,2 @@
+fn greet(n: int) { return n * 2 }
+print("packed test " + greet(21))

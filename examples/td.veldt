@@ -1,0 +1,109 @@
+# td.veldt — a real-time 2D game (engine builtins)
+# WASD / arrows drive @ live; let go and the grown hero_move policy
+# takes over (auto-play). A hunter chases — grab coins, reach the exit.
+#   veldt studio → /play/td   ·   agent "improve hero_move"
+
+# --- the breedable policy: pick a move when no keys are held ---
+# (px,py,tx,ty,hx,hy) -> [dx,dy] — chase the target, flee the hunter
+grow fn hero_move(px: int, py: int, tx: int, ty: int, hx: float, hy: float)
+        test hero_move(2, 7, 28, 12, 26.0, 7.0) == [1, 0] {
+    let dx = 0
+    let dy = 0
+    let dd = abs(px - hx) + abs(py - hy)
+    if dd < 4.0 {
+        if px > hx { dx = 1 } else { if px < hx { dx = -1 } }
+        if py > hy { dy = 1 } else { if py < hy { dy = -1 } }
+        return [dx, dy]
+    }
+    if tx > px { dx = 1 }
+    if tx < px { dx = -1 }
+    if ty > py and dx == 0 { dy = 1 }
+    if ty < py and dx == 0 { dy = -1 }
+    return [dx, dy]
+}
+
+# --- world (the DSL: declare types, spawn instances, scene manages them) ---
+let g = game_new(30, 15)
+ent_def("player", dict().put("sprite", "hero").put("tag", "player"))
+ent_def("hunter", dict().put("sprite", "hunter").put("tag", "hunter"))
+ent_def("exit",   dict().put("sprite", "exit").put("tag", "exit"))
+ent_def("coin",   dict().put("sprite", "coin").put("tag", "coin"))
+let s = scene_new(30, 15)
+let s = spawn(s, "player", 2, 7)
+let s = spawn(s, "hunter", 26, 7)
+let s = spawn(s, "exit", 28, 12)
+let s = spawn(s, "coin", 8, 4)
+let s = spawn(s, "coin", 15, 9)
+let s = spawn(s, "coin", 22, 3)
+let s = spawn(s, "coin", 6, 12)
+let hp = 100
+let score = 0
+let won = false
+
+# --- real-time loop — browser keys or the grown policy ---
+while game_running() and not won and hp > 0 {
+    let p = scene_find(s, "player")[0]
+    let h = scene_find(s, "hunter")[0]
+    let k = keys()
+    let dx = 0
+    let dy = 0
+    if k.contains("left") { dx = -1 }
+    if k.contains("right") { dx = 1 }
+    if k.contains("up") { dy = -1 }
+    if k.contains("down") { dy = 1 }
+    if dx == 0 and dy == 0 {
+        let m = hero_move(p["x"], p["y"], 28, 12, h["x"], h["y"])
+        dx = m[0]
+        dy = m[1]
+    }
+    let np = ent_move(p, dx, dy)
+    # clamp to the world
+    let nx = clamp(np["x"], 0, 29)
+    let ny = clamp(np["y"], 0, 14)
+    np["x"] = nx
+    np["y"] = ny
+    s = scene_despawn(s, p["name"])
+    s = scene_spawn(s, np)
+
+    # hunter chases at half speed — velocity then ent_move
+    let hdx = 0.0
+    let hdy = 0.0
+    if h["x"] < nx { hdx = 0.5 } else { if h["x"] > nx { hdx = -0.5 } }
+    if h["y"] < ny { hdy = 0.5 } else { if h["y"] > ny { hdy = -0.5 } }
+    s = scene_despawn(s, h["name"])
+    let h2 = ent_move(h, hdx, hdy)
+    s = scene_spawn(s, h2)
+
+    # what did the player touch? — collide_any answers it
+    let hit = collide_any(np, s)
+    if hit != null {
+        if hit["tag"] == "coin" {
+            score = score + 100
+            hp = min(100, hp + 12)
+            s = scene_despawn(s, hit["name"])
+            sfx("coin")
+        }
+        if hit["tag"] == "hunter" {
+            hp = hp - 3
+            sfx("hit")
+        }
+        if hit["tag"] == "exit" {
+            won = true
+            sfx("win")
+        }
+    }
+
+    let hud = dict()
+    hud["hp"] = hp
+    hud["score"] = score
+    game_frame(g, scene_entities(s), hud)
+    sleep(80)
+}
+
+let out = dict()
+out["hp"] = hp
+out["score"] = score
+out["won"] = won
+game_frame(g, scene_entities(s), out)
+if won { print("escaped — " + score + " gold") }
+else { if hp <= 0 { print("devoured — score " + score) } else { print("session over") } }

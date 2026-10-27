@@ -1,0 +1,100 @@
+# climb2.veldt — a real-time platformer (engine builtins)
+# WASD/arrows move, SPACE/up jumps. The grown plat_move policy
+# auto-plays when no keys are held. Veldt studio -> /play/climb2
+#   agent "improve plat_move" evolves the jump/walk policy.
+
+# --- breedable policy: pick a move when no keys are held ---
+# (px,py,ex,ey) -> [dx,jump] — walk toward the exit, jump over gaps/walls
+grow fn plat_move(px: int, py: int, ex: int, ey: int)
+        test plat_move(2, 11, 34, 3) == [1, 0] {
+    let dx = 0
+    let j = 0
+    if ex > px { dx = 1 }
+    if ex < px { dx = -1 }
+    if ey < py and dx == 0 { j = 1 }   # exit above — jump toward it
+    return [dx, j]
+}
+
+# --- the level: a platformer map as tile rows ---
+# floor, raised platforms, a pit to jump. Solid = #.
+let lvl = canvas_new(36, 14, " ")
+lvl = canvas_fill(lvl, 0, 13, 36, 1, "#")     # ground
+lvl = canvas_fill(lvl, 5, 10, 6, 1, "#")      # platform 1
+lvl = canvas_fill(lvl, 13, 7, 6, 1, "#")      # platform 2
+lvl = canvas_fill(lvl, 21, 4, 6, 1, "#")      # platform 3
+lvl = canvas_fill(lvl, 29, 10, 5, 1, "#")     # upper walk
+lvl = canvas_fill(lvl, 14, 13, 4, 1, " ")     # a pit in the ground
+
+let g = game_new(36, 14)
+# entity types declared once via the DSL — spawn() instances them
+ent_def("player", dict().put("sprite", "hero").put("tag", "player").put("vx", 0.0).put("vy", 0.0))
+ent_def("exit",   dict().put("sprite", "exit").put("tag", "exit"))
+ent_def("coin",   dict().put("sprite", "coin").put("tag", "coin"))
+let s = scene_new(36, 14)
+let s = spawn(s, "player", 2, 11)
+let s = spawn(s, "exit", 34, 12)
+let s = spawn(s, "coin", 7, 9)
+let s = spawn(s, "coin", 16, 6)
+let s = spawn(s, "coin", 24, 3)
+let s = spawn(s, "coin", 31, 9)
+let hp = 100
+let score = 0
+let won = false
+
+# --- real-time platformer loop ---
+while game_running() and not won {
+    let p = scene_find(s, "player")[0]
+    let k = keys()
+    let dx = 0
+    let jump = 0
+    if k.contains("left") { dx = -1 }
+    if k.contains("right") { dx = 1 }
+    if k.contains("up") or k.contains("space") { jump = 1 }
+    if dx == 0 and jump == 0 {
+        let m = plat_move(p["x"], p["y"], 34, 12)
+        dx = m[0]
+        jump = m[1]
+    }
+
+    # horizontal — move if the target tile is open
+    let p2 = ent_move(p, dx, 0)
+    if not tile_solid(lvl, p2["x"], p2["y"]) {
+        s = scene_despawn(s, p["name"])
+        s = scene_spawn(s, p2)
+        p = p2
+    }
+
+    # jump — launch up only when grounded
+    if jump == 1 and on_ground(p, lvl) {
+        s = scene_despawn(s, p["name"])
+        p = ent_vel(p, 0, -1.6)
+        s = scene_spawn(s, p)
+    }
+    # gravity + land
+    s = scene_despawn(s, p["name"])
+    p = physics_tick(p, lvl, 0.35)
+    s = scene_spawn(s, p)
+
+    # grab coins + reach the exit — collide_any is the "what did I touch" query
+    let hit = collide_any(p, s)
+    if hit != null {
+        if hit["tag"] == "coin" {
+            score = score + 100
+            s = scene_despawn(s, hit["name"])
+            sfx("coin")
+        }
+        if hit["tag"] == "exit" {
+            won = true
+            sfx("win")
+        }
+    }
+
+    # camera tracks the player (dead-zone scrolling)
+    g = camera_follow(g, p, 4.0)
+
+    let hud = dict()
+    hud["score"] = score
+    game_frame(g, scene_entities(s), hud, lvl)
+    sleep(80)
+}
+print("finished — score " + score)
