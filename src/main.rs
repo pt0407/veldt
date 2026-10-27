@@ -314,6 +314,63 @@ fn main() {
                 .map(|(n, _)| n.clone()).collect();
             if names.is_empty() {
                 println!("No families with multiple variants.");
+            } else if args.iter().any(|a| a == "--exact") {
+                // veldt verify --all --exact [--quarantine] — Z3 proof
+                // sweep: every non-fittest variant checked against the
+                // fittest; Sat cex = provably divergent.
+                #[cfg(feature = "smt")]
+                {
+                    println!("Auditing {} families (exact)...", names.len());
+                    let mut demoted = Vec::new();
+                    let mut divergences = 0usize;
+                    let mut proven = 0usize; let mut bailed = 0usize;
+                    for n in &names {
+                        let Some(fittest) = veldt.get_fittest_variant(n) else { continue };
+                        let ids: Vec<u32> = veldt.functions[n].iter()
+                            .filter(|e| e.id != fittest.id).map(|e| e.id).collect();
+                        let mut fam_bail = false;
+                        for vid in ids {
+                            match smt::verify_variant_exact(&veldt, n, vid) {
+                                Ok(None) => proven += 1,
+                                Ok(Some(cex)) => {
+                                    divergences += 1;
+                                    println!("  {}#{} PROVABLY DIVERGENT at ({})",
+                                             n, vid, cex.join(", "));
+                                    if quarantine {
+                                        if let Some(vs) = veldt.functions.get_mut(n) {
+                                            for v in vs.iter_mut() {
+                                                if v.id == vid {
+                                                    v.health = veldt::Health::Dying;
+                                                    demoted.push(format!("{}#{}", n, vid));
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    bailed += 1; fam_bail = true;
+                                    eprintln!("  {}#{} bail ({})", n, vid, e);
+                                }
+                            }
+                        }
+                        let _ = fam_bail;
+                    }
+                    println!("[exact] {} proven, {} divergent, {} bailed",
+                             proven, divergences, bailed);
+                    if quarantine && !demoted.is_empty() {
+                        veldt.save().unwrap_or_else(
+                            |e| eprintln!("Save error: {}", e));
+                        println!("Quarantined (Dying): {}", demoted.join(", "));
+                    }
+                    if args.iter().any(|a| a == "--strict") && divergences > 0 {
+                        eprintln!("{} provably divergent variant(s) found", divergences);
+                        process::exit(1);
+                    }
+                }
+                #[cfg(not(feature = "smt"))]
+                {
+                    eprintln!("--exact requires the smt feature (cargo build --features smt)");
+                }
             } else {
                 let strict = args.iter().any(|a| a == "--strict");
                 println!("Auditing {} families...", names.len());
