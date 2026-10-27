@@ -915,6 +915,9 @@ fn main() {
                             .into_iter()
                             .filter(|w| !w.contains("defined but never called")
                                 && !w.contains("no top-level statements")
+                                // `t = t + x` and `t += x` share an AST —
+                                // the style hint is unfixable noise here
+                                && !w.contains("use += compound assign")
                                 && !(has_probes && w.contains("has no test clause")))
                             .filter(|w| !bugs_only
                                 || crate::evolve::is_realbug_warning(w))
@@ -2780,6 +2783,7 @@ fn main() {
                         let warns: Vec<String> = lint(&[wrapped]).into_iter()
                             .filter(|w| !w.contains("defined but never called")
                                 && !w.contains("no top-level statements")
+                                && !w.contains("use += compound assign")
                                 && !(has_probes && w.contains("has no test clause")))
                             .collect();
                         if !warns.is_empty() { flagged += 1; }
