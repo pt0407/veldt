@@ -26,6 +26,9 @@ veldt evolve 10          # 10 mutation cycles — new variants compete
 veldt rewrite --all      # deterministic idiom rewrites (sort->scan, loop->closed form)
 veldt garden             # census: who's alive, who's dying, fitness
 veldt test score         # re-trial a whole family
+veldt probe --all        # plant probes on every bare lineage (selection pressure)
+veldt verify --all --exact --quarantine  # Z3-audit every family; demote divergent
+veldt stats --exact      # how many families are provably equivalent
 veldt agent "make a fizzbuzz"   # the Gardener writes it for you
 ```
 
