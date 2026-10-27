@@ -492,7 +492,21 @@ fn exec_one(
                 }
             }
             Stmt::For(var, iter_expr, body) => {
-                let SymVal::List(items) = expr_to_smt(iter_expr, state, veldt, fuel)? else {
+                let it_sv = expr_to_smt(iter_expr, state, veldt, fuel)?;
+                // `for k in dict` — keys of a construct-time dict are
+                // the store-spine; a symbolic param dict has none and
+                // stays an honest bail
+                let items: Vec<SymVal> = if let SymVal::Dict(arr) = &it_sv {
+                    let ks = dict_keys(arr);
+                    if ks.is_empty() {
+                        state.note("for over symbolic dict — keys unenumerable");
+                        return None;
+                    }
+                    ks.into_iter().map(SymVal::Scalar).collect()
+                } else if let SymVal::List(items) = it_sv {
+                    items
+                } else {
+                    state.note("for over non-list/dict");
                     return None;
                 };
                 for item in items {
@@ -1372,6 +1386,24 @@ impl VAnySort {
 /// Sort predicate — is this Dynamic the session's `VAny` datatype?
 fn is_vany(d: &Dynamic, va: &VAnySort) -> bool {
     d.get_sort() == va.dt.sort
+}
+
+/// Walk a `store(arr,k,v)` chain — collect the written keys
+/// (construct-time dicts have static keys; a fresh_const param dict
+/// has no store-spine -> empty -> caller honest-bails).
+fn dict_keys(arr: &Array) -> Vec<Dynamic> {
+    let mut out = Vec::new();
+    let mut cur: Dynamic = arr.clone().into();
+    loop {
+        if cur.decl().name() != "store" {
+            break;
+        }
+        let arr2 = cur.nth_child(0);
+        let key = cur.nth_child(1);
+        match key { Some(k) => out.push(k), None => break }
+        match arr2 { Some(a) => cur = a, None => break }
+    }
+    out
 }
 
 /// A scalar read as bool — VAny unwraps via type_err, natives cast.
