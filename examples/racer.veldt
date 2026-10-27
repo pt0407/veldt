@@ -1,0 +1,93 @@
+# racer.veldt — a topdown racer (engine builtins)
+# WASD/arrows steer. The grown nav_policy drives when no key is held —
+#   `agent "improve nav_policy"` evolves it.
+
+grow fn nav_policy(x: int, y: int, lap: int)
+        test nav_policy(3, 12, 0) == [0, -1] {
+    # a simple racing line — run the perimeter (the track is a loop)
+    let dx = 0
+    let dy = 0
+    if y >= 12 { dx = 1 }       # bottom edge — run right
+    if x >= 26 { dy = -1 }      # right edge — run up
+    if y <= 3 { dx = -1 }       # top edge — run left
+    if x <= 3 { dy = 1 }        # left edge — run down
+    if dx == 0 and dy == 0 { dx = 1 }
+    return [dx, dy]
+}
+
+# --- world (the DSL: a walled track, the car, lap markers) ---
+let lvl = canvas_new(30, 15, ".")
+# walls ring the track — a perimeter lane
+let x = 0
+while x < 30 {
+    canvas_set(lvl, x, 0, "#")
+    canvas_set(lvl, x, 14, "#")
+    canvas_set(lvl, x, 4, "#")
+    canvas_set(lvl, x, 10, "#")
+    x = x + 1
+}
+# leave the corners open
+canvas_set(lvl, 0, 4, " ")
+canvas_set(lvl, 29, 10, " ")
+canvas_set(lvl, 29, 4, " ")
+canvas_set(lvl, 0, 10, " ")
+
+let g = game_new(30, 15)
+ent_def("car", dict().put("sprite", "car").put("tag", "car"))
+ent_def("gate", dict().put("sprite", "flag").put("tag", "gate"))
+let s = scene_new(30, 15)
+let s = spawn(s, "car", 3, 7)
+let s = spawn(s, "gate", 15, 7)
+let lap = 0
+let ticks = 0
+let won = false
+let crashed = 0
+
+# --- real-time racing loop ---
+while game_running() and not won {
+    let c = scene_find(s, "car")[0]
+    let k = keys()
+    let dx = 0
+    let dy = 0
+    if k.contains("left") { dx = -1 }
+    if k.contains("right") { dx = 1 }
+    if k.contains("up") { dy = -1 }
+    if k.contains("down") { dy = 1 }
+    if dx == 0 and dy == 0 {
+        let m = nav_policy(c["x"], c["y"], lap)
+        dx = m[0]
+        dy = m[1]
+    }
+    let nc = ent_move(c, dx, dy)
+    # the car can't leave the track lanes — walls are solid tiles
+    if tile_solid(lvl, nc["x"], nc["y"]) {
+        crashed = crashed + 1
+        sfx("crash")
+        emit("hit", c["x"], c["y"])
+    } else {
+        s = scene_despawn(s, c["name"])
+        s = scene_spawn(s, nc)
+        c = nc
+    }
+    # lap gate — cross the midline marker to count a lap
+    let g2 = scene_find(s, "gate")
+    if g2.len() > 0 and collide(c, g2[0]) {
+        lap = lap + 1
+        sfx("coin")
+        emit("coin", g2[0]["x"], g2[0]["y"])
+        if lap >= 3 { won = true }
+    }
+    let hud = dict()
+    hud["lap"] = lap
+    hud["crashes"] = crashed
+    game_frame(g, scene_entities(s), hud, lvl)
+    sleep(80)
+    ticks = ticks + 1
+    if ticks > 400 {
+        lap = -1
+        sfx("death")
+        won = false
+    }
+}
+if lap >= 3 { print("finish! 3 laps, " + crashed + " crashes") }
+else { print("out of time — " + lap + " laps, " + crashed + " crashes") }

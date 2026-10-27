@@ -1,0 +1,109 @@
+# blaster.veldt — a real-time shoot-'em-up (engine builtins)
+# WASD/arrows fly, SPACE/enter fires. The grown shoot_policy is the
+#   auto-aiming brain — `agent "improve shoot_policy"` evolves it.
+
+grow fn shoot_policy(px: int, py: int, fx: float, fy: float)
+        test shoot_policy(5, 12, 22.0, 4.0) == [0, -1] {
+    # fly toward the nearest foe's column; the loop fires on cooldown
+    let dx = 0
+    let dy = 0
+    if fy > py { dy = 1 }
+    if fy < py { dy = -1 }
+    if fx > px + 3 { dx = 1 }
+    if fx < px - 3 { dx = -1 }
+    return [dx, dy]
+}
+
+# --- world (the DSL: declare types, spawn instances) ---
+let g = game_new(30, 15)
+ent_def("player", dict().put("sprite", "hero").put("tag", "player"))
+ent_def("foe",    dict().put("sprite", "hunter").put("tag", "foe"))
+ent_def("bullet", dict().put("sprite", "bullet").put("tag", "shot"))
+let s = scene_new(30, 15)
+let s = spawn(s, "player", 4, 7)
+let s = spawn(s, "foe", 22, 4)
+let s = spawn(s, "foe", 24, 9)
+let s = spawn(s, "foe", 26, 12)
+let hp = 100
+let score = 0
+let lost = false
+
+# --- real-time shooter loop ---
+while game_running() and not lost and hp > 0 {
+    let p = scene_find(s, "player")[0]
+    let k = keys()
+    let dx = 0
+    let dy = 0
+    if k.contains("left") { dx = -1 }
+    if k.contains("right") { dx = 1 }
+    if k.contains("up") { dy = -1 }
+    if k.contains("down") { dy = 1 }
+    let firing = k.contains("space") or k.contains("enter")
+    if dx == 0 and dy == 0 and not firing {
+        # nobody flying — the policy flies toward the nearest foe
+        let foes = scene_find(s, "foe")
+        if foes.len() > 0 {
+            let f = foes[0]
+            let m = shoot_policy(p["x"], p["y"], f["x"], f["y"])
+            dx = m[0]
+            dy = m[1]
+        }
+    }
+    let np = ent_move(p, dx, dy)
+    np["x"] = clamp(np["x"], 0, 29)
+    np["y"] = clamp(np["y"], 0, 14)
+    s = scene_despawn(s, p["name"])
+    s = scene_spawn(s, np)
+    p = np
+
+    # fire — cooldown gates the rate, a bullet spawns at the ship
+    if firing or cooldown("auto", 6) {
+        if cooldown("fire", 4) {
+            let b = bullet(p["x"] + 1, p["y"], 1.6, 0.0, "bullet")
+            s = scene_spawn(s, b)
+            sfx("shoot")
+        }
+    }
+
+    # bullets fly + hit foes — collide_any is 'what did the shot hit'
+    let shots = scene_find(s, "shot")
+    let i = 0
+    while i < shots.len() {
+        let b = shots[i]
+        let nb = ent_move(b, b["vx"], b["vy"])
+        s = scene_despawn(s, b["name"])
+        if nb["x"] > 29 or nb["x"] < 0 { s = s }
+        else { s = scene_spawn(s, nb)
+            let hit = collide_any(nb, s)
+            if hit != null and hit["tag"] == "foe" {
+                s = scene_despawn(s, nb["name"])
+                s = scene_despawn(s, hit["name"])
+                score = score + 50
+                emit("hit", hit["x"], hit["y"])
+                sfx("hit")
+            }
+        }
+        i = i + 1
+    }
+
+    # foes drift toward the player; contact costs hp
+    let foes = scene_find(s, "foe")
+    let i = 0
+    while i < foes.len() {
+        let f = foes[i]
+        s = scene_despawn(s, f["name"])
+        f = move_toward(f, p["x"], p["y"], 0.3)
+        s = scene_spawn(s, f)
+        if collide(p, f) { hp = hp - 4 }
+        i = i + 1
+    }
+    if foes.len() == 0 { lost = false }
+
+    let hud = dict()
+    hud["hp"] = hp
+    hud["score"] = score
+    game_frame(g, scene_entities(s), hud)
+    sleep(80)
+}
+if foes.len() == 0 { print("cleared — " + score) }
+else { if hp <= 0 { print("shot down — " + score) } else { print("over") } }

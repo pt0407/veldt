@@ -1,0 +1,113 @@
+# soko.veldt — a sokoban puzzle (engine builtins)
+# WASD/arrows walk; walk INTO a crate to push it. Get every crate onto
+#   a goal. The grown solve_policy auto-plays — `improve solve_policy`.
+
+grow fn solve_policy(px: int, py: int, cx: int, cy: int, gx: int, gy: int)
+        test solve_policy(5, 5, 8, 5, 12, 5) == [1, 0] {
+    # walk toward the nearest crate; when adjacent push it toward a goal
+    let dx = 0
+    let dy = 0
+    if cx > px { dx = 1 }
+    if cx < px { dx = -1 }
+    if cy > py { dy = 1 }
+    if cy < py { dy = -1 }
+    # adjacent to the crate — push it toward the goal's direction
+    if dx == 0 and dy == 0 {
+        if gx > cx { dx = 1 } else { if gx < cx { dx = -1 } }
+        if dy == 0 and dx == 0 {
+            if gy > cy { dy = 1 } else { if gy < cy { dy = -1 } }
+        }
+    }
+    return [dx, dy]
+}
+
+# --- world (the DSL: walls, the mover, crates, goal cells) ---
+let g = game_new(15, 10)
+ent_def("mover", dict().put("sprite", "hero").put("tag", "mover"))
+ent_def("crate", dict().put("sprite", "crate").put("tag", "crate"))
+ent_def("goal",  dict().put("sprite", "exit").put("tag", "goal"))
+let s = scene_new(15, 10)
+let s = spawn(s, "mover", 2, 7)
+let s = spawn(s, "crate", 6, 4)
+let s = spawn(s, "crate", 9, 6)
+let s = spawn(s, "goal", 12, 4)
+let s = spawn(s, "goal", 12, 6)
+let moves = 0
+let won = false
+
+# --- puzzle loop — move + push crates, all-on-goal wins ---
+while game_running() and not won {
+    let movers = scene_find(s, "mover")
+    if movers.len() == 0 { break }
+    let p = movers[0]
+    let k = keys()
+    let dx = 0
+    let dy = 0
+    if k.contains("left") { dx = -1 }
+    if k.contains("right") { dx = 1 }
+    if k.contains("up") { dy = -1 }
+    if k.contains("down") { dy = 1 }
+    if dx == 0 and dy == 0 {
+        # nobody steering — the policy walks toward the nearest crate
+        let crates = scene_find(s, "crate")
+        if crates.len() > 0 {
+            let c = crates[0]
+            let goals = scene_find(s, "goal")
+            let goal = dict().put("x", 12).put("y", 4)
+            if goals.len() > 0 { goal = goals[0] }
+            let m = solve_policy(p["x"], p["y"], c["x"], c["y"], goal["x"], goal["y"])
+            dx = m[0]
+            dy = m[1]
+        }
+    }
+    if dx != 0 or dy != 0 {
+        let np = ent_move(p, dx, dy)
+        np["x"] = clamp(np["x"], 0, 14)
+        np["y"] = clamp(np["y"], 0, 9)
+        # walking into a crate pushes it — sokoban mechanic
+        let hit = collide_any(np, s)
+        if hit != null and hit["tag"] == "crate" {
+            let pushed = ent_move(hit, dx, dy)
+            pushed["x"] = clamp(pushed["x"], 0, 14)
+            pushed["y"] = clamp(pushed["y"], 0, 9)
+            s = scene_despawn(s, hit["name"])
+            s = scene_spawn(s, pushed)
+            # only step if the crate moved (can't walk through walls of crates)
+            if not collide_any(np, s) {
+                s = scene_despawn(s, p["name"])
+                s = scene_spawn(s, np)
+                moves = moves + 1
+            }
+        } else {
+            s = scene_despawn(s, p["name"])
+            s = scene_spawn(s, np)
+            moves = moves + 1
+        }
+    }
+    # every crate on a goal → solved
+    let crates = scene_find(s, "crate")
+    let goals = scene_find(s, "goal")
+    let on = 0
+    let ci = 0
+    while ci < crates.len() {
+        let c = crates[ci]
+        let gi = 0
+        while gi < goals.len() {
+            if collide(c, goals[gi]) { on = on + 1 }
+            gi = gi + 1
+        }
+        ci = ci + 1
+    }
+    if on >= crates.len() and crates.len() > 0 {
+        won = true
+        sfx("win")
+        emit("win", 12, 5)
+    }
+    let hud = dict()
+    hud["moves"] = moves
+    hud["on"] = on
+    game_frame(g, scene_entities(s), hud)
+    sleep(90)
+}
+if won { print("solved in " + moves + " moves") }
+else { print("over — " + moves + " moves") }

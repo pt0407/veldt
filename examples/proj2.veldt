@@ -1,0 +1,9 @@
+fn main() {
+    print("hello — code that grows")
+    let a = args()
+    if a.len() > 0 {
+        print("args: " + a.join(", "))
+    }
+}
+
+main()
