@@ -4319,8 +4319,108 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
     let mut returned = false;
     // vars bound in this block — flag if never read later
     let mut bound: Vec<(usize, &String)> = Vec::new();
+    // idiom anti-patterns: any statement embedding sort()[0|last],
+    // sort().reverse()[0|last], or e.reverse().reverse()
+    fn is_sort_extremum(e: &Expr) -> bool {
+        if let Expr::Index(recv, _) = e {
+            let mut r = recv.as_ref();
+            if let Expr::MethodCall(inner, m, a) = r {
+                if m == "reverse" && a.is_empty() { r = inner.as_ref(); }
+            }
+            if let Expr::MethodCall(_, m, a) = r {
+                if m == "sort" && a.is_empty() { return true; }
+            }
+        }
+        false
+    }
+    fn contains_sort_extremum(e: &Expr) -> bool {
+        if is_sort_extremum(e) { return true; }
+        match e {
+            Expr::BinOp(l, _, r) => contains_sort_extremum(l) || contains_sort_extremum(r),
+            Expr::UnaryOp(_, x) => contains_sort_extremum(x),
+            Expr::Call(_, _, a) | Expr::List(a) | Expr::Interp(a) =>
+                a.iter().any(contains_sort_extremum),
+            Expr::MethodCall(o, _, a) =>
+                contains_sort_extremum(o) || a.iter().any(contains_sort_extremum),
+            Expr::FieldAccess(o, _) => contains_sort_extremum(o),
+            Expr::Index(o, i) => contains_sort_extremum(o) || contains_sort_extremum(i),
+            Expr::Slice(o, lo, hi) =>
+                contains_sort_extremum(o)
+                || lo.as_ref().map(|x| contains_sort_extremum(x)).unwrap_or(false)
+                || hi.as_ref().map(|x| contains_sort_extremum(x)).unwrap_or(false),
+            Expr::SafeGet(o, _, a) =>
+                contains_sort_extremum(o)
+                || a.as_ref().map(|x| x.iter().any(contains_sort_extremum)).unwrap_or(false),
+            Expr::StructLit(_, f) => f.iter().any(|(_, v)| contains_sort_extremum(v)),
+            Expr::ListComp(h, _, i, c) =>
+                contains_sort_extremum(h) || contains_sort_extremum(i)
+                || c.as_ref().map(|x| contains_sort_extremum(x)).unwrap_or(false),
+            _ => false,
+        }
+    }
+    fn stmt_has_extremum(s: &Stmt) -> bool {
+        match s {
+            Stmt::Let(_, e) | Stmt::Assign(_, e) | Stmt::Print(e)
+            | Stmt::ExprStmt(e) => contains_sort_extremum(e),
+            Stmt::Return(Some(e)) => contains_sort_extremum(e),
+            Stmt::If(c, t, b) => contains_sort_extremum(c)
+                || t.iter().any(stmt_has_extremum)
+                || b.as_ref().map(|x| x.iter().any(stmt_has_extremum)).unwrap_or(false),
+            Stmt::While(c, b) | Stmt::For(_, c, b) =>
+                contains_sort_extremum(c) || b.iter().any(stmt_has_extremum),
+            Stmt::Try(t, _, c) => t.iter().any(stmt_has_extremum) || c.iter().any(stmt_has_extremum),
+            Stmt::Match(e, arms, els) => contains_sort_extremum(e)
+                || arms.iter().any(|(_, b)| b.iter().any(stmt_has_extremum))
+                || els.as_ref().map(|x| x.iter().any(stmt_has_extremum)).unwrap_or(false),
+            _ => false,
+        }
+    }
+    // staged form: let s = xs.sort(); let r = s.reverse() — any
+    // later indexing of s/r is a sort-to-extremum access
+    let mut sorted_vars: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for st in stmts {
+        if let Stmt::Let(n, e) = st {
+            match e {
+                Expr::MethodCall(_, m, a) if m == "sort" && a.is_empty() => {
+                    sorted_vars.insert(n.clone());
+                }
+                Expr::MethodCall(inner, m, a) if m == "reverse" && a.is_empty() => {
+                    if let Expr::Var(v) = inner.as_ref() {
+                        if sorted_vars.contains(v) { sorted_vars.insert(n.clone()); }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let staged_extremum = |s: &Stmt| -> bool {
+        fn idx_of_sorted(e: &Expr, sv: &std::collections::HashSet<String>) -> bool {
+            match e {
+                Expr::Index(recv, _) =>
+                    matches!(recv.as_ref(), Expr::Var(v) if sv.contains(v)),
+                Expr::BinOp(l, _, r) => idx_of_sorted(l, sv) || idx_of_sorted(r, sv),
+                Expr::UnaryOp(_, x) => idx_of_sorted(x, sv),
+                Expr::Call(_, _, a) | Expr::List(a) | Expr::Interp(a) =>
+                    a.iter().any(|x| idx_of_sorted(x, sv)),
+                Expr::MethodCall(o, _, a) =>
+                    idx_of_sorted(o, sv) || a.iter().any(|x| idx_of_sorted(x, sv)),
+                _ => false,
+            }
+        }
+        match s {
+            Stmt::Let(n, e) | Stmt::Assign(n, e) =>
+                !sorted_vars.contains(n) && idx_of_sorted(e, &sorted_vars),
+            Stmt::Return(Some(e)) | Stmt::Print(e) | Stmt::ExprStmt(e) =>
+                idx_of_sorted(e, &sorted_vars),
+            _ => false,
+        }
+    };
     for (i, s) in stmts.iter().enumerate() {
         if returned { out.push("unreachable code after return".into()); }
+        if !matches!(s, Stmt::Grow(_) | Stmt::FnDef(..))
+            && (stmt_has_extremum(s) || staged_extremum(s)) {
+            out.push("O(n log n) sort-to-extremum — `veldt rewrite` makes it O(n)".into());
+        }
         match s {
             Stmt::Grow(GrowItem::Fn(name, params, body, tests)) => {
                 if tests.is_empty() {
