@@ -2842,6 +2842,15 @@ fn main() {
                 .and_then(|p| args.get(p + 1)).cloned();
             let json_stream = args.iter().any(|a| a == "--json");
             let mut run_cycles = 0usize;
+            // --sim <game>: generational playthrough-fitness — every cycle the
+            // family's healthy variants play the game (sim --pin), the winner's
+            // fitness reflects the real outcome, and the next mutation breeds
+            // from the variant that actually plays best. --until-win stops
+            // when a variant genuinely wins.
+            let sim_game = args.iter().position(|a| a == "--sim")
+                .and_then(|p| args.get(p + 1)).cloned();
+            let until_win = args.iter().any(|a| a == "--until-win");
+            let mut sim_won = false;
             while run_cycles < cycles || watch {
                 let events = evolver.evolve_scoped(&mut veldt, 1,
                     fam_scope.map(|s| s.as_str()));
@@ -2883,62 +2892,56 @@ fn main() {
                         break;
                     }
                 }
-            }
-            // --sim <game> --until-win: keep evolving until a variant actually
-            // WINS the game — the real 'evolution wins a game' loop
-            let until_win = args.iter().any(|a| a == "--until-win");
-            let mut sim_won = false;
-            // --sim <game>: generational playthrough-fitness — every cycle,
-            // the family's healthy variants play the game (sim --pin) and
-            // the winner's fitness reflects the real outcome, so the next
-            // mutation is bred from the variant that actually plays best.
-            if let Some(game) = &sim_game {
-                let fam = fam_scope.map(|s| s.to_string())
-                    .unwrap_or_else(|| "hero_move".into());
-                if let Some(vs) = veldt.functions.get(&fam) {
-                    eprintln!("[SIM] scoring {} {} variants by playthrough of {}",
-                              vs.len(), fam, game);
-                    let mut scored: Vec<(u32, f64, bool)> = Vec::new();
-                    for v in vs {
-                        if !matches!(v.health, veldt::Health::Healthy) { continue; }
-                        let pin = format!("{}={}", fam, v.id);
-                        let path = format!("examples/{}.veldt", game);
-                        let out = run_program_capture_pin(&path, Some(&pin));
-                        let won = out.contains("escaped") || out.contains("cleared")
-                            || (out.contains("won=true") && !out.contains("won=false"));
-                        let score: f64 = out.lines().rev()
-                            .find_map(|l| l.split("score ").nth(1)
-                                .or_else(|| l.split("score=").nth(1)))
-                            .and_then(|s| s.trim_end_matches(']').split(' ').next()
-                                .and_then(|x| x.parse().ok()))
-                            .unwrap_or(0.0);
-                        scored.push((v.id, score, won));
-                        eprintln!("[SIM] {}#{} → {} (won: {})", fam, v.id, score, won);
-                    }
-                    if let Some((id, score, won)) = scored.iter()
-                        .max_by(|a, b| (a.2 as u8).cmp(&(b.2 as u8)).then(
-                            a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)))
-                    {
-                        eprintln!("[SIM] best playthrough: {}#{} — score {} won {}",
-                                  fam, id, score, won);
-                        if *won { sim_won = true; }
-                        if let Some(vs) = veldt.functions.get_mut(&fam) {
-                            if let Some(e) = vs.iter_mut().find(|e| e.id == *id) {
-                                let sim_fit = *score + if *won { 1000.0 } else { 0.0 };
-                                e.fitness = e.fitness.max(sim_fit);
-                                eprintln!("[SIM] {}#{} promoted — fitness {:.2} (playthrough)",
-                                          fam, id, e.fitness);
+                // --sim <game>: the playthrough-fitness pass — every healthy
+                // variant of the scoped family plays the game (sim --pin) and
+                // is scored by the real outcome (won? score?), not the proxy.
+                if let Some(game) = &sim_game {
+                    let fam = fam_scope.map(|s| s.to_string())
+                        .unwrap_or_else(|| "hero_move".into());
+                    if let Some(vs) = veldt.functions.get(&fam) {
+                        eprintln!("[SIM] scoring {} {} variants by playthrough of {}",
+                                  vs.len(), fam, game);
+                        let mut scored: Vec<(u32, f64, bool)> = Vec::new();
+                        for v in vs {
+                            if !matches!(v.health, veldt::Health::Healthy) { continue; }
+                            let pin = format!("{}={}", fam, v.id);
+                            let path = format!("examples/{}.veldt", game);
+                            let out = run_program_capture_pin(&path, Some(&pin));
+                            let won = out.contains("escaped") || out.contains("cleared")
+                                || (out.contains("won=true") && !out.contains("won=false"));
+                            let score: f64 = out.lines().rev()
+                                .find_map(|l| l.split("score ").nth(1)
+                                    .or_else(|| l.split("score=").nth(1)))
+                                .and_then(|s| s.trim_end_matches(']').split(' ').next()
+                                    .and_then(|x| x.parse().ok()))
+                                .unwrap_or(0.0);
+                            scored.push((v.id, score, won));
+                            eprintln!("[SIM] {}#{} → {} (won: {})", fam, v.id, score, won);
+                        }
+                        if let Some((id, score, won)) = scored.iter()
+                            .max_by(|a, b| (a.2 as u8).cmp(&(b.2 as u8)).then(
+                                a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)))
+                        {
+                            eprintln!("[SIM] best playthrough: {}#{} — score {} won {}",
+                                      fam, id, score, won);
+                            if *won { sim_won = true; }
+                            if let Some(vs) = veldt.functions.get_mut(&fam) {
+                                if let Some(e) = vs.iter_mut().find(|e| e.id == *id) {
+                                    let sim_fit = *score + if *won { 1000.0 } else { 0.0 };
+                                    e.fitness = e.fitness.max(sim_fit);
+                                    eprintln!("[SIM] {}#{} promoted — fitness {:.2} (playthrough)",
+                                              fam, id, e.fitness);
+                                }
                             }
                         }
                     }
                 }
-            }
-            // a variant actually WON the game — stop evolving, that's the goal
-            if until_win && sim_won {
-                eprintln!("[SIM] a variant won the game — {} is a genuine winner. Stopping.",
-                          fam_scope.map(|s| s.as_str()).unwrap_or("the policy"));
-                veldt.save().unwrap_or_else(|e| eprintln!("Save error: {}", e));
-                return;
+                // --until-win: a variant actually won the game — the real goal
+                if until_win && sim_won {
+                    eprintln!("[SIM] a variant won the game — {} is a genuine winner. Stopping.",
+                              fam_scope.map(|s| s.as_str()).unwrap_or("the policy"));
+                    break;
+                }
             }
             if dry {
                 eprintln!("[EVOLVE] dry run complete — garden unchanged");
