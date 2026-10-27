@@ -2646,13 +2646,16 @@ fn main() {
                 // defect-class counts, same wrap as check --garden
                 let (mut lint_w, mut lint_d) = (0usize, 0usize);
                 for (name, vs) in &veldt.functions {
+                    let has_probes = veldt.probes.get(name)
+                        .map(|p| !p.is_empty()).unwrap_or(false);
                     for e in vs {
                         let wrapped = ast::Stmt::Grow(ast::GrowItem::Fn(
                             name.clone(), e.params.clone(),
                             e.body.clone(), e.tests.clone()));
                         for w in lint(&[wrapped]) {
                             if w.contains("defined but never called")
-                                || w.contains("no top-level statements") { continue; }
+                                || w.contains("no top-level statements")
+                                || (has_probes && w.contains("has no test clause")) { continue; }
                             lint_w += 1;
                             if crate::evolve::is_realbug_warning(&w) { lint_d += 1; }
                         }
@@ -2767,6 +2770,8 @@ fn main() {
                 let mut kinds: std::collections::HashMap<String, usize> =
                     std::collections::HashMap::new();
                 for (name, entries) in &veldt.functions {
+                    let has_probes = veldt.probes.get(name)
+                        .map(|p| !p.is_empty()).unwrap_or(false);
                     let mut fam_warns = 0usize;
                     for e in entries {
                         let wrapped = ast::Stmt::Grow(ast::GrowItem::Fn(
@@ -2774,7 +2779,8 @@ fn main() {
                             e.body.clone(), e.tests.clone()));
                         let warns: Vec<String> = lint(&[wrapped]).into_iter()
                             .filter(|w| !w.contains("defined but never called")
-                                && !w.contains("no top-level statements"))
+                                && !w.contains("no top-level statements")
+                                && !(has_probes && w.contains("has no test clause")))
                             .collect();
                         if !warns.is_empty() { flagged += 1; }
                         fam_warns += warns.len();
