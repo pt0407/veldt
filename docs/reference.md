@@ -16,7 +16,7 @@ Methods live on values: `xs.push(3)`, `s.split(",")`, `d.put(k, v)`.
 | `exit` | `exit(code)` | clean process exit |
 | `exec` | `exec(cmd)` | run shell command, returns output |
 | `sleep` | `sleep(ms)` | block |
-| `cwd` | `cwd()` | current directory |
+| `cwd` `home` | `cwd()` / `home()` | current / home directory |
 
 ## Types & conversion
 
@@ -63,7 +63,7 @@ difference to_list`.
 
 | `read_file` `write_file` | whole file |
 | `read_lines` `write_lines` | line lists |
-| `exists` `file_size` `ls` `mkdir` `rm` `cp` `mv` | fs ops |
+| `exists` `file_size` `ls` `mkdir` `rm` `cp` `mv` `read_lines` `write_lines` | fs ops |
 
 ## JSON
 
@@ -194,6 +194,62 @@ repairs to the whole garden.
 `veldt lsp` publishes lint warnings as editor diagnostics (severity 2)
 anchored to the enclosing fn — the same checks `check --strict` runs,
 live in the editor.
+
+## Game, procgen & simulation library
+
+Canvas (dict-backed 2D raster — `canvas_*` functions take/return dicts):
+
+| `canvas_new(w, h)` | new canvas dict |
+| `canvas_set(c, x, y, ch)` / `canvas_get(c, x, y)` | pixel write/read |
+| `canvas_line(c, x1, y1, x2, y2, ch)` | Bresenham line |
+| `canvas_rect(c, x, y, w, h, ch[, fill])` | rectangle |
+| `canvas_circle(c, cx, cy, r, ch)` / `canvas_ellipse(c, cx, cy, rx, ry, ch)` | outlines |
+| `canvas_triangle(c, x1,y1, x2,y2, x3,y3, ch)` | three edges |
+| `canvas_fill(c, x, y, w, h, ch)` | filled rect |
+| `canvas_clear(c[, ch])` | wipe |
+| `canvas_render(c)` / `canvas_print(c)` | to string / stdout |
+| `sprite(c, x, y, str)` | draw text |
+
+Grids & pathfinding:
+
+| `grid_new(w, h)` / `grid_get(g, x, y)` / `grid_set(g, x, y, v)` | grid dict |
+| `grid_neighbors(g, x, y[, diag])` / `neighbors(c, x, y[, diag])` | adjacency |
+| `astar(c, sx, sy, tx, ty, wall_ch[, diag])` | shortest path list |
+| `astar_cost(c, sx, sy, tx, ty, cost_dict)` | weighted A* |
+| `bfs(c, sx, sy, tx, ty, wall_ch)` | breadth-first path |
+| `flood_fill(c, x, y, ch)` | region fill |
+| `fov(c, x, y, radius, wall_ch)` | field of view set |
+| `los(...)` | line of sight |
+
+UI widgets (draw onto a canvas):
+
+| `ui_label(c, x, y, text)` `ui_box(c, x, y, w, h[, title])` | text/frame |
+| `ui_bar(c, x, y, w, cur, max[, ch])` `ui_progress(c, x, y, w, cur, max)` | meters |
+| `ui_menu(c, x, y, items, sel)` `ui_button(c, x, y, label, hot)` | menus |
+| `ui_log(c, x, y, w, h, msgs)` `ui_inventory(c, x, y, items, cols)` | panels |
+
+Randomness & noise (seeded, deterministic per interp):
+
+| `randf()` `rand_bool()` `rand_sign()` `rand_range(lo, hi)` | scalars |
+| `rand_gauss(mean, stddev)` `rand_permute(n)` `rand_shuffle(list)` `choice(list)` `weighted_choice(list)` `dice(n, sides)` `roll` | distributions |
+| `noise2(x, y)` `perlin(x, y)` `fbm(x, y[, octaves])` `poisson_disc(w, h, r)` | noise fields |
+| `voronoi(c, [[x,y,ch],...])` `delaunay([[x,y],...])` `wfc(sample, w, h)` `maze_gen(w, h, wall_ch)` | generators |
+
+Math & curves:
+
+| `lerp(a, b, t)` `clamp(v, lo, hi)` `dist(x1, y1, x2, y2)` `aabb(x1,y1,w1,h1, x2,y2,w2,h2)` `smoothstep(e0, e1, x)` | scalar helpers |
+| `bezier(t, x1, y1, x2, y2)` `line_points(x1, y1, x2, y2)` `point_in_poly(x, y, [[px,py],...])` `convex_hull([[x,y],...])` `bounce(t)` `ease_in(t)` `ease_out(t)` `ease_in_out(t)` `collide(a, b)` | curves/easing |
+
+Behavior trees, entities & game loop:
+
+| `bt_tick(tree, ctx)` — nodes `["seq", ...]` `["sel", ...]` `["act", fn]` `["inv", a]`; `succeed`/`fail` | behavior trees |
+| `entity(name, x, y, sprite)` `ent_move(e, dx, dy)` `ent_vel(e, vx, vy)` | entities |
+| `game_new(w, h)` `game_loop(max_ticks, init, fn)` `game_frame(state, entities, hud)` `game_running()` `camera_xy(state, x, y)` | loop |
+| `fsm_next(transitions, state, event)` `turn` | state machines |
+| `balance_test(fn, trials)` `balance_compare(f1, f2, trials)` `dist_stats(fn, trials)` `match_order(book, side, price, qty)` `book_new()` `book_add(book, side, price, qty)` `book_mid(book)` `book_spread(book)` | balancing/order book |
+| `svc_register(reg, name, fn)` `svc_call(reg, name, args)` `svc_health(reg)` `edge_deploy(cluster, node, fn)` `edge_call(cluster, node, args)` `edge_nodes(cluster)` `edge_health(cluster)` | service/edge sim |
+| `robot_new(x, y, dir[, range])` `robot_move(robot, canvas, wall_ch)` `robot_turn(robot, dir)` `robot_sensor(robot, canvas, wall_ch)` `robot_draw(robot, canvas)` | robots |
+| `render(template, dict)` `seq` `garden_reload()` | misc |
 
 ## Errors & control
 

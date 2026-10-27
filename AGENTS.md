@@ -49,6 +49,13 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] REFERENCE COMPLETE: docs/reference.md now covers
+  all 186 builtin names — added a "Game, procgen & simulation library"
+  section (canvas/grid/astar/bfs/fov, ui_*, rand*/noise/voronoi/delaunay/
+  wfc/maze_gen, lerp/clamp/bezier/easing, bt_/entity/game_loop/fsm,
+  book_*/svc_*/edge_*/robot_*, render) with real signatures extracted
+  from the arms' error strings. home()/read_lines/write_lines added
+  to fs rows. Missing-count check: 0.
 - [Devin/main-side] SMT STRINGS: `Type::Str` params are now encodable
   — strings live in an uninterpreted `VStr` sort; every string method
   (len/index_of/count -> Int, contains/starts_with/ends_with/is_empty
