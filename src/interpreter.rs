@@ -116,6 +116,8 @@ pub struct Interpreter {
     pub ent_defs: HashMap<String, im::HashMap<String, Value>>,
     /// unique-name counter for spawned/projectile entities (bullet1, bullet2…)
     pub entity_counter: u64,
+    /// cooldown state — cooldown(key, n) counts ticks per key (fire rates)
+    pub cooldowns: HashMap<String, u64>,
 }
 
 /// Shared state for a live game session: browser key events in,
@@ -254,6 +256,7 @@ impl Interpreter {
             game_io: None,
             ent_defs: HashMap::new(),
             entity_counter: 0,
+            cooldowns: HashMap::new(),
         }
     }
 
@@ -2981,6 +2984,20 @@ impl Interpreter {
                     _ => Vec::new(),
                 };
                 Ok(Some(Value::List(hits.into())))
+            }
+            "cooldown" | "every" => {
+                // cooldown(key, n) → true only every n-th call — a fire-rate
+                // or ability-cooldown primitive. Stateful per key; the game
+                // calls it each tick and it gates how often the action fires.
+                let (key, n) = match (args.get(0), args.get(1)) {
+                    (Some(Value::Str(k)), Some(n)) => (k.to_string(), Self::num_f(n)? as u64),
+                    _ => return Err("cooldown(key, n) expects str + int".into()),
+                };
+                let count = self.cooldowns.entry(key).or_insert(0u64);
+                *count += 1;
+                let ready = *count >= n.max(1);
+                if ready { *count = 0; }
+                Ok(Some(Value::Bool(ready)))
             }
             "bullet" | "projectile" => {
                 // bullet(x, y, vx, vy, sprite) → a moving projectile entity —
