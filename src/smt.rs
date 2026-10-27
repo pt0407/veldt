@@ -182,14 +182,14 @@ impl SymState {
         }
     }
 
-    fn final_value(self) -> Option<(SymVal, Vec<Bool>)> {
+    fn final_value(self) -> Option<(SymVal, Vec<Bool>, Bool)> {
         let val = match (self.ret, self.last) {
             (Some((_, rv)), None) => Some(rv),
             (None, Some(lv)) => Some(lv),
             (Some((rc, rv)), Some(lv)) => merge_symval(&rc, &rv, &lv).or(Some(rv)),
             (None, None) => None,
         }?;
-        Some((val, self.assumptions))
+        Some((val, self.assumptions, self.type_err))
     }
 }
 
@@ -254,7 +254,7 @@ fn body_to_smt(
     env: HashMap<String, SymVal>,
     veldt: &veldt::Veldt,
     fuel: u32,
-) -> Result<(SymVal, Vec<Bool>), String> {
+) -> Result<(SymVal, Vec<Bool>, Bool), String> {
     let mut state = SymState::new(env);
     if exec_stmts(stmts, &mut state, veldt, fuel).is_none() {
         return Err(state.reason());
@@ -402,6 +402,38 @@ fn exec_one(
                                     rebound = true;
                                 }
                             }
+                            // dict `put`/`set` — store(k, wrap(v)),
+                            // rebind in env like append
+                            ("put", 2) | ("set", 2) => {
+                                if let Some(SymVal::Dict(arr)) =
+                                    state.env.get(n).cloned()
+                                {
+                                    let k = expr_to_smt(&margs[0], state, veldt, fuel)?
+                                        .into_scalar().or_else(|| { state.note("dict key non-scalar"); None })?;
+                                    let v = expr_to_smt(&margs[1], state, veldt, fuel)?
+                                        .into_scalar().or_else(|| { state.note("dict value non-scalar"); None })?;
+                                    let va = vany();
+                                    let Some(vw) = va.wrap(&v) else {
+                                        state.note("dict put of unwrappable value");
+                                        return None;
+                                    };
+                                    state.env.insert(n.clone(),
+                                        SymVal::Dict(arr.store(&k, &vw)));
+                                    rebound = true;
+                                }
+                            }
+                            ("remove", 1) => {
+                                if let Some(SymVal::Dict(arr)) =
+                                    state.env.get(n).cloned()
+                                {
+                                    let k = expr_to_smt(&margs[0], state, veldt, fuel)?
+                                        .into_scalar().or_else(|| { state.note("dict key non-scalar"); None })?;
+                                    let va = vany();
+                                    state.env.insert(n.clone(),
+                                        SymVal::Dict(arr.store(&k, &va.null())));
+                                    rebound = true;
+                                }
+                            }
                             _ => {}
                         }
                         if rebound { return Some(()); }
@@ -410,9 +442,10 @@ fn exec_one(
                 state.last = Some(expr_to_smt(e, state, veldt, fuel)?);
             }
             Stmt::If(cond, then_stmts, else_stmts) => {
-                let c = expr_to_smt(cond, state, veldt, fuel)?
-                    .into_scalar().or_else(|| { state.note("aggregate where scalar expected"); None })?
-                    .as_bool().or_else(|| { state.note("expected bool"); None })?;
+                let cd = expr_to_smt(cond, state, veldt, fuel)?
+                    .into_scalar().or_else(|| { state.note("aggregate where scalar expected"); None })?;
+                let c = cond_bool(&cd, state)
+                    .or_else(|| { state.note("expected bool"); None })?;
                 let mut then_st = state.clone();
                 let mut else_st = state.clone();
                 run_sub!(then_st, then_stmts);
@@ -470,11 +503,32 @@ fn exec_one(
                     *state = match merge_states(&go, body_st, state.clone()) { Some(x) => x, None => { state.note("loop merge sort-mismatch"); return None; } };
                 }
             }
+            Stmt::IndexAssign(obj, idx, val) => {
+                // dict[k] = v -> arr.store(k, wrap(v)) rebind
+                if let Expr::Var(n) = obj {
+                    if let Some(SymVal::Dict(arr)) = state.env.get(n).cloned() {
+                        let k = expr_to_smt(idx, state, veldt, fuel)?
+                            .into_scalar().or_else(|| { state.note("dict key non-scalar"); None })?;
+                        let v = expr_to_smt(val, state, veldt, fuel)?
+                            .into_scalar().or_else(|| { state.note("dict value non-scalar"); None })?;
+                        let va = vany();
+                        let Some(vw) = va.wrap(&v) else {
+                            state.note("dict assign of unwrappable value");
+                            return None;
+                        };
+                        state.env.insert(n.clone(),
+                            SymVal::Dict(arr.store(&k, &vw)));
+                        return Some(());
+                    }
+                }
+                state.note("stmt indexassign");
+                return None;
+            }
             Stmt::While(cond, body) => {
                 for _ in 0..UNROLL_BOUND {
                     let sv = expr_to_smt(cond, state, veldt, fuel)?
                         .into_scalar().or_else(|| { state.note("aggregate where scalar expected"); None })?;
-                    let c = sv.as_bool().or_else(|| { state.note(format!("expected bool (sort {:?})", sv.get_sort())); None })?;
+                    let c = cond_bool(&sv, state).or_else(|| { state.note(format!("expected bool (sort {:?})", sv.get_sort())); None })?;
                     let go = (state.active() & &c).simplify();
                     if go.as_bool() == Some(false) {
                         break;
@@ -483,9 +537,10 @@ fn exec_one(
                     run_sub!(body_st, body);
                     *state = match merge_states(&go, body_st, state.clone()) { Some(x) => x, None => { state.note("loop merge sort-mismatch"); return None; } };
                 }
-                let c_after = expr_to_smt(cond, state, veldt, fuel)?
-                    .into_scalar().or_else(|| { state.note("aggregate where scalar expected"); None })?
-                    .as_bool().or_else(|| { state.note("expected bool"); None })?;
+                let c_after_d = expr_to_smt(cond, state, veldt, fuel)?
+                    .into_scalar().or_else(|| { state.note("aggregate where scalar expected"); None })?;
+                let c_after = cond_bool(&c_after_d, state)
+                    .or_else(|| { state.note("expected bool"); None })?;
                 let exited = (state.active() & &c_after).not();
                 state.assumptions.push(exited);
             }
@@ -665,6 +720,67 @@ fn expr_to_smt_raw(
             match (recv, method.as_str(), args.len()) {
                 (SymVal::List(items), "len", 0) => {
                     Some(SymVal::Scalar(Int::from_i64(items.len() as i64).into()))
+                }
+                // ---- dict ops (Array(VStr, VAny)) ----
+                (SymVal::Dict(arr), "get", 1) => {
+                    let k = expr_to_smt(&args[0], state, veldt, fuel)?
+                        .into_scalar().or_else(|| { state.note("dict key non-scalar"); None })?;
+                    if k.get_sort() != vstr_sort() { state.note("dict.get non-str key"); return None; }
+                    Some(SymVal::Scalar(arr.select(&k)))
+                }
+                (SymVal::Dict(arr), "get", 2) => {
+                    let k = expr_to_smt(&args[0], state, veldt, fuel)?
+                        .into_scalar().or_else(|| { state.note("dict key non-scalar"); None })?;
+                    if k.get_sort() != vstr_sort() { state.note("dict.get non-str key"); return None; }
+                    let dfl = expr_to_smt(&args[1], state, veldt, fuel)?
+                        .into_scalar().or_else(|| { state.note("dict default non-scalar"); None })?;
+                    let va = vany();
+                    let Some(dw) = va.wrap(&dfl) else {
+                        state.note("dict.get unwrappable default"); return None;
+                    };
+                    let sel = arr.select(&k);
+                    Some(SymVal::Scalar(va.is_null(&sel).ite(&dw, &sel)))
+                }
+                (SymVal::Dict(arr), "has", 1) => {
+                    let k = expr_to_smt(&args[0], state, veldt, fuel)?
+                        .into_scalar().or_else(|| { state.note("dict key non-scalar"); None })?;
+                    if k.get_sort() != vstr_sort() { state.note("dict.has non-str key"); return None; }
+                    let va = vany();
+                    Some(SymVal::Scalar(va.is_null(&arr.select(&k)).not().into()))
+                }
+                (SymVal::Dict(arr), "len", 0) => {
+                    // opaque count: uninterpreted fn over the array
+                    let f = FuncDecl::new("dict_len",
+                        &[&arr.get_sort()], &Sort::int());
+                    Some(SymVal::Scalar(f.apply(&[&Dynamic::from(arr.clone())])))
+                }
+                (SymVal::Dict(arr), "is_empty", 0) => {
+                    let f = FuncDecl::new("dict_len",
+                        &[&arr.get_sort()], &Sort::int());
+                    let n = f.apply(&[&Dynamic::from(arr.clone())]);
+                    Some(SymVal::Scalar(n.as_int().or_else(|| { state.note("dict_len non-int"); None })?.eq(Int::from_i64(0)).into()))
+                }
+                (SymVal::Dict(_), "keys", 0) | (SymVal::Dict(_), "values", 0) => {
+                    state.note("dict.keys/values — heterogeneous list unencodable");
+                    return None;
+                }
+                // expr-level put/set — dict().put(k,v).put(k2,v2) chains
+                (SymVal::Dict(arr), "put", 2) | (SymVal::Dict(arr), "set", 2) => {
+                    let k = expr_to_smt(&args[0], state, veldt, fuel)?
+                        .into_scalar().or_else(|| { state.note("dict key non-scalar"); None })?;
+                    let v = expr_to_smt(&args[1], state, veldt, fuel)?
+                        .into_scalar().or_else(|| { state.note("dict value non-scalar"); None })?;
+                    let va = vany();
+                    let Some(vw) = va.wrap(&v) else {
+                        state.note("dict put of unwrappable value"); return None;
+                    };
+                    Some(SymVal::Dict(arr.store(&k, &vw)))
+                }
+                (SymVal::Dict(arr), "remove", 1) => {
+                    let k = expr_to_smt(&args[0], state, veldt, fuel)?
+                        .into_scalar().or_else(|| { state.note("dict key non-scalar"); None })?;
+                    let va = vany();
+                    Some(SymVal::Dict(arr.store(&k, &va.null())))
                 }
                 (SymVal::List(items), "is_empty", 0) => {
                     Some(SymVal::Scalar(Bool::from_bool(items.is_empty()).into()))
@@ -966,6 +1082,13 @@ fn expr_to_smt_raw(
             // Builtin math functions
             if vid.is_none() && !veldt.functions.contains_key(name) {
                 match (name.as_str(), args.len()) {
+                    ("dict", 0) => {
+                        // empty dict: const Array(VStr, vnull)
+                        let va = vany();
+                        let base = va.null();
+                        return Some(SymVal::Dict(
+                            Array::const_array(&vstr_sort(), &base)));
+                    }
                     ("range", 1) => {
                         // concrete trip count only — symbolic lengths bail
                         let n = expr_to_smt(&args[0], state, veldt, fuel)?
@@ -1099,7 +1222,8 @@ fn expr_to_smt_raw(
                 return None;
             }
             state.steps = sub_st.steps;
-            let (val, mut a_sub) = sub_st.final_value()?;
+            let (val, mut a_sub, te_sub) = sub_st.final_value()?;
+                        state.type_err = state.type_err.clone() | te_sub;
             state.assumptions.append(&mut a_sub);
             Some(val)
         }
@@ -1233,6 +1357,18 @@ impl VAnySort {
 /// Sort predicate — is this Dynamic the session's `VAny` datatype?
 fn is_vany(d: &Dynamic, va: &VAnySort) -> bool {
     d.get_sort() == va.dt.sort
+}
+
+/// A scalar read as bool — VAny unwraps via type_err, natives cast.
+fn cond_bool(d: &Dynamic, state: &mut SymState) -> Option<Bool> {
+    if d.get_sort().kind() == z3::SortKind::Datatype {
+        let va = vany();
+        if is_vany(d, &va) {
+            return vany_unwrap(d, &Sort::bool(), &va, state)
+                .and_then(|x| x.as_bool());
+        }
+    }
+    d.as_bool()
 }
 
 /// Coerce `d` (possibly VAny) to `target` sort. On tag mismatch the
@@ -1370,7 +1506,7 @@ pub fn verify_exact_on_veldt(
             base_env.insert(p.name.clone(), sv);
         }
 
-        let (f_smt, f_assumptions) = body_to_smt(&f_body, base_env.clone(), veldt, 8)
+        let (f_smt, f_assumptions, f_te) = body_to_smt(&f_body, base_env.clone(), veldt, 8)
             .map_err(|r| format!("fittest: {}", r))?;
 
         let mut bail_notes: Vec<String> = Vec::new();
@@ -1392,7 +1528,7 @@ pub fn verify_exact_on_veldt(
                     v_env.insert(vp.name.clone(), sv.clone());
                 }
             }
-            let (v_smt, v_assumptions) = match body_to_smt(&v.body, v_env, veldt, 8) {
+            let (v_smt, v_assumptions, v_te) = match body_to_smt(&v.body, v_env, veldt, 8) {
                 Ok(x) => x,
                 // variant returns void while fittest returns a value —
                 // semantically divergent on every input (not a bail)
@@ -1418,7 +1554,9 @@ pub fn verify_exact_on_veldt(
             for a in &v_assumptions {
                 solver.assert(a);
             }
-            solver.assert(&eq.not());
+            // divergent = error-status differs, OR both clean & values differ
+            solver.assert(&(f_te.eq(&v_te).not()
+                | (f_te.not() & v_te.not() & eq.not())));
             match solver.check() {
                 SatResult::Unsat => { /* equivalent */ }
                 SatResult::Sat => {
@@ -1486,7 +1624,7 @@ pub fn verify_pair_exact(
             let sv = make_sym_param(&p.name, &p.typ, &mut flat_syms);
             base_env.insert(p.name.clone(), sv);
         }
-        let (a_smt, a_asm) = body_to_smt(&a_body, base_env.clone(), veldt, 8)
+        let (a_smt, a_asm, a_te) = body_to_smt(&a_body, base_env.clone(), veldt, 8)
             .map_err(|r| format!("{}#{}: {}", name, a_id, r))?;
         // bind b's OWN param names to the shared symbols by position —
         // a renamed param is the same function under rebind
@@ -1504,7 +1642,7 @@ pub fn verify_pair_exact(
                 return Ok(Some(vec!["<variant returns void>".to_string()]));
             }
         }
-        let (b_smt, b_asm) = b_res
+        let (b_smt, b_asm, b_te) = b_res
             .map_err(|r| format!("{}#{}: {}", name, b_id, r))?;
         let eq = a_smt.eq_val(&b_smt)
             .ok_or_else(|| format!("{}#{} vs #{} return sort mismatch", name, a_id, b_id))?;
@@ -1514,7 +1652,8 @@ pub fn verify_pair_exact(
         solver.set_params(&sp);
         for x in &a_asm { solver.assert(x); }
         for x in &b_asm { solver.assert(x); }
-        solver.assert(&eq.not());
+        solver.assert(&(a_te.eq(&b_te).not()
+            | (a_te.not() & b_te.not() & eq.not())));
         match solver.check() {
             SatResult::Unsat => Ok(None),
             SatResult::Sat => {
@@ -1554,9 +1693,9 @@ pub fn verify_bodies_exact(
             let sv = make_sym_param(n, t, &mut flat_syms);
             base_env.insert(n.clone(), sv);
         }
-        let (a_smt, a_asm) = body_to_smt(before, base_env.clone(), &empty, 8)
+        let (a_smt, a_asm, a_te) = body_to_smt(before, base_env.clone(), &empty, 8)
             .map_err(|r| format!("before: {}", r))?;
-        let (b_smt, b_asm) = body_to_smt(after, base_env, &empty, 8)
+        let (b_smt, b_asm, b_te) = body_to_smt(after, base_env, &empty, 8)
             .map_err(|r| format!("after: {}", r))?;
         let eq = a_smt.eq_val(&b_smt)
             .ok_or_else(|| "return sort mismatch".to_string())?;
@@ -1566,7 +1705,8 @@ pub fn verify_bodies_exact(
         solver.set_params(&sp);
         for x in &a_asm { solver.assert(x); }
         for x in &b_asm { solver.assert(x); }
-        solver.assert(&eq.not());
+        solver.assert(&(a_te.eq(&b_te).not()
+            | (a_te.not() & b_te.not() & eq.not())));
         match solver.check() {
             SatResult::Unsat => Ok(None),
             SatResult::Sat => {
@@ -1623,7 +1763,7 @@ pub fn verify_variant_exact(
             let sv = make_sym_param(&p.name, &p.typ, &mut flat_syms);
             base_env.insert(p.name.clone(), sv);
         }
-        let (f_smt, f_assumptions) = body_to_smt(&f_body, base_env.clone(), veldt, 8)
+        let (f_smt, f_assumptions, f_te) = body_to_smt(&f_body, base_env.clone(), veldt, 8)
             .map_err(|r| format!("fittest: {}", r))?;
         // bind the variant's OWN param names to the shared symbols by
         // position — a renamed param is the same function under rebind
@@ -1644,7 +1784,7 @@ pub fn verify_variant_exact(
                 return Ok(Some(vec!["<variant returns void>".to_string()]));
             }
         }
-        let (v_smt, v_assumptions) = v_res
+        let (v_smt, v_assumptions, v_te) = v_res
             .map_err(|r| format!("{}#{}: {}", name, vid, r))?;
         let eq = f_smt
             .eq_val(&v_smt)
@@ -1659,7 +1799,8 @@ pub fn verify_variant_exact(
         for a in &v_assumptions {
             solver.assert(a);
         }
-        solver.assert(&eq.not());
+        solver.assert(&(f_te.eq(&v_te).not()
+            | (f_te.not() & v_te.not() & eq.not())));
         match solver.check() {
             SatResult::Unsat => Ok(None),
             SatResult::Sat => {
