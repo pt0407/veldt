@@ -203,7 +203,9 @@ fn vm_all_examples_run() {
     for p in paths {
         // skip examples that need stdin/args/serve-loop
         let name = p.file_name().unwrap().to_str().unwrap();
-        if matches!(name, "web_server.veldt") { continue; }
+        if matches!(name,
+            "web_server.veldt" | "climb.veldt" | "playable.veldt" | "depths.veldt")
+        { continue; }
         if hello.as_ref().map(|h| *p == *h).unwrap_or(false) { continue; }
         let out = std::process::Command::new(veldt)
             .args(["run", p.to_str().unwrap(), "--vm",
