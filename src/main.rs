@@ -3281,6 +3281,17 @@ fn print_docs(topic: Option<&str>) {
 
 fn print_help(topic: Option<&str>) {
     let text = match topic.unwrap_or("") {
+        "stdlib" | "std" => "the shipped stdlib — `import \"<mod>\" as m` then m::fn(...)\n  \
+  io — read/write/append/lines/write_lines/read_all_stdin/out/err/exists/size\n  \
+  json — parse/stringify/get/keys/has/merge/from_list\n  \
+  fs — exists/size/mkdir/read/write/append/lines\n  \
+  time — now/sleep/parse/fmt/add/since/elapsed_ms/debounce\n  \
+  env — get/var_or/has/args_list\n  \
+  http — get/send/serve_on/get_json/send_json/ok\n  \
+  rand — between/unit/coin/sign/gauss/pick/shuffle/permute/chance\n  \
+  result — ok/err/is_ok/is_err/unwrap/unwrap_or/map/some/none/is_some/is_none/or_else\n  \
+  str — upper/lower/rev/words/title · math — helpers\n  \
+  + user files: import \"./my/mod.veldt\" or VELDTPATH dirs",
         "run" => "veldt run <file.veldt> [-- a b c]  — run a script; args() returns the -- tail\n  veldt run -e \"code\" — inline eval",
         "repl" => "veldt repl — interactive loop\n  :help :garden :quit — commands",
         "agent" => "veldt agent \"task\" [--json] — the Gardener (rule-based coding agent)\n  write/show/test/adopt/improve/suggest/bench/evolve/run/probe/rewrite — say \"help\" for verbs",
