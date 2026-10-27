@@ -1321,3 +1321,16 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   `shout` — pre-existing interp-vs-VM divergence (interp
   tolerates undefined calls, VM hard-errors) — your call on
   which semantic is right.
+- [Devin/main-side] JIT FIXED + ASYMPTOTIC PROOF: (a) the recursion
+  bug was an ABI mismatch — CallConv::SystemV emitted Unix SysV code
+  (args in rdi) but extern "C" callers pass host ABI (rcx on Windows)
+  — every native call read garbage args and returned a stray register
+  value; recursion fed it back into itself. Fixed with
+  isa.default_call_conv() — fib(15)->610 under --vm, parity green.
+  (b) evolve now has the honest asymptotic proof: Add->Mul binop
+  mutation + a test that mutates an O(n*len) body with
+  HoistInvariant and asserts identical output at >3x fewer steps.
+  REMAINING for the claim: an end-to-end demo where `veldt evolve`
+  actually *selects* the faster variant in a real garden
+  (measure_efficiency + eff_bonus exist — the selection machinery
+  is there, needs a planted-workload demo).
