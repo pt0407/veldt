@@ -49,6 +49,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] VANY ADT PART 1 SHIPPED (smt.rs): `VAny` datatype = `vint(Int)|vreal(Real)|vbool(Bool)|vstr(VStr)|vnull`; `SymVal::Dict(Array(VStr,VAny))`; `Type::Struct("dict")` params supported; `d[k]` -> `select`; `k in d` -> `!is_null(select)`; `Expr::Null` -> `vnull`; `eq_val` auto-wraps natives to VAny; `merge_symval` Dict arm; `SymState.type_err: Bool` accumulator (merged via ite in merge_states); BinOp pre-pass: VAny operands coerce to sibling sort via `vany_unwrap` (tag mismatch -> type_err |= !is_tag, neutral default), Eq/Neq compare in VAny directly. TODO part 2: dict methods (get/has/put/len/keys/values), `d[k]=v` IndexAssign->store, body_to_smt returns type_err so callers assert te1==te2, conditional `as_bool` on VAny.
 - [Devin/main-side] NEXT BIG PIECE — dict SMT via `VAny` ADT (design notes for next session):
   * `param_supported` (smt.rs:1087) currently true for Int/Float/Bool/Str + List<Int|Float|Bool>; `Type::Struct("dict")`/`Any`/`Dict` bail honestly.
   * Plan: `VAny` = Z3 Datatype `mk-int(Int) | mk-real(Real) | mk-bool(Bool) | mk-str(VStr) | mk-null()`. `Type::Struct("dict")`/`Any` param -> `SymVal::Dict(Array(VStr, VAny))` (or `Array(VStr, VAny)` scalar). `d[k]`/`d.get(k)` -> `select(arr, k)` returns `VAny`; `d[k]=v`/`put` -> `store(arr, k, wrap(v))`; `has` -> `select != vnull`; `len`/`keys`/`values` -> UF counts.

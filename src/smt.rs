@@ -16,7 +16,8 @@
 use crate::ast::{BinOp, Expr, Stmt, Type, UnaryOp};
 use crate::veldt;
 use std::collections::HashMap;
-use z3::ast::{Ast, Bool, Dynamic, Int, Real};
+use z3::ast::{Array, Ast, Bool, Dynamic, Int, Real};
+use z3::{DatatypeAccessor, DatatypeBuilder, DatatypeSort};
 use z3::{Config, FuncDecl, Params, SatResult, Solver, Sort};
 
 const UNROLL_BOUND: usize = 6;
@@ -27,6 +28,8 @@ const MAX_SYM_STEPS: u32 = 64;
 enum SymVal {
     Scalar(Dynamic),
     List(Vec<SymVal>),
+    /// A dict: `Array(VStr, VAny)` — string keys, tagged-union values.
+    Dict(Array),
 }
 
 impl SymVal {
@@ -48,6 +51,16 @@ impl SymVal {
         match (self, other) {
             (SymVal::Scalar(a), SymVal::Scalar(b)) => {
                 if a.get_sort() != b.get_sort() {
+                    // VAny vs native — wrap the native side, compare
+                    // tag+payload (a null-vs-int is provably unequal)
+                    let va = vany();
+                    if is_vany(a, &va) || is_vany(b, &va) {
+                        let (a2, b2) = (va.wrap(a), va.wrap(b));
+                        return match (a2, b2) {
+                            (Some(x), Some(y)) => Some(x.eq(&y)),
+                            _ => None,
+                        };
+                    }
                     return None;
                 }
                 Some(a.eq(b))
@@ -91,6 +104,10 @@ fn merge_symval(cond: &Bool, tv: &SymVal, fv: &SymVal) -> Option<SymVal> {
             }
             Some(SymVal::List(out))
         }
+        (SymVal::Dict(a), SymVal::Dict(b)) =>
+            merge_dynamic(cond, &a.clone().into(), &b.clone().into())
+                .and_then(|d| d.as_array())
+                .map(SymVal::Dict),
         _ => None,
     }
 }
@@ -110,6 +127,10 @@ struct SymState {
     assumptions: Vec<Bool>,
     /// Names the first construct we couldn't encode — diagnostics only.
     bail_reason: Option<String>,
+    /// Accumulated condition under which a VAny tag read mismatched
+    /// (a runtime type error). Compared across bodies so "errored"
+    /// and "returned" are provably different.
+    type_err: Bool,
 }
 
 impl SymState {
@@ -124,6 +145,7 @@ impl SymState {
 
     fn new(env: HashMap<String, SymVal>) -> Self {
         Self {
+            type_err: Bool::from_bool(false),
             env,
             ret: None,
             err: None,
@@ -214,6 +236,8 @@ fn merge_states(cond: &Bool, mut t: SymState, mut f: SymState) -> Option<SymStat
     };
     t.assumptions.append(&mut f.assumptions);
     Some(SymState {
+        type_err: merge_dynamic(cond, &t.type_err.into(), &f.type_err.into())
+            .and_then(|d| d.as_bool())?,
         env,
         ret,
         err,
@@ -530,6 +554,7 @@ fn expr_to_smt_raw(
 ) -> Option<SymVal> {
     match e {
         Expr::Int(n) => Some(SymVal::Scalar(Int::from_i64(*n).into())),
+        Expr::Null => Some(SymVal::Scalar(vany().null())),
         Expr::Float(f) => Some(SymVal::Scalar(float_to_real(*f).or_else(|| { state.note("non-finite float"); None })?.into())),
         Expr::Bool(b) => Some(SymVal::Scalar(Bool::from_bool(*b).into())),
         Expr::Str(v) => Some(SymVal::Scalar(vstr_const(&format!("lit_{}", v)))),
@@ -597,7 +622,19 @@ fn expr_to_smt_raw(
             Some(SymVal::List(out))
         }
         Expr::Index(obj, idx) => {
-            let SymVal::List(items) = expr_to_smt(obj, state, veldt, fuel)? else {
+            let o_sv = expr_to_smt(obj, state, veldt, fuel)?;
+            // `d[k]` on a dict -> select(arr, vstr(k)) -> a VAny scalar
+            if let SymVal::Dict(arr) = &o_sv {
+                let k = expr_to_smt(idx, state, veldt, fuel)?
+                    .into_scalar().or_else(|| { state.note("aggregate where scalar expected"); None })?;
+                if k.get_sort() != vstr_sort() {
+                    state.note("dict index with non-str key");
+                    return None;
+                }
+                return Some(SymVal::Scalar(arr.select(&k)));
+            }
+            let SymVal::List(items) = o_sv else {
+                state.note("index over non-list/dict");
                 return None;
             };
             if items.is_empty() {
@@ -794,6 +831,16 @@ fn expr_to_smt_raw(
                             return None;
                         }
                     }
+                    // `k in dict` — key membership: select != vnull
+                    SymVal::Dict(arr) => {
+                        let needle = a_sv.into_scalar().or_else(|| { state.note("aggregate where scalar expected"); None })?;
+                        if needle.get_sort() != vstr_sort() {
+                            state.note("dict `in` with non-str key");
+                            return None;
+                        }
+                        let va = vany();
+                        va.is_null(&arr.select(&needle)).not()
+                    }
                 };
                 return Some(SymVal::Scalar(if neg { found.not().into() } else { found.into() }));
             }
@@ -801,6 +848,43 @@ fn expr_to_smt_raw(
             let b_sv = expr_to_smt(r, state, veldt, fuel)?;
             let (a, b) = (a_sv.into_scalar().or_else(|| { state.note("aggregate where scalar expected"); None })?, b_sv.into_scalar().or_else(|| { state.note("aggregate where scalar expected"); None })?);
             use BinOp::*;
+            // VAny operand — a dict-read value. `==`/`!=` compare in
+            // the VAny sort directly (tag+payload); other ops coerce the
+            // VAny to the sibling's sort and record tag-mismatch in
+            // type_err so error-vs-value provably differs.
+            let va = vany();
+            if is_vany(&a, &va) || is_vany(&b, &va) {
+                if matches!(op, Eq | Neq) {
+                    let (x, y) = match (va.wrap(&a), va.wrap(&b)) {
+                        (Some(x), Some(y)) => (x, y),
+                        _ => { state.note("vany eq of unwrappable sort"); return None; }
+                    };
+                    let eq = x.eq(&y);
+                    return Some(SymVal::Scalar(
+                        if matches!(op, Eq) { eq.into() } else { eq.not().into() }));
+                }
+                let tgt = if !is_vany(&b, &va) { b.get_sort() }
+                          else if !is_vany(&a, &va) { a.get_sort() }
+                          else if matches!(op, And | Or) { Sort::bool() }
+                          else { Sort::int() };
+                let a2 = vany_unwrap(&a, &tgt, &va, state)
+                    .or_else(|| { state.note("vany unwrap lhs"); None })?;
+                let b2 = vany_unwrap(&b, &tgt, &va, state)
+                    .or_else(|| { state.note("vany unwrap rhs"); None })?;
+                // re-enter expr_to_smt on fresh Vars bound to the
+                // unwrapped scalars — the plain paths handle them
+                let mut st2 = state.clone();
+                st2.env.insert("__vany_a".into(), SymVal::Scalar(a2));
+                st2.env.insert("__vany_b".into(), SymVal::Scalar(b2));
+                let r = expr_to_smt(
+                    &Expr::BinOp(Box::new(Expr::Var("__vany_a".into())),
+                                 op.clone(),
+                                 Box::new(Expr::Var("__vany_b".into()))),
+                    &mut st2, veldt, fuel);
+                state.type_err = state.type_err.clone() | st2.type_err;
+                state.bail_reason = state.bail_reason.take().or(st2.bail_reason);
+                return r;
+            }
             if let (Some(ai), Some(bi)) = (a.as_int(), b.as_int()) {
                 let d: Dynamic = match op {
                     Add => (ai + bi).into(),
@@ -1072,6 +1156,109 @@ fn calls_itself(stmts: &[Stmt], name: &str) -> bool {
     })
 }
 
+/// `VAny` — tagged-union ADT for heterogeneous dict values and null:
+/// `vint(Int) | vreal(Real) | vbool(Bool) | vstr(VStr) | vnull`.
+/// Sorts are context-scoped, so the sort is rebuilt per Z3 session.
+struct VAnySort {
+    dt: DatatypeSort,
+}
+
+fn vany() -> VAnySort {
+    let dt = DatatypeBuilder::new("VAny")
+        .variant("vint", vec![("x", DatatypeAccessor::sort(Sort::int()))])
+        .variant("vreal", vec![("x", DatatypeAccessor::sort(Sort::real()))])
+        .variant("vbool", vec![("x", DatatypeAccessor::sort(Sort::bool()))])
+        .variant("vstr", vec![("x", DatatypeAccessor::sort(vstr_sort()))])
+        .variant("vnull", vec![])
+        .finish();
+    VAnySort { dt }
+}
+
+impl VAnySort {
+    fn mk_int(&self, d: &Dynamic) -> Dynamic {
+        self.dt.variants[0].constructor.apply(&[d])
+    }
+    fn mk_real(&self, d: &Dynamic) -> Dynamic {
+        self.dt.variants[1].constructor.apply(&[d])
+    }
+    fn mk_bool(&self, d: &Dynamic) -> Dynamic {
+        self.dt.variants[2].constructor.apply(&[d])
+    }
+    fn mk_str(&self, d: &Dynamic) -> Dynamic {
+        self.dt.variants[3].constructor.apply(&[d])
+    }
+    fn null(&self) -> Dynamic {
+        self.dt.variants[4].constructor.apply(&[])
+    }
+    fn is_int(&self, d: &Dynamic) -> Bool {
+        self.dt.variants[0].tester.apply(&[d]).as_bool().unwrap()
+    }
+    fn is_real(&self, d: &Dynamic) -> Bool {
+        self.dt.variants[1].tester.apply(&[d]).as_bool().unwrap()
+    }
+    fn is_bool(&self, d: &Dynamic) -> Bool {
+        self.dt.variants[2].tester.apply(&[d]).as_bool().unwrap()
+    }
+    fn is_str(&self, d: &Dynamic) -> Bool {
+        self.dt.variants[3].tester.apply(&[d]).as_bool().unwrap()
+    }
+    fn is_null(&self, d: &Dynamic) -> Bool {
+        self.dt.variants[4].tester.apply(&[d]).as_bool().unwrap()
+    }
+    fn get_int(&self, d: &Dynamic) -> Dynamic {
+        self.dt.variants[0].accessors[0].apply(&[d])
+    }
+    fn get_real(&self, d: &Dynamic) -> Dynamic {
+        self.dt.variants[1].accessors[0].apply(&[d])
+    }
+    fn get_bool(&self, d: &Dynamic) -> Dynamic {
+        self.dt.variants[2].accessors[0].apply(&[d])
+    }
+    fn get_str(&self, d: &Dynamic) -> Dynamic {
+        self.dt.variants[3].accessors[0].apply(&[d])
+    }
+    /// Wrap a native-sorted scalar into a `VAny` — Int/Real/Bool/VStr
+    /// go through their constructor; a VAny passes through.
+    fn wrap(&self, d: &Dynamic) -> Option<Dynamic> {
+        let srt = d.get_sort();
+        if srt == self.dt.sort { return Some(d.clone()); }
+        if srt == Sort::int() { return Some(self.mk_int(d)); }
+        if srt == Sort::real() { return Some(self.mk_real(d)); }
+        if srt == Sort::bool() { return Some(self.mk_bool(d)); }
+        if srt == vstr_sort() { return Some(self.mk_str(d)); }
+        None
+    }
+}
+
+/// Sort predicate — is this Dynamic the session's `VAny` datatype?
+fn is_vany(d: &Dynamic, va: &VAnySort) -> bool {
+    d.get_sort() == va.dt.sort
+}
+
+/// Coerce `d` (possibly VAny) to `target` sort. On tag mismatch the
+/// body takes the neutral default AND `state.type_err` accumulates the
+/// mismatch condition — so "errored" and "returned" compare different.
+/// Non-VAny inputs pass through unchanged.
+fn vany_unwrap(d: &Dynamic, target: &Sort, va: &VAnySort,
+               state: &mut SymState) -> Option<Dynamic> {
+    if !is_vany(d, va) { return Some(d.clone()); }
+    let (is, get, default): (Bool, Dynamic, Dynamic) =
+        if *target == Sort::int() {
+            (va.is_int(d), va.get_int(d), Int::from_i64(0).into())
+        } else if *target == Sort::real() {
+            (va.is_real(d), va.get_real(d), Real::from_rational(0, 1).into())
+        } else if *target == Sort::bool() {
+            (va.is_bool(d), va.get_bool(d), Bool::from_bool(false).into())
+        } else if *target == vstr_sort() {
+            (va.is_str(d), va.get_str(d), vstr_const("vany_err"))
+        } else {
+            state.note("vany unwrap to unsupported sort");
+            return None;
+        };
+    state.type_err = state.type_err.clone() | state.active() & is.clone().not();
+    Some(is.ite(&get, &default))
+}
+
 fn vstr_sort() -> Sort {
     Sort::uninterpreted(z3::Symbol::String("VStr".into()))
 }
@@ -1088,6 +1275,7 @@ fn param_supported(t: &Type) -> bool {
     match t {
         Type::Int | Type::Float | Type::Bool | Type::Str => true,
         Type::List(inner) => matches!(**inner, Type::Int | Type::Float | Type::Bool),
+        Type::Struct(n) => n == "dict",
         _ => false,
     }
 }
@@ -1121,6 +1309,19 @@ fn make_sym_param(name: &str, t: &Type, flat_syms: &mut Vec<Dynamic>) -> SymVal 
                 items.push(make_sym_param(&elem_name, inner, flat_syms));
             }
             SymVal::List(items)
+        }
+        Type::Struct(n) if n == "dict" => {
+            // Array(VStr, VAny) — absent keys select to vnull
+            let va = vany();
+            let base = va.null();
+            let arr = Array::const_array(&vstr_sort(), &base);
+            let arr = Array::fresh_const(name, &vstr_sort(), &va.dt.sort)
+                .store(&vstr_const("__sentinel__"), &base)
+                .store(&vstr_const("__sentinel__"), &base); // keep fresh
+            let _ = arr;
+            let arr = Array::fresh_const(name, &vstr_sort(), &va.dt.sort);
+            flat_syms.push(arr.clone().into());
+            SymVal::Dict(arr)
         }
         _ => unreachable!(),
     }
