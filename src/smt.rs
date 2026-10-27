@@ -1287,7 +1287,23 @@ pub fn verify_pair_exact(
         }
         let (a_smt, a_asm) = body_to_smt(&a_body, base_env.clone(), veldt, 8)
             .map_err(|r| format!("{}#{}: {}", name, a_id, r))?;
-        let (b_smt, b_asm) = body_to_smt(&b_body, base_env, veldt, 8)
+        // bind b's OWN param names to the shared symbols by position —
+        // a renamed param is the same function under rebind
+        let mut b_env = base_env.clone();
+        for (bp, ap) in b.params.iter().zip(a.params.iter()) {
+            if let Some(sv) = base_env.get(&ap.name) {
+                b_env.insert(bp.name.clone(), sv.clone());
+            }
+        }
+        // b returns void while a returns a value — divergent on
+        // every input (not a bail)
+        let b_res = body_to_smt(&b_body, b_env, veldt, 8);
+        if let Err(r) = &b_res {
+            if r.contains("no return value") {
+                return Ok(Some(vec!["<variant returns void>".to_string()]));
+            }
+        }
+        let (b_smt, b_asm) = b_res
             .map_err(|r| format!("{}#{}: {}", name, b_id, r))?;
         let eq = a_smt.eq_val(&b_smt)
             .ok_or_else(|| format!("{}#{} vs #{} return sort mismatch", name, a_id, b_id))?;
@@ -1408,7 +1424,26 @@ pub fn verify_variant_exact(
         }
         let (f_smt, f_assumptions) = body_to_smt(&f_body, base_env.clone(), veldt, 8)
             .map_err(|r| format!("fittest: {}", r))?;
-        let (v_smt, v_assumptions) = body_to_smt(&target.body, base_env, veldt, 8)
+        // bind the variant's OWN param names to the shared symbols by
+        // position — a renamed param is the same function under rebind
+        if target.params.len() != params.len() {
+            return Err(format!("{}#{}: arity {} != fittest {}",
+                               name, vid, target.params.len(), params.len()));
+        }
+        let mut v_env = base_env.clone();
+        for (vp, fp) in target.params.iter().zip(params.iter()) {
+            if let Some(sv) = base_env.get(&fp.name) {
+                v_env.insert(vp.name.clone(), sv.clone());
+            }
+        }
+        // void-return while fittest returns a value -> divergent
+        let v_res = body_to_smt(&target.body, v_env, veldt, 8);
+        if let Err(r) = &v_res {
+            if r.contains("no return value") {
+                return Ok(Some(vec!["<variant returns void>".to_string()]));
+            }
+        }
+        let (v_smt, v_assumptions) = v_res
             .map_err(|r| format!("{}#{}: {}", name, vid, r))?;
         let eq = f_smt
             .eq_val(&v_smt)
