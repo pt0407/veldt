@@ -220,6 +220,29 @@ function paint(frame) {
     }
     ctx.textAlign = 'left';
   }
+  // transient effects — emit()/particle() events fade a flash at (x, y)
+  const fx = f.fx || [];
+  for (const e of fx) {
+    const ex = (e.x - (f.camera_x || 0)) * cell, ey = (e.y - (f.camera_y || 0)) * cell;
+    ctx.save();
+    ctx.globalAlpha = .8;
+    if (e.kind === 'coin' || e.kind === 'collect') {
+      ctx.strokeStyle = '#ffd98f'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(ex + cell/2, ey + cell/2, cell * .5, 0, Math.PI*2); ctx.stroke();
+      ctx.fillStyle = 'rgba(255,217,143,.4)';
+      ctx.beginPath(); ctx.arc(ex + cell/2, ey + cell/2, cell * .4, 0, Math.PI*2); ctx.fill();
+    } else if (e.kind === 'hit' || e.kind === 'death') {
+      ctx.fillStyle = 'rgba(224,90,84,.7)';
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2, r = cell * .5;
+        ctx.fillRect(ex + cell/2 + Math.cos(a) * r - 2, ey + cell/2 + Math.sin(a) * r - 2, 4, 4);
+      }
+    } else {
+      ctx.fillStyle = 'rgba(142,197,160,.6)';
+      ctx.fillRect(ex + 2, ey + 2, cell - 4, cell - 4);
+    }
+    ctx.restore();
+  }
   // sound events — a named tone per sfx() the program emitted this frame
   for (const s of (f.sfx || [])) playSfx(s);
 }

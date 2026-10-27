@@ -125,6 +125,9 @@ pub struct GameIo {
     pub frame: std::sync::Mutex<Option<String>>,
     /// pending sound events — sfx() pushes, game_frame drains into the scene
     pub sfx: std::sync::Mutex<Vec<String>>,
+    /// pending visual events — emit()/particle() push, game_frame drains into
+    /// the scene's `fx` so the browser can render transient effects
+    pub fx: std::sync::Mutex<Vec<serde_json::Value>>,
     /// session alive — game_running() polls this; /api/game/stop clears it
     pub running: std::sync::atomic::AtomicBool,
     /// headless render — `veldt play` sets this so game_frame paints the
@@ -141,6 +144,7 @@ impl GameIo {
             keys: std::sync::Mutex::new(Vec::new()),
             frame: std::sync::Mutex::new(None),
             sfx: std::sync::Mutex::new(Vec::new()),
+            fx: std::sync::Mutex::new(Vec::new()),
             running: std::sync::atomic::AtomicBool::new(true),
             cli_render: std::sync::atomic::AtomicBool::new(false),
             frames: std::sync::atomic::AtomicU64::new(0),
@@ -3117,6 +3121,21 @@ impl Interpreter {
                 }
                 Ok(Some(Value::Null))
             }
+            "emit" | "particle" => {
+                // emit(name, x, y) — a transient visual effect event queued
+                // into the frame's `fx` (coin sparkle, hit flash, death burst).
+                // The browser renders each; in a headless run it's a marker.
+                let (name, x, y) = match (args.get(0), args.get(1), args.get(2)) {
+                    (Some(Value::Str(n)), Some(x), Some(y)) =>
+                        (n.to_string(), Self::num_f(x)?, Self::num_f(y)?),
+                    _ => return Err("emit(name, x, y) expects str + 2 nums".into()),
+                };
+                if let Some(io) = &self.game_io {
+                    io.fx.lock().unwrap().push(
+                        serde_json::json!({"kind": name, "x": x, "y": y}));
+                }
+                Ok(Some(Value::Null))
+            }
             "beep" => {
                 // beep(freq, ms) → a terminal bell / tone for CLI games
                 let (freq, ms) = match (args.get(0), args.get(1)) {
@@ -3221,9 +3240,12 @@ impl Interpreter {
                     },
                     _ => serde_json::Value::Null,
                 };
-                // drain any queued sfx into this frame — the browser plays them
+                // drain queued sfx + fx into this frame — sounds & visuals
                 let sfx_events: Vec<String> = self.game_io.as_ref()
                     .map(|io| std::mem::take(&mut *io.sfx.lock().unwrap()))
+                    .unwrap_or_default();
+                let fx_events: Vec<serde_json::Value> = self.game_io.as_ref()
+                    .map(|io| std::mem::take(&mut *io.fx.lock().unwrap()))
                     .unwrap_or_default();
                 let scene = serde_json::json!({
                     "w": state.get("w").map(Self::json_num).unwrap_or(0.0),
@@ -3233,6 +3255,7 @@ impl Interpreter {
                     "entities": entities.iter().map(Self::entity_json).collect::<Vec<_>>(),
                     "map": map_rows,
                     "sfx": sfx_events,
+                    "fx": fx_events,
                     "hud": match hud { Value::Dict(hd) => hd.iter()
                         .map(|(k,v)| (k.clone(), Self::json_val(v)))
                         .collect::<serde_json::Map<_,_>>().into(),
