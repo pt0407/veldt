@@ -89,6 +89,6 @@ veldt adopt max_val#2 --exact  # promote the proven-faster variant
 
 `rewrite` recognizes `xs.sort().reverse()[0]` / `xs.sort()[0]` /
 `[-1]` / `[len-1]` (max/min scans), `total += k` accumulate loops
-(closed form), and hand-rolled linear search (`-> index_of`), plus
+(closed form), and hand-rolled linear search (`-> index_of`, dedup loop -> `unique`), plus
 `x.reverse().reverse() -> x` via simplification. Random `evolve`
 cycles reach for the same rewrite automatically.
