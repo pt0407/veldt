@@ -1613,3 +1613,13 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   sprite tilesheets are partial (chars still), WASM-in-browser,
   and the auto-policy can't WIN games (weak by design — the real
   evolution target; improve plat_move now plants a climbing strain).
+- [Devin/main-side] OVERNIGHT BUILD part 2 — engine depth + genres:
+  NEW BUILTINS: ent_def/spawn (entity-type DSL) · integrate (velocity
+  physics) · camera_follow (dead-zone scroll) · collide_any/collide_all
+  + in_radius + dist + move_toward (queries/AI) · bullet/projectile ·
+  cooldown/every (fire-rate) · scene_each (iterate entities) ·
+  emit/particle (visual fx) · key_pressed (edge input). 4 GENRE
+  TEMPLATES on the DSL: platformer + topdown + shooter + snake
+  ('make a X' / 'veldt game new --X'). veldt report — consolidated
+  garden readout. VM parity verified for the whole engine surface.
+  help game + reference.md updated. Suite: 82/82 + 50/50 green.
