@@ -435,6 +435,53 @@ fn expr_to_smt(
                     Some(SymVal::List(items.into_iter().rev().collect()))
                 }
                 (SymVal::List(items), "sort", 0) => Some(SymVal::List(sym_sort(items)?)),
+                (SymVal::List(items), "sum", 0) => {
+                    // exact: x0 + x1 + ... + xN
+                    let mut acc: Option<Dynamic> = None;
+                    for it in items {
+                        let d = it.into_scalar()?;
+                        acc = Some(match acc {
+                            None => d,
+                            Some(a) if a.as_int().is_some() && d.as_int().is_some() =>
+                                (a.as_int()? + d.as_int()?).into(),
+                            Some(a) => {
+                                let ar = as_real_coerced(&a)?;
+                                let br = as_real_coerced(&d)?;
+                                (ar + br).into()
+                            }
+                        });
+                    }
+                    Some(SymVal::Scalar(acc?))
+                }
+                (SymVal::List(items), "contains", 1) => {
+                    let needle = expr_to_smt(&args[0], state, veldt, fuel)?.into_scalar()?;
+                    let mut acc = Bool::from_bool(false);
+                    for it in items {
+                        let d = it.into_scalar()?;
+                        acc = acc | d.eq(&needle);
+                    }
+                    Some(SymVal::Scalar(acc.into()))
+                }
+                (SymVal::List(items), "first", 0) =>
+                    items.first().cloned(),
+                (SymVal::List(items), "last", 0) =>
+                    items.last().cloned(),
+                (SymVal::List(mut items), "push", 1) => {
+                    items.push(expr_to_smt(&args[0], state, veldt, fuel)?);
+                    Some(SymVal::List(items))
+                }
+                (SymVal::List(items), "index_of", 1) => {
+                    // ite chain: (x0==v ? 0 : (x1==v ? 1 : ... : -1))
+                    let needle = expr_to_smt(&args[0], state, veldt, fuel)?.into_scalar()?;
+                    let mut acc: Dynamic = Int::from_i64(-1).into();
+                    for (i, it) in items.iter().enumerate().rev() {
+                        let d = it.clone().into_scalar()?;
+                        acc = d.eq(&needle)
+                            .ite(&Int::from_i64(i as i64), &acc.as_int()?)
+                            .into();
+                    }
+                    Some(SymVal::Scalar(acc))
+                }
                 (SymVal::Scalar(sv), m, nargs) => {
                     // String methods as uninterpreted functions over VStr.
                     // (return sort, expected arg count)
