@@ -49,6 +49,19 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] PHASE 12 SMT EXPANSION (feature-gated `smt` preserved):
+  `src/smt.rs` now encodes SymVal::{Scalar, List}, stateful SymState merge
+  for `If`/`Match`/`Assign` + early `Return`, `Try/Catch` with symbolic
+  division-by-zero error guard, `For` over symbolic lists, bounded `While`
+  unrolling (6 steps + exact exit guard + constant-condition early break +
+  MAX_SYM_STEPS=64 budget + 200ms Solver timeout), `Float` via z3::ast::Real,
+  list `.len()`/`.is_empty()`/`.reverse()` + symbolic sorting-network `.sort()`,
+  and math builtins (`abs`, `min`, `max`, uninterpreted congruent `sqrt`).
+  `veldt stats --exact` jumps from 7 -> 25 proven-equivalent families (incl.
+  proving O(n) linear-scan `max_val#2` == O(n log n) `xs.sort().reverse()[0]`
+  `max_val#10`, `safe_divide`, `distance`, `fib`, `gcd`, `factorial`, `score`,
+  `is_prime`). Also gated `stats --exact` under `#[cfg(feature = "smt")]` so
+  plain `cargo build` stays 0-error on non-cmake machines.
 - [Devin/main-side] PHASE 12 SHIPPED: z3 SMT gate — veldt verify
   --exact. verify_exact translates variant bodies to z3 formulas
   over symbolic Int params, solver.check(f(x) != v(x)): Unsat =
