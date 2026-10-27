@@ -1,0 +1,115 @@
+# playable.veldt — a real-time 2D game (engine builtins)
+# WASD / arrows drive @ live; let go and the grown hero_move policy
+# takes over (auto-play). A hunter chases — grab coins, reach the exit.
+#   veldt studio → /play/playable   ·   agent "improve hero_move"
+
+# --- the breedable policy: pick a move when no keys are held ---
+# (px,py,tx,ty,hx,hy) -> [dx,dy] — chase the target, flee the hunter
+grow fn hero_move(px: int, py: int, tx: int, ty: int, hx: float, hy: float)
+        test hero_move(2, 7, 28, 12, 26.0, 7.0) == [1, 0] {
+    let dx = 0
+    let dy = 0
+    let dd = abs(px - hx) + abs(py - hy)
+    if dd < 4.0 {
+        if px > hx { dx = 1 } else { if px < hx { dx = -1 } }
+        if py > hy { dy = 1 } else { if py < hy { dy = -1 } }
+        return [dx, dy]
+    }
+    if tx > px { dx = 1 }
+    if tx < px { dx = -1 }
+    if ty > py and dx == 0 { dy = 1 }
+    if ty < py and dx == 0 { dy = -1 }
+    return [dx, dy]
+}
+
+# --- world ---
+let g = game_new(30, 15)
+let player = entity("player", 2, 7, "hero")
+let hunter = entity("hunter", 26, 7, "hunter")
+let exit = entity("exit", 28, 12, "exit")
+let gold = [entity("coin", 8, 4, "coin"), entity("coin", 15, 9, "coin"),
+            entity("coin", 22, 3, "coin"), entity("coin", 6, 12, "coin")]
+let hp = 100
+let score = 0
+let won = false
+
+# --- real-time loop — browser keys or the grown policy ---
+while game_running() and not won and hp > 0 {
+    let k = keys()
+    let dx = 0
+    let dy = 0
+    if k.contains("left") { dx = -1 }
+    if k.contains("right") { dx = 1 }
+    if k.contains("up") { dy = -1 }
+    if k.contains("down") { dy = 1 }
+    if dx == 0 and dy == 0 {
+        # nobody driving — the grown policy moves
+        let m = hero_move(player["x"], player["y"], exit["x"], exit["y"],
+                          hunter["x"], hunter["y"])
+        dx = m[0]
+        dy = m[1]
+    }
+    player = ent_move(player, dx, dy)
+
+    # clamp to the world
+    if player["x"] < 0 { player = ent_move(player, 1, 0) }
+    if player["x"] > g["w"] - 1 { player = ent_move(player, -1, 0) }
+    if player["y"] < 0 { player = ent_move(player, 0, 1) }
+    if player["y"] > g["h"] - 1 { player = ent_move(player, 0, -1) }
+    let px = player["x"]
+    let py = player["y"]
+
+    # hunter chases at half speed
+    let hx = hunter["x"]
+    let hy = hunter["y"]
+    let hdx = 0.0
+    let hdy = 0.0
+    if hx < px { hdx = 0.5 } else { if hx > px { hdx = -0.5 } }
+    if hy < py { hdy = 0.5 } else { if hy > py { hdy = -0.5 } }
+    hunter = ent_move(hunter, hdx, hdy)
+    if collide(player, hunter) { hp = hp - 3 }
+
+    # grab coins
+    let remaining = []
+    let gi = 0
+    while gi < gold.len() {
+        let c = gold[gi]
+        if collide(player, c) {
+            score = score + 100
+            hp = min(100, hp + 12)
+        } else {
+            remaining.append(c)
+        }
+        gi = gi + 1
+    }
+    gold = remaining
+
+    if collide(player, exit) { won = true }
+
+    let hud = dict()
+    hud["hp"] = hp
+    hud["score"] = score
+    hud["gold"] = gold.len()
+    let scene = [player, hunter, exit]
+    gi = 0
+    while gi < gold.len() {
+        scene.append(gold[gi])
+        gi = gi + 1
+    }
+    game_frame(g, scene, hud)
+    sleep(80)
+}
+
+let out = dict()
+out["hp"] = hp
+out["score"] = score
+out["won"] = won
+let scene2 = [player, hunter, exit]
+gi = 0
+while gi < gold.len() {
+    scene2.append(gold[gi])
+    gi = gi + 1
+}
+game_frame(g, scene2, out)
+if won { print("escaped — " + score + " gold") }
+else { if hp <= 0 { print("devoured — score " + score) } else { print("session over") } }

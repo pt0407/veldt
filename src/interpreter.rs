@@ -125,6 +125,12 @@ pub struct GameIo {
     pub sfx: std::sync::Mutex<Vec<String>>,
     /// session alive — game_running() polls this; /api/game/stop clears it
     pub running: std::sync::atomic::AtomicBool,
+    /// headless render — `veldt play` sets this so game_frame paints the
+    /// scene to the terminal instead of buffering it for a browser
+    pub cli_render: std::sync::atomic::AtomicBool,
+    /// headless frame counter — after a cap, the session ends so a
+    /// non-winnable game doesn't flood the terminal forever
+    pub frames: std::sync::atomic::AtomicU64,
 }
 
 impl GameIo {
@@ -134,7 +140,15 @@ impl GameIo {
             frame: std::sync::Mutex::new(None),
             sfx: std::sync::Mutex::new(Vec::new()),
             running: std::sync::atomic::AtomicBool::new(true),
+            cli_render: std::sync::atomic::AtomicBool::new(false),
+            frames: std::sync::atomic::AtomicU64::new(0),
         })
+    }
+    /// `veldt play` — headless session: the loop runs, frames render to stdout
+    pub fn headless() -> std::sync::Arc<Self> {
+        let g = Self::new();
+        g.cli_render.store(true, std::sync::atomic::Ordering::SeqCst);
+        g
     }
 }
 
@@ -3109,6 +3123,36 @@ impl Interpreter {
                 });
                 let line = scene.to_string();
                 match &self.game_io {
+                    Some(io) if io.cli_render.load(std::sync::atomic::Ordering::SeqCst) => {
+                        // headless `veldt play` — count the frame (game_running
+                        // caps at the bound so the auto-policy can't loop forever)
+                        io.frames.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        // render the scene as text: map rows + entity sprite overlay
+                        let mut text = String::from("\n");
+                        if let serde_json::Value::Array(rows) = &scene["map"] {
+                            let mut grid: Vec<Vec<char>> = rows.iter().map(|r|
+                                r.as_str().unwrap_or("").chars().collect()).collect();
+                            for e in scene["entities"].as_array().map(|a| a.as_slice()).unwrap_or(&[]) {
+                                let ex = e["x"].as_i64().unwrap_or(0) as usize;
+                                let ey = e["y"].as_i64().unwrap_or(0) as usize;
+                                let ch = e["sprite"].as_str().unwrap_or("?").chars().next().unwrap_or('?');
+                                if let Some(row) = grid.get_mut(ey) {
+                                    if ex < row.len() { row[ex] = ch; }
+                                }
+                            }
+                            for row in &grid {
+                                text.push_str(&row.iter().collect::<String>());
+                                text.push('\n');
+                            }
+                        }
+                        if let Some(hd) = scene["hud"].as_object() {
+                            text.push_str(&format!("[{}] ",
+                                hd.iter().map(|(k,v)| format!("{}={}", k, v)).collect::<Vec<_>>().join(" ")));
+                            text.push('\n');
+                        }
+                        print!("{}", text);
+                        Ok(Some(Value::Null))
+                    }
                     Some(io) => {
                         *io.frame.lock().unwrap() = Some(line);
                         Ok(Some(Value::Null))
@@ -3124,9 +3168,16 @@ impl Interpreter {
                 }
             }
             "game_running" => {
-                // game_running() → bool — the session is alive
+                // game_running() → bool — the session is alive. In headless
+                // `veldt play` mode, cap the frames so a game that can't win
+                // still ends (the auto-policy may loop forever otherwise).
                 let r = self.game_io.as_ref()
-                    .map(|io| io.running.load(std::sync::atomic::Ordering::Relaxed))
+                    .map(|io| {
+                        let alive = io.running.load(std::sync::atomic::Ordering::Relaxed);
+                        if io.cli_render.load(std::sync::atomic::Ordering::Relaxed) {
+                            alive && io.frames.load(std::sync::atomic::Ordering::Relaxed) < 400
+                        } else { alive }
+                    })
                     .unwrap_or(true);
                 Ok(Some(Value::Bool(r)))
             }

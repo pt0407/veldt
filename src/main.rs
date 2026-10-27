@@ -6497,6 +6497,10 @@ fn run_program(path: &str, trace: bool, evolve_after: bool) {
         interp.argv = all_args[pos+1..].to_vec();
     }
     veldt.load_into_interpreter(&mut interp);
+    // attach a GameIo so `veldt play <game>` actually runs the session —
+    // game_running() true, keys() empty (auto-policy drives), game_frame
+    // writes the scene buffer we can surface.
+    interp.game_io = Some(interpreter::GameIo::headless());
 
     // Run the program
     let run_res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
