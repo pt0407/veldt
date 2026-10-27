@@ -7309,19 +7309,28 @@ grow fn hero_move(px: int, py: int, tx: int, ty: int, hx: float, hy: float)
     return [dx, dy]
 }
 
-# --- world ---
+# --- world (the DSL: declare types, spawn instances, scene manages them) ---
 let g = game_new(30, 15)
-let player = entity("player", 2, 7, "hero")
-let hunter = entity("hunter", 26, 7, "hunter")
-let exit = entity("exit", 28, 12, "exit")
-let gold = [entity("coin", 8, 4, "coin"), entity("coin", 15, 9, "coin"),
-            entity("coin", 22, 3, "coin"), entity("coin", 6, 12, "coin")]
+ent_def("player", dict().put("sprite", "hero").put("tag", "player"))
+ent_def("hunter", dict().put("sprite", "hunter").put("tag", "hunter"))
+ent_def("exit",   dict().put("sprite", "exit").put("tag", "exit"))
+ent_def("coin",   dict().put("sprite", "coin").put("tag", "coin"))
+let s = scene_new(30, 15)
+let s = spawn(s, "player", 2, 7)
+let s = spawn(s, "hunter", 26, 7)
+let s = spawn(s, "exit", 28, 12)
+let s = spawn(s, "coin", 8, 4)
+let s = spawn(s, "coin", 15, 9)
+let s = spawn(s, "coin", 22, 3)
+let s = spawn(s, "coin", 6, 12)
 let hp = 100
 let score = 0
 let won = false
 
 # --- real-time loop — browser keys or the grown policy ---
 while game_running() and not won and hp > 0 {
+    let p = scene_find(s, "player")[0]
+    let h = scene_find(s, "hunter")[0]
     let k = keys()
     let dx = 0
     let dy = 0
@@ -7330,60 +7339,51 @@ while game_running() and not won and hp > 0 {
     if k.contains("up") { dy = -1 }
     if k.contains("down") { dy = 1 }
     if dx == 0 and dy == 0 {
-        # nobody driving — the grown policy moves
-        let m = hero_move(player["x"], player["y"], exit["x"], exit["y"],
-                          hunter["x"], hunter["y"])
+        let m = hero_move(p["x"], p["y"], 28, 12, h["x"], h["y"])
         dx = m[0]
         dy = m[1]
     }
-    player = ent_move(player, dx, dy)
-
+    let np = ent_move(p, dx, dy)
     # clamp to the world
-    if player["x"] < 0 { player = ent_move(player, 1, 0) }
-    if player["x"] > g["w"] - 1 { player = ent_move(player, -1, 0) }
-    if player["y"] < 0 { player = ent_move(player, 0, 1) }
-    if player["y"] > g["h"] - 1 { player = ent_move(player, 0, -1) }
-    let px = player["x"]
-    let py = player["y"]
+    let nx = clamp(np["x"], 0, 29)
+    let ny = clamp(np["y"], 0, 14)
+    np["x"] = nx
+    np["y"] = ny
+    s = scene_despawn(s, p["name"])
+    s = scene_spawn(s, np)
 
-    # hunter chases at half speed
-    let hx = hunter["x"]
-    let hy = hunter["y"]
+    # hunter chases at half speed — velocity then ent_move
     let hdx = 0.0
     let hdy = 0.0
-    if hx < px { hdx = 0.5 } else { if hx > px { hdx = -0.5 } }
-    if hy < py { hdy = 0.5 } else { if hy > py { hdy = -0.5 } }
-    hunter = ent_move(hunter, hdx, hdy)
-    if collide(player, hunter) { hp = hp - 3 }
+    if h["x"] < nx { hdx = 0.5 } else { if h["x"] > nx { hdx = -0.5 } }
+    if h["y"] < ny { hdy = 0.5 } else { if h["y"] > ny { hdy = -0.5 } }
+    s = scene_despawn(s, h["name"])
+    let h2 = ent_move(h, hdx, hdy)
+    s = scene_spawn(s, h2)
 
-    # grab coins
-    let remaining = []
-    let gi = 0
-    while gi < gold.len() {
-        let c = gold[gi]
-        if collide(player, c) {
+    # what did the player touch? — collide_any answers it
+    let hit = collide_any(np, s)
+    if hit != null {
+        if hit["tag"] == "coin" {
             score = score + 100
             hp = min(100, hp + 12)
-        } else {
-            remaining.append(c)
+            s = scene_despawn(s, hit["name"])
+            sfx("coin")
         }
-        gi = gi + 1
+        if hit["tag"] == "hunter" {
+            hp = hp - 3
+            sfx("hit")
+        }
+        if hit["tag"] == "exit" {
+            won = true
+            sfx("win")
+        }
     }
-    gold = remaining
-
-    if collide(player, exit) { won = true }
 
     let hud = dict()
     hud["hp"] = hp
     hud["score"] = score
-    hud["gold"] = gold.len()
-    let scene = [player, hunter, exit]
-    gi = 0
-    while gi < gold.len() {
-        scene.append(gold[gi])
-        gi = gi + 1
-    }
-    game_frame(g, scene, hud)
+    game_frame(g, scene_entities(s), hud)
     sleep(80)
 }
 
@@ -7391,13 +7391,7 @@ let out = dict()
 out["hp"] = hp
 out["score"] = score
 out["won"] = won
-let scene2 = [player, hunter, exit]
-gi = 0
-while gi < gold.len() {
-    scene2.append(gold[gi])
-    gi = gi + 1
-}
-game_frame(g, scene2, out)
+game_frame(g, scene_entities(s), out)
 if won { print("escaped — " + score + " gold") }
 else { if hp <= 0 { print("devoured — score " + score) } else { print("session over") } }
 "##;

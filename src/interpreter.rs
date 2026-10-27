@@ -3246,21 +3246,25 @@ impl Interpreter {
                         io.frames.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         // render the scene as text: map rows + entity sprite overlay
                         let mut text = String::from("\n");
-                        if let serde_json::Value::Array(rows) = &scene["map"] {
-                            let mut grid: Vec<Vec<char>> = rows.iter().map(|r|
-                                r.as_str().unwrap_or("").chars().collect()).collect();
-                            for e in scene["entities"].as_array().map(|a| a.as_slice()).unwrap_or(&[]) {
-                                let ex = e["x"].as_i64().unwrap_or(0) as usize;
-                                let ey = e["y"].as_i64().unwrap_or(0) as usize;
-                                let ch = e["sprite"].as_str().unwrap_or("?").chars().next().unwrap_or('?');
-                                if let Some(row) = grid.get_mut(ey) {
-                                    if ex < row.len() { row[ex] = ch; }
-                                }
+                        // grid = the map rows, or a blank world grid when the
+                        // game has no tilemap (open-field topdown)
+                        let mut grid: Vec<Vec<char>> = match &scene["map"] {
+                            serde_json::Value::Array(rows) => rows.iter().map(|r|
+                                r.as_str().unwrap_or("").chars().collect()).collect(),
+                            _ => vec![vec![' '; scene["w"].as_i64().unwrap_or(20) as usize];
+                                      scene["h"].as_i64().unwrap_or(10) as usize],
+                        };
+                        for e in scene["entities"].as_array().map(|a| a.as_slice()).unwrap_or(&[]) {
+                            let ex = e["x"].as_i64().unwrap_or(0) as usize;
+                            let ey = e["y"].as_i64().unwrap_or(0) as usize;
+                            let ch = e["sprite"].as_str().unwrap_or("?").chars().next().unwrap_or('?');
+                            if let Some(row) = grid.get_mut(ey) {
+                                if ex < row.len() { row[ex] = ch; }
                             }
-                            for row in &grid {
-                                text.push_str(&row.iter().collect::<String>());
-                                text.push('\n');
-                            }
+                        }
+                        for row in &grid {
+                            text.push_str(&row.iter().collect::<String>());
+                            text.push('\n');
                         }
                         if let Some(hd) = scene["hud"].as_object() {
                             text.push_str(&format!("[{}] ",
