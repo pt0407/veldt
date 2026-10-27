@@ -7782,6 +7782,108 @@ else { if hp <= 0 { print("shot down — " + score) } else { print("over") } }
     src.replace("GAME_NAME", name)
 }
 
+/// `veldt game new <name> --snake` / `agent "make a snake"` — the classic
+/// snake: a growing tail, food pickups, self/wall collision ends the run.
+/// The grown `snake_dir` policy steers when no key is held.
+pub(crate) fn snake_template(name: &str) -> String {
+    let src = r##"# GAME_NAME.veldt — a real-time snake (engine builtins)
+# WASD/arrows steer. The grown snake_dir policy auto-steers when no key
+#   is held — `agent "improve snake_dir"` evolves it.
+
+grow fn snake_dir(hx: int, hy: int, fx: float, fy: float)
+        test snake_dir(15, 7, 8.0, 7.0) == [-1, 0] {
+    # steer toward the food: dominant axis first, then the other
+    let dx = 0
+    let dy = 0
+    if fx > hx { dx = 1 } else { if fx < hx { dx = -1 } }
+    if dx == 0 {
+        if fy > hy { dy = 1 } else { if fy < hy { dy = -1 } }
+    }
+    return [dx, dy]
+}
+
+# --- world (the DSL: the snake is a body of segment entities) ---
+let g = game_new(30, 15)
+ent_def("head", dict().put("sprite", "snake").put("tag", "head"))
+ent_def("body", dict().put("sprite", "body").put("tag", "body"))
+ent_def("food", dict().put("sprite", "coin").put("tag", "food"))
+let s = scene_new(30, 15)
+let s = spawn(s, "head", 15, 7)
+let s = spawn(s, "food", 8, 7)
+# the tail is a list of [x,y] trail positions
+let tail = []
+let len = 3
+let score = 0
+let dead = false
+
+# --- real-time snake loop ---
+while game_running() and not dead {
+    let h = scene_find(s, "head")[0]
+    let k = keys()
+    let dx = 0
+    let dy = 0
+    if k.contains("left") { dx = -1 }
+    if k.contains("right") { dx = 1 }
+    if k.contains("up") { dy = -1 }
+    if k.contains("down") { dy = 1 }
+    if dx == 0 and dy == 0 {
+        let f = scene_find(s, "food")[0]
+        let m = snake_dir(h["x"], h["y"], f["x"], f["y"])
+        dx = m[0]
+        dy = m[1]
+    }
+    if dx != 0 or dy != 0 {
+        # grow the tail: the old head cell becomes a body segment —
+        # the tail list is immutable so skip(1) drops the oldest cell
+        tail.append([h["x"], h["y"]])
+        while tail.len() > len { tail = tail.skip(1) }
+        let nh = ent_move(h, dx, dy)
+        nh["x"] = clamp(nh["x"], 0, 29)
+        nh["y"] = clamp(nh["y"], 0, 14)
+        # wall/self collision — the snake can't leave or bite itself
+        let i = 0
+        while i < tail.len() {
+            let seg = tail[i]
+            if nh["x"] == seg[0] and nh["y"] == seg[1] { dead = true }
+            i = i + 1
+        }
+        s = scene_despawn(s, h["name"])
+        s = scene_spawn(s, nh)
+        h = nh
+    }
+    # eat food — collide_any tells us the head touched it
+    let f = scene_find(s, "food")[0]
+    if collide(h, f) {
+        score = score + 10
+        len = len + 1
+        sfx("coin")
+        emit("coin", f["x"], f["y"])
+        s = scene_despawn(s, f["name"])
+        s = spawn(s, "food", rand_range(2, 27), rand_range(2, 12))
+    }
+    # render the tail as body entities over the head
+    let i = 0
+    let scene_list = [h]
+    while i < tail.len() {
+        let seg = tail[i]
+        let b = entity("seg" + i, seg[0], seg[1], "body")
+        scene_list.append(b)
+        i = i + 1
+    }
+    let f2 = scene_find(s, "food")
+    if f2.len() > 0 { scene_list.append(f2[0]) }
+    let hud = dict()
+    hud["score"] = score
+    hud["len"] = len
+    game_frame(g, scene_list, hud)
+    sleep(90)
+}
+if dead { print("bit itself — length " + len + " score " + score) }
+else { print("session over — score " + score) }
+"##;
+    src.replace("GAME_NAME", name)
+}
+
 #[cfg(test)]
 mod lint_tests {
     use super::*;
