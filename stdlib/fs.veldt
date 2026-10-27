@@ -1,0 +1,10 @@
+# stdlib/fs — filesystem utilities for veldt
+# `import "fs"` then fs::exists(p), fs::size(p), fs::mkdir(p)…
+
+fn exists(path: str) { return exists(path) }
+fn size(path: str) { return file_size(path) }
+fn mkdir(path: str) { mkdir(path) }
+fn read(path: str) { return read_file(path) }
+fn write(path: str, s: str) { write_file(path, s) }
+fn append(path: str, s: str) { append(path, s) }
+fn lines(path: str) { return read_lines(path) }

@@ -1,0 +1,11 @@
+# stdlib/time — dates, durations, and epoch time for veldt
+# `import "time"` then time::now(), time::sleep(ms), time::fmt(ts)…
+
+fn now() { return time_ms() }
+fn sleep(ms: int) { sleep(ms) }
+fn parse(s: str) { return parse_date(s) }
+fn fmt(ts: any) { return date_fmt(ts) }
+fn add(ts: any, amount: any) { return date_add(ts, amount) }
+fn since(ts: any) { return time_ms() - ts }
+fn elapsed_ms(ts: any) { return time_ms() - ts }
+fn debounce(last_ts: int, ms: int) { return time_ms() - last_ts >= ms }

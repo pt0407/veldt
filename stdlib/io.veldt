@@ -1,0 +1,14 @@
+# stdlib/io — file + console I/O for veldt
+# `import "io"` then io::read(path), io::write(path, s), io::lines(path)…
+
+fn read(path: str) { return read_file(path) }
+fn write(path: str, s: str) { write_file(path, s) }
+fn append(path: str, s: str) { append(path, s) }
+fn lines(path: str) { return read_lines(path) }
+fn write_lines(path: str, xs: list) { write_lines(path, xs) }
+fn read_all_stdin() { return read_stdin() }
+fn line() { return readline() }
+fn out(s: any) { print(s) }
+fn err(s: any) { eprint(s) }
+fn exists(path: str) { return exists(path) }
+fn size(path: str) { return file_size(path) }

@@ -6242,6 +6242,22 @@ pub(crate) fn resolve_import_source(path: &str) -> Result<String, String> {
         ("str.veldt", include_str!("../stdlib/str.veldt")),
         ("math", include_str!("../stdlib/math.veldt")),
         ("math.veldt", include_str!("../stdlib/math.veldt")),
+        ("io", include_str!("../stdlib/io.veldt")),
+        ("io.veldt", include_str!("../stdlib/io.veldt")),
+        ("json", include_str!("../stdlib/json.veldt")),
+        ("json.veldt", include_str!("../stdlib/json.veldt")),
+        ("fs", include_str!("../stdlib/fs.veldt")),
+        ("fs.veldt", include_str!("../stdlib/fs.veldt")),
+        ("time", include_str!("../stdlib/time.veldt")),
+        ("time.veldt", include_str!("../stdlib/time.veldt")),
+        ("env", include_str!("../stdlib/env.veldt")),
+        ("env.veldt", include_str!("../stdlib/env.veldt")),
+        ("http", include_str!("../stdlib/http.veldt")),
+        ("http.veldt", include_str!("../stdlib/http.veldt")),
+        ("rand", include_str!("../stdlib/rand.veldt")),
+        ("rand.veldt", include_str!("../stdlib/rand.veldt")),
+        ("result", include_str!("../stdlib/result.veldt")),
+        ("result.veldt", include_str!("../stdlib/result.veldt")),
     ];
     std::fs::read_to_string(path)
         .or_else(|_| {

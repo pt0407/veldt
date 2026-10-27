@@ -257,6 +257,27 @@ impl Parser {
     }
 
     fn parse_ident_postfix(&mut self, name: String) -> Result<Expr, String> {
+        // Namespaced call: `mod::fn(...)` — the lexer emits `::` as two
+        // Colon tokens, so fold `Ident :: Ident` into the `mod::fn` name
+        // the import machinery registers. `import "json" as json` then
+        // `json::parse(s)` calls the `json::parse` stored name.
+        let mut name = name;
+        while self.check(&Token::Colon) {
+            // lookahead: Colon Colon Ident → namespaced
+            self.advance(); // first :
+            if !self.check(&Token::Colon) {
+                // a single `:` isn't a namespace — put the token back by
+                // erroring clearly (there is no rewind; callers only hit
+                // this when they actually wrote `name:`, which isn't valid
+                // in expression position anyway)
+                return Err("unexpected ':' — did you mean '::'?".into());
+            }
+            self.advance(); // second :
+            match self.advance() {
+                Token::Ident(sub) => { name = format!("{}::{}", name, sub); }
+                t => return Err(format!("Expected a name after '::' but got {:?}", t)),
+            }
+        }
         // Check for variant marker: name#N
         let variant = if let Token::Hash(n) = self.peek() {
             let v = *n;
