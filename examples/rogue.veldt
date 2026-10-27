@@ -21,26 +21,23 @@ grow fn rogue_move(px: int, py: int, tx: int, ty: int, hx: float, hy: float)
     return [dx, dy]
 }
 
-# --- the dungeon + scene ---
+# --- the dungeon + scene (the DSL: declare types, spawn instances) ---
 let lvl = maze_gen(21, 11, "#")
 let g = scene_new(21, 11)
 
-let player = entity("player", 1, 1, "hero")
-player["tag"] = "player"
-g = scene_spawn(g, player)
-g = scene_spawn(g, entity("exit", 19, 9, "exit"))
-# hunters spawn on open floor
-g = scene_spawn(g, entity("h1", 15, 5, "hunter"))
-g = scene_spawn(g, entity("h2", 5, 7, "hunter"))
-g = scene_spawn(g, entity("h3", 17, 1, "hunter"))
-# gold
-let gold = [entity("g1", 6, 3, "coin"), entity("g2", 12, 7, "coin"),
-            entity("g3", 17, 5, "coin"), entity("g4", 4, 9, "coin")]
-let gi = 0
-while gi < gold.len() {
-    g = scene_spawn(g, gold[gi])
-    gi = gi + 1
-}
+ent_def("player", dict().put("sprite", "hero").put("tag", "player"))
+ent_def("exit",   dict().put("sprite", "exit").put("tag", "exit"))
+ent_def("hunter", dict().put("sprite", "hunter").put("tag", "hunter"))
+ent_def("coin",   dict().put("sprite", "coin").put("tag", "coin"))
+g = spawn(g, "player", 1, 1)
+g = spawn(g, "exit", 19, 9)
+g = spawn(g, "hunter", 15, 5)
+g = spawn(g, "hunter", 5, 7)
+g = spawn(g, "hunter", 17, 1)
+g = spawn(g, "coin", 6, 3)
+g = spawn(g, "coin", 12, 7)
+g = spawn(g, "coin", 17, 5)
+g = spawn(g, "coin", 4, 9)
 
 let hp = 100
 let score = 0
@@ -109,7 +106,7 @@ while game_running() and not won and hp > 0 {
 
     # grab gold — +score, +hp
     let coins = scene_find(g, "coin")
-    gi = 0
+    let gi = 0
     while gi < coins.len() {
         let c = coins[gi]
         if collide(p, c) {
