@@ -223,13 +223,21 @@ impl HealthChecker {
                 .filter_map(|s| serde_json::from_str(s).ok()).collect();
             if args.len() != entry.params.len() { continue; }
             let before = interp.step_count;
-            let _ = Self::call_one(&mut interp, &mut vm, &entry.name, Some(entry.id), args.clone());
-            my_steps += interp.step_count - before;
+            match Self::call_one(&mut interp, &mut vm, &entry.name, Some(entry.id), args.clone()) {
+                Ok(_) => my_steps += interp.step_count - before,
+                // an erroring call isn't cheap — it's a failed run:
+                // count it at the step cap so broken variants can't
+                // inflate their efficiency with near-zero steps
+                Err(_) => my_steps += interp.step_limit,
+            }
             used += 1;
             if let Some(id) = incumbent_id {
                 let before = interp.step_count;
-                let _ = Self::call_one(&mut interp, &mut vm, &entry.name, Some(id), args);
-                base_steps += interp.step_count - before;
+                if Self::call_one(&mut interp, &mut vm, &entry.name, Some(id), args).is_ok() {
+                    base_steps += interp.step_count - before;
+                } else {
+                    base_steps += interp.step_limit;
+                }
             }
         }
         if used == 0 || my_steps == 0 { return 1.0; }

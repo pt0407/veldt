@@ -21,6 +21,11 @@ pub struct Evolver {
     /// Self-maintaining cycles — heal sick variants and run the
     /// mechanical dead-code repairs across the garden each cycle.
     pub tend: bool,
+    /// Families whose fittest variant's body isn't side-effect-free —
+    /// `let x = f()` where f is impure must NOT hoist (it would run the
+    /// side effect once instead of per-iteration). Recomputed at the
+    /// start of each evolve run by fixpoint scan.
+    impure_fns: std::collections::HashSet<String>,
 }
 
 impl Evolver {
@@ -29,7 +34,9 @@ impl Evolver {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_nanos() as u64)
             .unwrap_or(42);
-        Evolver { rng_seed: seed, llm: false, filter: None, sort: None, use_vm: false, tend: false }
+        Evolver { rng_seed: seed, llm: false, filter: None, sort: None,
+                  use_vm: false, tend: false,
+                  impure_fns: std::collections::HashSet::new() }
     }
 
     /// Deterministic evolution: same seed + same garden = same outcomes.
@@ -63,6 +70,7 @@ impl Evolver {
     /// Evolve with an optional family scope — `only` restricts candidates
     /// to a single lineage (targeted mutation on one family).
     pub fn evolve_scoped(&mut self, veldt: &mut Veldt, cycles: usize, only: Option<&str>) -> Vec<EvolutionEvent> {
+        self.impure_fns = Self::impure_families(&veldt.functions);
         let mut events = Vec::new();
 
         for cycle in 1..=cycles {
@@ -715,12 +723,16 @@ impl Evolver {
                         // first let whose rhs reads no loop-mutated var
                         body.iter().position(|st| {
                             if let Stmt::Let(name, e) = st {
-                                // RHS must read no loop-mutated var, and
-                                // the name must not be re-assigned inside
-                                // (else hoisting changes reset semantics)
+                                // RHS must read no loop-mutated var, the
+                                // name must not be re-assigned inside
+                                // (else hoisting changes reset semantics),
+                                // and the RHS must be side-effect-free —
+                                // hoisting `print(x)` would fire it once
+                                // instead of per-iteration
                                 !Self::expr_uses_any(e, &assigned)
                                     && !body.iter().any(|s2| matches!(s2,
                                         Stmt::Assign(n2, _) if n2 == name))
+                                    && self.expr_hoistable(e)
                             } else { false }
                         }).map(|pos| pos)
                     } else { None };
@@ -916,6 +928,165 @@ impl Evolver {
                 parts.iter().any(|x| Self::expr_uses_any(x, names)),
             _ => false,
         }
+    }
+
+    /// True if hoisting `let x = e` out of a loop preserves behavior —
+    /// i.e. `e` is side-effect-free. Calls are allowed only to fns proven
+    /// pure (impure_fns is the complement set) or to builtins that
+    /// aren't in the side-effecting denylist.
+    fn expr_hoistable(&self, e: &Expr) -> bool {
+        match e {
+            Expr::Call(n, _, args) => {
+                !Self::impure_builtin(n)
+                    && !self.impure_fns.contains(n)
+                    && args.iter().all(|a| self.expr_hoistable(a))
+            }
+            Expr::MethodCall(o, m, args) => {
+                !Self::impure_method(m)
+                    && self.expr_hoistable(o)
+                    && args.iter().all(|a| self.expr_hoistable(a))
+            }
+            Expr::SafeGet(o, _, args) => self.expr_hoistable(o)
+                && args.as_ref()
+                    .map(|a| a.iter().all(|x| self.expr_hoistable(x)))
+                    .unwrap_or(true),
+            Expr::BinOp(a, _, b) | Expr::Index(a, b) =>
+                self.expr_hoistable(a) && self.expr_hoistable(b),
+            Expr::UnaryOp(_, a) | Expr::FieldAccess(a, _) => self.expr_hoistable(a),
+            Expr::List(items) | Expr::Interp(items) =>
+                items.iter().all(|i| self.expr_hoistable(i)),
+            Expr::StructLit(_, fs) => fs.iter().all(|(_, v)| self.expr_hoistable(v)),
+            Expr::Slice(o, lo, hi) => self.expr_hoistable(o)
+                && lo.as_ref().map(|e| self.expr_hoistable(e)).unwrap_or(true)
+                && hi.as_ref().map(|e| self.expr_hoistable(e)).unwrap_or(true),
+            Expr::ListComp(x, _, it, c) => self.expr_hoistable(x)
+                && self.expr_hoistable(it)
+                && c.as_ref().map(|e| self.expr_hoistable(e)).unwrap_or(true),
+            Expr::Lambda(_, _) => true, // creating a closure is pure — its
+            // effects fire where it's called, same either way
+            _ => true,
+        }
+    }
+
+    /// Side-effecting builtins — a `let` holding one can't hoist.
+    fn impure_builtin(n: &str) -> bool {
+        matches!(n,
+            "print" | "eprint" | "rand" | "randint" | "randf" | "input"
+            | "readline" | "now" | "time" | "sleep" | "exit" | "quit"
+            | "read_file" | "write_file" | "append_file" | "read_lines"
+            | "list_dir" | "exec" | "shell" | "http_get" | "http_post"
+            | "http_put" | "http_delete" | "fetch" | "open" | "connect"
+            | "query" | "save" | "load" | "absorb" | "spawn" | "join_task"
+            | "env" | "setenv" | "gc" | "log" | "debug")
+    }
+
+    /// Mutating methods — `obj.m()` mutates the receiver, not pure.
+    fn impure_method(m: &str) -> bool {
+        matches!(m, "append" | "insert" | "remove" | "pop" | "clear"
+            | "push" | "extend" | "update" | "delete" | "fill" | "sort_in_place")
+    }
+
+    /// Body scan for the fixpoint — a stmt list is pure iff nothing
+    /// side-effects: no Print, no IndexAssign/FieldAssign (mutates a
+    /// possibly-shared structure), no Grow/Import (environment effects),
+    /// and every call target is a pure fn or a non-denylisted builtin.
+    fn stmt_pure(s: &Stmt, pure: &std::collections::HashSet<String>,
+                 fns: &std::collections::HashMap<String, Vec<FunctionEntry>>) -> bool {
+        let ep = |e: &Expr| Self::expr_pure_in(e, pure, fns);
+        match s {
+            Stmt::Print(_) | Stmt::Grow(_) | Stmt::Import(..)
+            | Stmt::IndexAssign(..) | Stmt::FieldAssign(..) => false,
+            Stmt::Let(_, e) | Stmt::Assign(_, e) | Stmt::ExprStmt(e)
+            | Stmt::LetDestructure(_, e) => ep(e),
+            Stmt::Return(Some(e)) => ep(e),
+            Stmt::Return(None) | Stmt::Break | Stmt::Continue
+            | Stmt::StructDef(..) | Stmt::FnDef(..) => true,
+            Stmt::If(c, a, b) => ep(c)
+                && a.iter().all(|s| Self::stmt_pure(s, pure, fns))
+                && b.as_ref()
+                    .map(|v| v.iter().all(|s| Self::stmt_pure(s, pure, fns)))
+                    .unwrap_or(true),
+            Stmt::While(c, b) => ep(c)
+                && b.iter().all(|s| Self::stmt_pure(s, pure, fns)),
+            Stmt::For(_, it, b) => ep(it)
+                && b.iter().all(|s| Self::stmt_pure(s, pure, fns)),
+            Stmt::Try(b, _, h) =>
+                b.iter().chain(h.iter()).all(|s| Self::stmt_pure(s, pure, fns)),
+            Stmt::Match(e, arms, els) => ep(e)
+                && arms.iter().all(|(p, b)|
+                    ep(p) && b.iter().all(|s| Self::stmt_pure(s, pure, fns)))
+                && els.as_ref()
+                    .map(|v| v.iter().all(|s| Self::stmt_pure(s, pure, fns)))
+                    .unwrap_or(true),
+        }
+    }
+
+    fn expr_pure_in(e: &Expr, pure: &std::collections::HashSet<String>,
+                    fns: &std::collections::HashMap<String, Vec<FunctionEntry>>) -> bool {
+        match e {
+            Expr::Call(n, _, args) => {
+                if Self::impure_builtin(n) { return false; }
+                // a user fn that isn't (yet) proven pure is impure
+                if fns.contains_key(n) && !pure.contains(n) { return false; }
+                args.iter().all(|a| Self::expr_pure_in(a, pure, fns))
+            }
+            Expr::MethodCall(o, m, args) => {
+                !Self::impure_method(m)
+                    && Self::expr_pure_in(o, pure, fns)
+                    && args.iter().all(|a| Self::expr_pure_in(a, pure, fns))
+            }
+            Expr::SafeGet(o, _, args) => Self::expr_pure_in(o, pure, fns)
+                && args.as_ref()
+                    .map(|a| a.iter().all(|x| Self::expr_pure_in(x, pure, fns)))
+                    .unwrap_or(true),
+            Expr::BinOp(a, _, b) | Expr::Index(a, b) =>
+                Self::expr_pure_in(a, pure, fns) && Self::expr_pure_in(b, pure, fns),
+            Expr::UnaryOp(_, a) | Expr::FieldAccess(a, _) =>
+                Self::expr_pure_in(a, pure, fns),
+            Expr::List(items) | Expr::Interp(items) =>
+                items.iter().all(|i| Self::expr_pure_in(i, pure, fns)),
+            Expr::StructLit(_, fs) =>
+                fs.iter().all(|(_, v)| Self::expr_pure_in(v, pure, fns)),
+            Expr::Slice(o, lo, hi) => Self::expr_pure_in(o, pure, fns)
+                && lo.as_ref().map(|e| Self::expr_pure_in(e, pure, fns)).unwrap_or(true)
+                && hi.as_ref().map(|e| Self::expr_pure_in(e, pure, fns)).unwrap_or(true),
+            Expr::ListComp(x, _, it, c) => Self::expr_pure_in(x, pure, fns)
+                && Self::expr_pure_in(it, pure, fns)
+                && c.as_ref().map(|e| Self::expr_pure_in(e, pure, fns)).unwrap_or(true),
+            Expr::Lambda(_, body) =>
+                body.iter().all(|s| Self::stmt_pure(s, pure, fns)),
+            _ => true,
+        }
+    }
+
+    /// Fixpoint: which families' FITTEST variant is side-effecting?
+    /// A fn is pure iff its body scans clean AND every user-fn call it
+    /// makes is already proven pure. Everything else lands in the set.
+    fn impure_families(fns: &std::collections::HashMap<String, Vec<FunctionEntry>>)
+        -> std::collections::HashSet<String> {
+        let mut pure: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+        loop {
+            let mut changed = false;
+            for (name, variants) in fns {
+                if pure.contains(name) { continue; }
+                let fittest = variants.iter()
+                    .max_by(|a, b| a.fitness.partial_cmp(&b.fitness)
+                        .unwrap_or(std::cmp::Ordering::Equal));
+                if let Some(v) = fittest {
+                    if v.body.iter().all(|s| Self::stmt_pure(s, &pure, fns)) {
+                        pure.insert(name.clone());
+                        changed = true;
+                    }
+                } else {
+                    // empty family — can't call it anyway; mark pure
+                    // so it doesn't poison the set
+                    pure.insert(name.clone());
+                }
+            }
+            if !changed { break; }
+        }
+        fns.keys().filter(|n| !pure.contains(*n)).cloned().collect()
     }
 
     /// Try to simplify every expr in a statement (depth-first, first match wins).
@@ -1622,6 +1793,25 @@ mod phase7_tests {
         if let Stmt::While(_, b) = &out[1] {
             assert!(!b.iter().any(|s| matches!(s, Stmt::Let(n, _) if n == "scale")));
         } else { panic!("expected while second"); }
+    }
+
+    #[test]
+    fn hoist_skips_impure_lets() {
+        // `let c = print(x)` inside a loop — hoisting would fire the
+        // side effect once instead of per-iteration. Must not hoist.
+        let body = vec![
+            Stmt::While(Expr::BinOp(
+                    Box::new(Expr::Var("i".into())), BinOp::Lt, Box::new(Expr::Var("n".into()))),
+                vec![
+                    Stmt::Let("c".into(), Expr::Call("print".into(), None,
+                        vec![Expr::Var("x".into())])),
+                    Stmt::Assign("i".into(), Expr::Int(1)),
+                ]),
+        ];
+        let mut e = ev();
+        let out = e.mutate_body(&body, Mutation::HoistInvariant);
+        assert!(matches!(&out[0], Stmt::While(_, _)),
+            "impure let was hoisted: {:?}", out);
     }
 
     #[test]
