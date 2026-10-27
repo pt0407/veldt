@@ -967,7 +967,53 @@ impl Evolver {
             }
         }
         if let Some(r) = Self::accum_window(win) { return Some(r); }
-        Self::linsearch_window(win)
+        if let Some(r) = Self::linsearch_window(win) { return Some(r); }
+        Self::dedup_window(win)
+    }
+
+    /// O(n^2) hand-rolled dedup -> `xs.unique()`:
+    ///   `let out = []` + `for x in xs { if not x in out { out = out.push(x) } }`
+    ///   (also `!out.contains(x)` form)
+    fn dedup_window(win: &[Stmt]) -> Option<(usize, Vec<Stmt>)> {
+        if win.len() < 2 { return None; }
+        let out_name = match &win[0] {
+            Stmt::Let(n, Expr::List(items)) if items.is_empty() => n.clone(),
+            _ => return None,
+        };
+        if let Stmt::For(x, xs, body) = &win[1] {
+            if body.len() != 1 { return None; }
+            if let Stmt::If(cond, then_b, None) = &body[0] {
+                if then_b.len() != 1 { return None; }
+                // condition: `not x in out` / `not out.contains(x)` /
+                // `!(x in out)`
+                let is_member_test = |e: &Expr| -> bool {
+                    match e {
+                        Expr::BinOp(l, BinOp::In, r) =>
+                            matches!(l.as_ref(), Expr::Var(v) if v == x)
+                                && matches!(r.as_ref(), Expr::Var(v) if v == &out_name),
+                        Expr::MethodCall(o, m, a) if m == "contains" && a.len() == 1 =>
+                            matches!(o.as_ref(), Expr::Var(v) if v == &out_name)
+                                && matches!(&a[0], Expr::Var(v) if v == x),
+                        _ => false,
+                    }
+                };
+                let negated = match cond {
+                    Expr::UnaryOp(UnaryOp::Not, inner) => is_member_test(inner),
+                    _ => false,
+                };
+                if !negated { return None; }
+                // then: out = out.push(x)
+                let is_push = matches!(&then_b[0],
+                    Stmt::Assign(t, Expr::MethodCall(o, m, a))
+                        if t == &out_name && m == "push" && a.len() == 1
+                        && matches!(o.as_ref(), Expr::Var(v) if v == &out_name)
+                        && matches!(&a[0], Expr::Var(v) if v == x));
+                if !is_push { return None; }
+                return Some((2, vec![Stmt::Let(out_name, Expr::MethodCall(
+                    Box::new(xs.clone()), "unique".into(), vec![]))]));
+            }
+        }
+        None
     }
 
     /// O(n) hand-rolled linear search -> `xs.index_of(t)` builtin:
@@ -2533,6 +2579,23 @@ mod asymptotic_proof {
         // invariant violation: k uses the loop var -> must NOT rewrite
         let body = parse_fn_body(
             "let total = 0\nfor x in xs {\n  total += x\n}\nreturn total");
+        let out = evolver.mutate_body(&body, Mutation::IdiomRewrite);
+        let src = crate::fmt::format_program(&out);
+        assert!(src.contains("for"), "unsafe rewrite:\n{}", src);
+    }
+
+    #[test]
+    fn idiom_rewrite_dedup_loop_to_unique() {
+        let mut evolver = Evolver::new();
+        let body = parse_fn_body(
+            "let out = []\nfor x in xs {\n  if not (x in out) { out = out.push(x) }\n}\nreturn out");
+        let out = evolver.mutate_body(&body, Mutation::IdiomRewrite);
+        let src = crate::fmt::format_program(&out);
+        assert!(src.contains("unique") && !src.contains("for"),
+            "dedup loop not rewritten:\n{}", src);
+        // wrong accumulator push (push y not x) must NOT rewrite
+        let body = parse_fn_body(
+            "let out = []\nfor x in xs {\n  if not (x in out) { out = out.push(y) }\n}\nreturn out");
         let out = evolver.mutate_body(&body, Mutation::IdiomRewrite);
         let src = crate::fmt::format_program(&out);
         assert!(src.contains("for"), "unsafe rewrite:\n{}", src);

@@ -5570,6 +5570,16 @@ impl Interpreter {
                 None => Err("contains(x) needs an argument".into()),
                 }
             },
+            (Value::List(items), "unique") => {
+                self.step_count += (items.len() as u64) * 4;
+                let mut seen: Vec<Value> = Vec::with_capacity(items.len());
+                for v in items.iter() {
+                    if !seen.iter().any(|x| self.values_eq(x, v)) {
+                        seen.push(v.clone());
+                    }
+                }
+                Ok(Value::List(seen.into_iter().collect()))
+            }
             (Value::List(items), "index_of") => {
                 self.step_count += (items.len() as u64) * 2;
                 match args.get(0) {
