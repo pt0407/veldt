@@ -5570,6 +5570,20 @@ impl Interpreter {
                 None => Err("contains(x) needs an argument".into()),
                 }
             },
+            (Value::List(items), "min") | (Value::List(items), "max") => {
+                self.step_count += items.len() as u64;
+                if items.is_empty() { return Ok(Value::Null); }
+                let want_max = method == "max";
+                let mut best = items[0].clone();
+                for v in items.iter().skip(1) {
+                    let ord = self.cmp_values(v, &best);
+                    if (want_max && ord == std::cmp::Ordering::Greater)
+                        || (!want_max && ord == std::cmp::Ordering::Less) {
+                        best = v.clone();
+                    }
+                }
+                Ok(best)
+            }
             (Value::List(items), "unique") => {
                 self.step_count += (items.len() as u64) * 4;
                 let mut seen: Vec<Value> = Vec::with_capacity(items.len());
