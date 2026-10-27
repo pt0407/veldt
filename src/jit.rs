@@ -51,6 +51,9 @@ pub struct JitEngine {
     pub fail_at: HashMap<String, usize>,
     compiling: HashSet<String>,
     rt: RtIds,
+    /// Host C ABI for declared signatures — matches how extern "C"
+    /// callers (jit_invoke, jit_call_fast, rt helpers) invoke the code.
+    call_conv: CallConv,
 }
 
 type Fns = HashMap<String, Vec<CompiledFn>>;
@@ -62,6 +65,12 @@ impl JitEngine {
         let isa = builder().ok()?
             .finish(settings::Flags::new(flag_builder)).ok()?;
         let fe_cfg = isa.frontend_config();
+        // host C ABI — cranelift's CallConv::SystemV is literally the
+        // Unix SysV ABI (args in rdi...), but extern "C" callers on
+        // Windows use Microsoft x64 (args in rcx...) — JIT'd code
+        // invoked via transmute read args from the wrong registers
+        // and returned garbage/pointers.
+        let cc = isa.default_call_conv();
         let mut jb = JITBuilder::with_isa(
             isa, cranelift_module::default_libcall_names());
         jb.symbol("veldt_rt_const", veldt_rt_const as *const u8);
@@ -102,10 +111,11 @@ impl JitEngine {
         jb.symbol("veldt_rt_boolbox", veldt_rt_boolbox as *const u8);
         jb.symbol("veldt_rt_floatbox", veldt_rt_floatbox as *const u8);
         let mut module = JITModule::new(jb);
-        let rt = RtIds::declare(&mut module);
+        let rt = RtIds::declare(&mut module, cc);
         Some(JitEngine {
             module, fe_cfg, ids: HashMap::new(), ptrs: HashMap::new(),
             compiling: HashSet::new(), fail_at: HashMap::new(), rt,
+            call_conv: cc,
         })
     }
 
@@ -119,7 +129,7 @@ impl JitEngine {
         let sig = Signature {
             params: vec![AbiParam::new(t); arity],
             returns: vec![AbiParam::new(t)],
-            call_conv: CallConv::SystemV,
+            call_conv: self.call_conv,
         };
         let f = self.module
             .declare_function(name, Linkage::Local, &sig).ok()?;
@@ -673,7 +683,7 @@ impl JitEngine {
         let sig = Signature {
             params: vec![AbiParam::new(types::I64); 3],
             returns: vec![AbiParam::new(types::I64)],
-            call_conv: CallConv::SystemV,
+            call_conv: self.call_conv,
         };
         let f = self.module
             .declare_function(name, Linkage::Local, &sig).ok()?;
@@ -708,7 +718,7 @@ impl JitEngine {
             Signature {
                 params: vec![AbiParam::new(types::I64); 3],
                 returns: vec![AbiParam::new(types::I64)],
-                call_conv: CallConv::SystemV,
+                call_conv: self.call_conv,
             });
         let mut fail_pc = usize::MAX;
         {
@@ -1462,7 +1472,7 @@ impl JitEngine {
         Signature {
             params: vec![AbiParam::new(t); arity],
             returns: vec![AbiParam::new(t)],
-            call_conv: CallConv::SystemV,
+            call_conv: self.call_conv,
         }
     }
 }
@@ -1861,7 +1871,7 @@ struct RtIds {
 }
 
 impl RtIds {
-    fn declare(m: &mut JITModule) -> RtIds {
+    fn declare(m: &mut JITModule, cc: CallConv) -> RtIds {
         // every helper is an i64-only signature: (argc params) -> i64
         // (0 return => void, encoded as params, false)
         let d = |m: &mut JITModule, name: &str, nargs: usize, ret: bool| {
@@ -1869,7 +1879,7 @@ impl RtIds {
                 params: vec![AbiParam::new(types::I64); nargs],
                 returns: if ret { vec![AbiParam::new(types::I64)] }
                          else { vec![] },
-                call_conv: CallConv::SystemV,
+                call_conv: cc,
             };
             m.declare_function(name, Linkage::Import, &sig).unwrap()
         };
@@ -1916,7 +1926,7 @@ impl RtIds {
                     params: vec![AbiParam::new(types::I64),
                                  AbiParam::new(types::F64)],
                     returns: vec![AbiParam::new(types::I64)],
-                    call_conv: CallConv::SystemV,
+                    call_conv: cc,
                 };
                 m.declare_function("veldt_rt_floatbox", Linkage::Import, &sig).unwrap()
             },
