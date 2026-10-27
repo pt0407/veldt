@@ -575,6 +575,11 @@ impl Evolver {
                 }
             }
             Type::Struct(name) => {
+                // `x: any` parses as Struct("any") — same random
+                // scalar/dict generation as Type::Any
+                if name == "any" {
+                    return self.gen_value_scaled_in(&Type::Any, scale, structs);
+                }
                 // `dict` params parse as Struct("dict") — produce
                 // a real dict value, not a struct lookup.
                 if name == "dict" {
