@@ -6348,6 +6348,36 @@ fn rewrite_one(veldt: &mut veldt::Veldt, name: &str, vid: u32, quiet: bool) -> b
         }
         return false;
     }
+    // --exact: only birth rewrites Z3 proves semantics-preserving.
+    if std::env::args().any(|a| a == "--exact") {
+        #[cfg(feature = "smt")]
+        {
+            let params: Vec<(String, ast::Type)> = entry.params.iter()
+                .map(|p| (p.name.clone(), p.typ.clone())).collect();
+            match smt::verify_bodies_exact(&entry.body, &new_body, &params) {
+                Ok(None) => {}
+                Ok(Some(cex)) => {
+                    if !quiet {
+                        println!("{}#{} — rewrite DIVERGES at ({}), not born",
+                                 name, vid, cex.join(", "));
+                    }
+                    return false;
+                }
+                Err(why) => {
+                    if !quiet {
+                        println!("{}#{} — rewrite not provable ({}), not born",
+                                 name, vid, why);
+                    }
+                    return false;
+                }
+            }
+        }
+        #[cfg(not(feature = "smt"))]
+        {
+            eprintln!("--exact requires the smt feature");
+            return false;
+        }
+    }
     let source = format!("fn {}(...) {{ [idiom rewrite of {}#{}] }}", name, name, vid);
     let new_id = veldt.grow_function_full(name, entry.params.clone(), new_body,
         entry.tests.clone(), &source, vec![entry.id],

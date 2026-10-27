@@ -1299,7 +1299,6 @@ pub fn verify_pair_exact(
 /// Prove two raw bodies equivalent over the same symbolic params —
 /// used to certify an idiom rewrite preserved semantics (not just
 /// bounded-tested). Same return contract as verify_variant_exact.
-#[cfg(test)]
 pub fn verify_bodies_exact(
     before: &[Stmt],
     after: &[Stmt],

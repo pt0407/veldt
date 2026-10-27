@@ -325,6 +325,7 @@ Veldt provides two verification tiers for checking whether variants in a family 
 | `veldt adopt <name#N> --exact` | **SMT gate (`--features smt`)** | Promotes `<name#N>` to `Canonical` only if Z3 proves equivalence (`Unsat`) against the fittest variant |
 | `veldt verify --all --exact [--quarantine]` | **Garden sweep (`--features smt`)** | Z3-audits every multi-variant family — each non-fittest variant is proven/divergent/bail with a named reason (`str.split`, `step budget`, `expr null`, `list-comp over non-list`, `if-arm merge sort-mismatch`, ...). `--quarantine` demotes provably-divergent variants to `Dying`; `--strict` exits 1 |
 | `veldt diff <a#N> <b#M> --exact` | **Pair-wise SMT (`--features smt`)** | Proves divergence between any two variants in a lineage — prints `PROVABLY EQUIVALENT` or `PROVABLY DIVERGENT at (cex)` before the source diff |
+| `veldt rewrite <name#N> --exact` | **SMT-gated rewrite** | Only births the idiom-rewritten variant if Z3 proves the rewrite semantics-preserving (`verify_bodies_exact`); bails and reports `DIVERGES`/`not provable` otherwise |
 | `veldt stats --verified` / `veldt stats --exact` | **Garden census** | Reports how many multi-variant families pass bounded verification vs. Z3 SMT verification |
 
 **Honesty boundary:**
