@@ -112,6 +112,8 @@ pub struct Interpreter {
     // (/api/game/start), this is the shared input queue + frame buffer.
     // None = CLI mode — game_frame prints a JSON frame line instead.
     pub game_io: Option<std::sync::Arc<GameIo>>,
+    /// ent_def registry — registered entity types for the `spawn` DSL
+    pub ent_defs: HashMap<String, im::HashMap<String, Value>>,
 }
 
 /// Shared state for a live game session: browser key events in,
@@ -229,6 +231,7 @@ impl Interpreter {
             importing: Vec::new(),
             caps: Caps::allow_all(),
             game_io: None,
+            ent_defs: HashMap::new(),
         }
     }
 
@@ -2887,6 +2890,56 @@ impl Interpreter {
                 let ex = Self::num_f(e.get("x").unwrap_or(&Value::Int(0)))? as i64;
                 let ey = Self::num_f(e.get("y").unwrap_or(&Value::Int(0)))? as i64;
                 Ok(Some(Value::Bool(Self::cell_solid(d, ex, ey + 1))))
+            }
+            "ent_def" => {
+                // ent_def(name, fields) — register an entity type. A real
+                // entity-builder DSL: games declare a type once with its
+                // component fields, then spawn(scene, "type", x, y) clones it.
+                let (name, fields) = match (args.get(0), args.get(1)) {
+                    (Some(Value::Str(n)), Some(Value::Dict(f))) => (n.to_string(), f.clone()),
+                    _ => return Err("ent_def(name, fields_dict) expects str + dict".into()),
+                };
+                // store the type in the interpreter registry — spawn reads it
+                self.ent_defs.insert(name.clone(), fields);
+                Ok(Some(Value::Str(format!("defined entity type '{}'", name).into())))
+            }
+            "spawn" => {
+                // spawn(scene, type_name, x, y) — instantiate a registered
+                // entity type: clone the ent_def fields, set position, tag =
+                // type name, merge into the scene. The clean build path.
+                let (scene, tname, x, y) = match (args.get(0), args.get(1), args.get(2), args.get(3)) {
+                    (Some(Value::Dict(s)), Some(Value::Str(t)), Some(x), Some(y)) =>
+                        (s.clone(), t.to_string(), Self::num_f(x)?, Self::num_f(y)?),
+                    _ => return Err("spawn(scene, type, x, y) expects dict + str + 2 nums".into()),
+                };
+                let tpl = match self.ent_defs.get(&tname) {
+                    Some(f) => f.clone(),
+                    None => return Err(format!("spawn: no entity type '{}' — ent_def it first", tname)),
+                };
+                let mut e = tpl.clone();
+                e.insert("name".into(), Value::Str(tname.clone().into()));
+                e.insert("x".into(), Value::Float(x));
+                e.insert("y".into(), Value::Float(y));
+                if !e.contains_key("sprite") {
+                    e.insert("sprite".into(), Value::Str(tname.clone().into()));
+                }
+                if !e.contains_key("tag") {
+                    e.insert("tag".into(), Value::Str(tname.clone().into()));
+                }
+                if !e.contains_key("vx") { e.insert("vx".into(), Value::Float(0.0)); }
+                if !e.contains_key("vy") { e.insert("vy".into(), Value::Float(0.0)); }
+                // spawn(scene, type, x, y) — unique name = type + count so
+                // multiple same-type spawns don't collide in the entity map
+                let mut s2 = scene.clone();
+                let mut ents = match s2.get("entities") {
+                    Some(Value::Dict(m)) => m.clone(), _ => im::HashMap::new() };
+                let mut uname = tname.clone();
+                let mut n = 1u32;
+                while ents.contains_key(uname.as_str()) { uname = format!("{}{}", tname, n); n += 1; }
+                e.insert("name".into(), Value::Str(uname.clone().into()));
+                ents.insert(uname, Value::Dict(e));
+                s2.insert("entities".into(), Value::Dict(ents));
+                Ok(Some(Value::Dict(s2)))
             }
             "integrate" => {
                 // integrate(e, map, dt) — velocity physics: apply vx/vy to the
