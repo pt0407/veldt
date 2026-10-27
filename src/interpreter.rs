@@ -4498,6 +4498,7 @@ impl Interpreter {
             (Value::Str(s), "len") => Ok(Value::Int(s.chars().count() as i64)),
             (Value::Str(s), "split") => {
                 if args.len() != 1 { return Err("split() expects 1 argument".into()); }
+                self.step_count += (s.len() / 4) as u64;
                 match &args[0] {
                     Value::Str(sep) => {
                         let parts: Vec<Value> = s.split(&**sep).map(|p| Value::Str(p.to_string().into())).collect();
@@ -4508,6 +4509,7 @@ impl Interpreter {
             }
             (Value::Str(s), "contains") => {
                 if args.len() != 1 { return Err("contains() expects 1 argument".into()); }
+                self.step_count += (s.len() / 4) as u64;
                 match &args[0] {
                     Value::Str(sub) => Ok(Value::Bool(s.contains(&**sub))),
                     _ => Err("contains() expects a string".into()),
@@ -4515,6 +4517,7 @@ impl Interpreter {
             }
             (Value::Str(s), "replace") => {
                 if args.len() != 2 { return Err("replace() expects 2 arguments".into()); }
+                self.step_count += (s.len() / 4) as u64;
                 match (&args[0], &args[1]) {
                     (Value::Str(old), Value::Str(new)) => Ok(Value::Str(s.replace(&**old, &**new).into())),
                     _ => Err("replace() expects two strings".into()),
@@ -4567,6 +4570,7 @@ impl Interpreter {
             }
             (Value::Str(s), "index_of") => {
                 if args.len() != 1 { return Err("index_of() expects 1 argument".into()); }
+                self.step_count += (s.len() / 4) as u64;
                 match &args[0] {
                     Value::Str(ch) => {
                         if let Some(c) = ch.chars().next() {
@@ -4598,8 +4602,11 @@ impl Interpreter {
                 }
                 _ => Err("pad(len[, char]) expects int".into()),
             },
-            (Value::Str(s), "chars") => Ok(Value::List(
-                s.chars().map(|c| Value::Str(c.to_string().into())).collect())),
+            (Value::Str(s), "chars") => {
+                self.step_count += (s.len() / 2) as u64;
+                Ok(Value::List(
+                s.chars().map(|c| Value::Str(c.to_string().into())).collect()))
+            }
             (Value::Str(s), "repeat") => match args.get(0) {
                 Some(Value::Int(n)) => Ok(Value::Str(s.repeat((*n).max(0) as usize).into())),
                 _ => Err("repeat(n) expects int".into()),
@@ -4614,28 +4621,39 @@ impl Interpreter {
             },
             // === Phase 1 stdlib: lists ===
             (Value::List(items), "join") => {
+                self.step_count += (items.len() as u64) * 2;
                 let sep = match args.get(0) {
                     Some(Value::Str(s)) => s.clone(),
                     _ => ", ".into(),
                 };
                 Ok(Value::Str(items.iter().map(|v| format!("{}", v)).collect::<Vec<_>>().join(&sep).into()))
             }
-            (Value::List(items), "contains") => match args.get(0) {
+            (Value::List(items), "contains") => {
+                self.step_count += (items.len() as u64) * 2;
+                match args.get(0) {
                 Some(v) => Ok(Value::Bool(items.iter().any(|i| self.values_eq(i, v)))),
                 None => Err("contains(x) needs an argument".into()),
+                }
             },
-            (Value::List(items), "enumerate") => Ok(Value::List(
+            (Value::List(items), "enumerate") => {
+                self.step_count += (items.len() as u64) * 2;
+                Ok(Value::List(
                 items.iter().enumerate()
                     .map(|(i, v)| Value::List(im::vector![Value::Int(i as i64), v.clone()]))
-                    .collect())),
-            (Value::List(items), "zip") => match args.get(0) {
+                    .collect()))
+            },
+            (Value::List(items), "zip") => {
+                self.step_count += (items.len() as u64) * 2;
+                match args.get(0) {
                 Some(Value::List(other)) => Ok(Value::List(
                     items.iter().zip(other.iter())
                         .map(|(a, b)| Value::List(im::vector![a.clone(), b.clone()]))
                         .collect())),
                 _ => Err("zip(other) expects a list".into()),
+                }
             },
             (Value::List(items), "flatten") => {
+                self.step_count += (items.len() as u64) * 2;
                 let mut out = Vec::new();
                 for v in items {
                     match v {
@@ -4646,13 +4664,17 @@ impl Interpreter {
                 Ok(Value::List(out.into_iter().collect()))
             }
             (Value::List(items), "take") => match args.get(0) {
-                Some(Value::Int(n)) =>
-                    Ok(Value::List(items.iter().take((*n).max(0) as usize).cloned().collect())),
+                Some(Value::Int(n)) => {
+                    self.step_count += ((*n).clamp(0, items.len() as i64) as u64) * 2;
+                    Ok(Value::List(items.iter().take((*n).max(0) as usize).cloned().collect()))
+                }
                 _ => Err("take(n) expects int".into()),
             },
             (Value::List(items), "skip") => match args.get(0) {
-                Some(Value::Int(n)) =>
-                    Ok(Value::List(items.iter().skip((*n).max(0) as usize).cloned().collect())),
+                Some(Value::Int(n)) => {
+                    self.step_count += (items.len() as u64).saturating_sub((*n).max(0) as u64) * 2;
+                    Ok(Value::List(items.iter().skip((*n).max(0) as usize).cloned().collect()))
+                }
                 _ => Err("skip(n) expects int".into()),
             },
             (Value::List(items), "sort_by") => match args.get(0) {
@@ -4700,6 +4722,7 @@ impl Interpreter {
             },
             // === additional list ops ===
             (Value::List(items), "sum") => {
+                self.step_count += items.len() as u64;
                 let mut total = 0i64;
                 let mut ftotal = 0f64;
                 let mut has_float = false;
@@ -4713,6 +4736,7 @@ impl Interpreter {
                 Ok(if has_float { Value::Float(ftotal) } else { Value::Int(total) })
             }
             (Value::List(items), "product") => {
+                self.step_count += items.len() as u64;
                 let mut total = 1i64;
                 let mut ftotal = 1f64;
                 let mut has_float = false;
@@ -4912,6 +4936,7 @@ impl Interpreter {
                 Ok(acc)
             }
             (Value::List(items), "find") => {
+                self.step_count += (items.len() as u64) * 2;
                 if args.len() != 1 { return Err("find() expects 1 closure argument".into()); }
                 let closure = args[0].clone();
                 for item in items.iter() {

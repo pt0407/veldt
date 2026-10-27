@@ -49,6 +49,13 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] HONEST STEP ACCOUNTING ROUND 2: the hidden-O(n)
+  bug was systemic, not just sort/reverse. Now charged: str split/
+  contains/replace/index_of/chars (len/4–len/2), list join/contains/
+  find/enumerate/zip/flatten (2n), take/skip (bounded 2n), sum/
+  product (n). NOTE: eval_method_call has dead duplicate arms
+  (str trim/len, list contains/join at ~4548+4828) — the FIRST
+  occurrence wins; cleanup pending. 125 tests green.
 - [Devin/main-side] IDIOM REWRITE GENERALIZED: `apply_idiom_pass` in
   evolve.rs now rewrites sort-extremum windows ANYWHERE — `let x =
   xs.sort().reverse()[0]` bindings, nested if/while/for/match/lambda
