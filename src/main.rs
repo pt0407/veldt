@@ -7317,7 +7317,7 @@ while game_running() and not won {
         scene.append(coins[gi])
         gi = gi + 1
     }
-    game_frame(g, scene, hud)
+    game_frame(g, scene, hud, lvl)
     sleep(80)
 }
 print("finished — score " + score)

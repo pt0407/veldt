@@ -2840,12 +2840,28 @@ impl Interpreter {
                     .map(|s| Value::Str(s.into())).collect())))
             }
             "game_frame" => {
-                // game_frame(state, entities, hud) → emit the scene JSON to
-                // the session frame buffer (or print it in CLI mode)
+                // game_frame(state, entities, hud, map?) → emit the scene JSON to
+                // the session frame buffer (or print it in CLI mode). The
+                // optional map is a canvas dict — its cells become "map" rows
+                // so the browser can paint terrain under the entities.
                 let (state, entities, hud) = match (args.get(0), args.get(1), args.get(2)) {
                     (Some(Value::Dict(s)), Some(Value::List(e)), Some(h)) =>
                         (s, e.clone(), h),
-                    _ => return Err("game_frame(state, entities, hud) expects dict + list + any".into()),
+                    _ => return Err("game_frame(state, entities, hud, map?) expects dict + list + any".into()),
+                };
+                let map_rows: serde_json::Value = match args.get(3) {
+                    Some(Value::Dict(md)) => match md.get("cells") {
+                        Some(Value::List(rows)) => serde_json::json!(rows.iter().map(|r| {
+                            if let Value::List(row) = r {
+                                row.iter().map(|c| match c {
+                                    Value::Str(s) => s.to_string(),
+                                    _ => "?".into(),
+                                }).collect::<String>()
+                            } else { String::new() }
+                        }).collect::<Vec<_>>()),
+                        _ => serde_json::Value::Null,
+                    },
+                    _ => serde_json::Value::Null,
                 };
                 let scene = serde_json::json!({
                     "w": state.get("w").map(Self::json_num).unwrap_or(0.0),
@@ -2853,6 +2869,7 @@ impl Interpreter {
                     "camera_x": state.get("camera_x").map(Self::json_num).unwrap_or(0.0),
                     "camera_y": state.get("camera_y").map(Self::json_num).unwrap_or(0.0),
                     "entities": entities.iter().map(Self::entity_json).collect::<Vec<_>>(),
+                    "map": map_rows,
                     "hud": match hud { Value::Dict(hd) => hd.iter()
                         .map(|(k,v)| (k.clone(), Self::json_val(v)))
                         .collect::<serde_json::Map<_,_>>().into(),
