@@ -3008,7 +3008,13 @@ fn generate_intent(t: &str, words: &[&str], veldt: &mut Veldt) -> AgentResponse 
         if exec.success {
             steps.push(step("ok", format!("Game `{}` ran and planted `game_step` in the garden.", name)));
         }
-        let reply = if realtime {
+        let reply = if platformer {
+            format!(
+                "Built a real-time platformer `{}` ({}) — WASD/arrows run, SPACE/up jumps when on_ground, coins + exit, tile terrain + gravity. When no keys are held the grown `plat_move` policy auto-plays — the Gardener breeds it.\n\
+                 Play at /play/{} (studio) or `veldt play {}`; `improve plat_move` evolves the policy.",
+                name, path, name, name
+            )
+        } else if realtime {
             format!(
                 "Built a real-time 2D game `{}` ({}) — WASD/arrows drive @ live, a hunter chases, coins + exit, HP. When no keys are held the grown `hero_move` policy auto-plays — the Gardener breeds it.\n\
                  Play it at /play/{} (studio) or `veldt play {}`; `improve hero_move` evolves the policy.",

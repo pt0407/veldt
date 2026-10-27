@@ -121,6 +121,8 @@ pub struct GameIo {
     pub keys: std::sync::Mutex<Vec<String>>,
     /// latest emitted game_frame scene (serialized JSON) — /api/game/frame reads it
     pub frame: std::sync::Mutex<Option<String>>,
+    /// pending sound events — sfx() pushes, game_frame drains into the scene
+    pub sfx: std::sync::Mutex<Vec<String>>,
     /// session alive — game_running() polls this; /api/game/stop clears it
     pub running: std::sync::atomic::AtomicBool,
 }
@@ -130,6 +132,7 @@ impl GameIo {
         std::sync::Arc::new(GameIo {
             keys: std::sync::Mutex::new(Vec::new()),
             frame: std::sync::Mutex::new(None),
+            sfx: std::sync::Mutex::new(Vec::new()),
             running: std::sync::atomic::AtomicBool::new(true),
         })
     }
@@ -2831,6 +2834,103 @@ impl Interpreter {
                 e2.insert("vy".into(), Value::Float(vy));
                 Ok(Some(Value::Dict(e2)))
             }
+            "scene_new" => {
+                // scene_new(w, h) → a scene dict {w, h, entities: {}} —
+                // managed entity container for a 2D game
+                let (w, h) = match (args.get(0), args.get(1)) {
+                    (Some(Value::Int(w)), Some(Value::Int(h))) => (*w as f64, *h as f64),
+                    _ => return Err("scene_new(w, h) expects two ints".into()),
+                };
+                let mut d = im::HashMap::new();
+                d.insert("w".into(), Value::Float(w));
+                d.insert("h".into(), Value::Float(h));
+                d.insert("camera_x".into(), Value::Float(0.0));
+                d.insert("camera_y".into(), Value::Float(0.0));
+                d.insert("t".into(), Value::Int(0));
+                d.insert("entities".into(), Value::Dict(im::HashMap::new()));
+                Ok(Some(Value::Dict(d)))
+            }
+            "scene_spawn" => {
+                // scene_spawn(scene, e) → add entity e to the scene
+                let (d, e) = match (args.get(0), args.get(1)) {
+                    (Some(Value::Dict(d)), Some(Value::Dict(e))) => (d.clone(), e.clone()),
+                    _ => return Err("scene_spawn(scene, e) expects dict + entity dict".into()),
+                };
+                let name = match e.get("name") { Some(Value::Str(n)) => n.to_string(), _ => return Err("entity needs a name".into()) };
+                let mut d2 = d.clone();
+                let mut ents = match d.get("entities") {
+                    Some(Value::Dict(m)) => m.clone(), _ => im::HashMap::new() };
+                ents.insert(name.into(), Value::Dict(e));
+                d2.insert("entities".into(), Value::Dict(ents));
+                Ok(Some(Value::Dict(d2)))
+            }
+            "scene_despawn" => {
+                // scene_despawn(scene, name) → remove the named entity
+                let (d, name) = match (args.get(0), args.get(1)) {
+                    (Some(Value::Dict(d)), Some(Value::Str(n))) => (d.clone(), n.to_string()),
+                    _ => return Err("scene_despawn(scene, name) expects dict + str".into()),
+                };
+                let mut d2 = d.clone();
+                let mut ents = match d.get("entities") {
+                    Some(Value::Dict(m)) => m.clone(), _ => im::HashMap::new() };
+                ents.remove(&*name);
+                d2.insert("entities".into(), Value::Dict(ents));
+                Ok(Some(Value::Dict(d2)))
+            }
+            "scene_entities" => {
+                // scene_entities(scene) → list of entity dicts (for game_frame)
+                let d = match args.get(0) {
+                    Some(Value::Dict(d)) => d.clone(),
+                    _ => return Err("scene_entities(scene) expects a scene dict".into()),
+                };
+                let ents: im::Vector<Value> = match d.get("entities") {
+                    Some(Value::Dict(m)) => m.values().cloned().collect(),
+                    _ => im::Vector::new() };
+                Ok(Some(Value::List(ents)))
+            }
+            "sfx" => {
+                // sfx(name) → queue a sound event for this frame — the
+                // browser plays it via WebAudio; CLI mode rings a bell
+                let name = match args.get(0) {
+                    Some(Value::Str(s)) => s.to_string(),
+                    _ => return Err("sfx(name) expects a string".into()),
+                };
+                match &self.game_io {
+                    Some(io) => { io.sfx.lock().unwrap().push(name); }
+                    None => {
+                        if let Some(buf) = &mut self.print_buffer {
+                            buf.push_str(&format!("[sfx:{}]", name));
+                        }
+                    }
+                }
+                Ok(Some(Value::Null))
+            }
+            "beep" => {
+                // beep(freq, ms) → a terminal bell / tone for CLI games
+                let (freq, ms) = match (args.get(0), args.get(1)) {
+                    (Some(f), Some(m)) => (Self::num_f(f)?, Self::num_f(m)?),
+                    _ => return Err("beep(freq, ms) expects two numbers".into()),
+                };
+                let _ = (freq, ms);
+                if let Some(buf) = &mut self.print_buffer {
+                    buf.push('\x07');
+                } else { print!("\x07"); }
+                Ok(Some(Value::Null))
+            }
+            "scene_find" => {
+                // scene_find(scene, tag) → list of entities with that tag
+                let (d, tag) = match (args.get(0), args.get(1)) {
+                    (Some(Value::Dict(d)), Some(Value::Str(t))) => (d.clone(), t.to_string()),
+                    _ => return Err("scene_find(scene, tag) expects dict + str".into()),
+                };
+                let out: im::Vector<Value> = match d.get("entities") {
+                    Some(Value::Dict(m)) => m.values().filter(|v| {
+                        matches!(v, Value::Dict(ed)
+                            if ed.get("tag").map(|t| matches!(t, Value::Str(ts) if ts.as_ref() == tag)).unwrap_or(false))
+                    }).cloned().collect(),
+                    _ => im::Vector::new() };
+                Ok(Some(Value::List(out)))
+            }
             "keys" => {
                 // keys() → list of held keys from the session input queue
                 let pressed: Vec<String> = self.game_io.as_ref()
@@ -2840,19 +2940,41 @@ impl Interpreter {
                     .map(|s| Value::Str(s.into())).collect())))
             }
             "game_frame" => {
-                // game_frame(state, entities, hud) → emit the scene JSON to
-                // the session frame buffer (or print it in CLI mode)
+                // game_frame(state, entities, hud, map?) → emit the scene JSON to
+                // the session frame buffer (or print it in CLI mode). The
+                // optional map is a canvas dict — its cells become "map" rows
+                // so the browser can paint terrain under the entities.
                 let (state, entities, hud) = match (args.get(0), args.get(1), args.get(2)) {
                     (Some(Value::Dict(s)), Some(Value::List(e)), Some(h)) =>
                         (s, e.clone(), h),
-                    _ => return Err("game_frame(state, entities, hud) expects dict + list + any".into()),
+                    _ => return Err("game_frame(state, entities, hud, map?) expects dict + list + any".into()),
                 };
+                let map_rows: serde_json::Value = match args.get(3) {
+                    Some(Value::Dict(md)) => match md.get("cells") {
+                        Some(Value::List(rows)) => serde_json::json!(rows.iter().map(|r| {
+                            if let Value::List(row) = r {
+                                row.iter().map(|c| match c {
+                                    Value::Str(s) => s.to_string(),
+                                    _ => "?".into(),
+                                }).collect::<String>()
+                            } else { String::new() }
+                        }).collect::<Vec<_>>()),
+                        _ => serde_json::Value::Null,
+                    },
+                    _ => serde_json::Value::Null,
+                };
+                // drain any queued sfx into this frame — the browser plays them
+                let sfx_events: Vec<String> = self.game_io.as_ref()
+                    .map(|io| std::mem::take(&mut *io.sfx.lock().unwrap()))
+                    .unwrap_or_default();
                 let scene = serde_json::json!({
                     "w": state.get("w").map(Self::json_num).unwrap_or(0.0),
                     "h": state.get("h").map(Self::json_num).unwrap_or(0.0),
                     "camera_x": state.get("camera_x").map(Self::json_num).unwrap_or(0.0),
                     "camera_y": state.get("camera_y").map(Self::json_num).unwrap_or(0.0),
                     "entities": entities.iter().map(Self::entity_json).collect::<Vec<_>>(),
+                    "map": map_rows,
+                    "sfx": sfx_events,
                     "hud": match hud { Value::Dict(hd) => hd.iter()
                         .map(|(k,v)| (k.clone(), Self::json_val(v)))
                         .collect::<serde_json::Map<_,_>>().into(),

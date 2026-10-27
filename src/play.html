@@ -128,6 +128,21 @@ function paint(frame) {
   for (let r = 0; r < h; r++) for (let c = 0; c < w; c++) {
     if ((r + c) % 2 === 0) { ctx.fillStyle = '#0a110d'; ctx.fillRect(c * cell, r * cell, cell, cell); }
   }
+  // terrain — the map's solid cells paint as beveled stone under the actors
+  const map = f.map;
+  if (Array.isArray(map)) {
+    for (let r = 0; r < map.length && r < h; r++) {
+      const row = map[r] || '';
+      for (let c = 0; c < row.length && c < w; c++) {
+        const ch = row[c];
+        if (ch !== ' ' && ch !== '.') {
+          const x = c * cell, y = r * cell;
+          ctx.fillStyle = '#1f3027'; ctx.fillRect(x, y, cell, cell);
+          ctx.fillStyle = '#2e4639'; ctx.fillRect(x + 1, y + 1, cell - 2, 3);
+        }
+      }
+    }
+  }
   for (const e of (f.entities || [])) {
     const ex = e.x - (f.camera_x || 0), ey = e.y - (f.camera_y || 0);
     drawSprite(ctx, e.sprite || e.name || 'orb', ex * cell, ey * cell, cell);
@@ -137,6 +152,28 @@ function paint(frame) {
   const meta = Object.entries(hud).map(([k, v]) => `${k} ${v}`).join(' · ');
   document.getElementById('hudMeta').textContent = meta;
   document.getElementById('hudTitle').textContent = NAME.toUpperCase();
+  // sound events — a named tone per sfx() the program emitted this frame
+  for (const s of (f.sfx || [])) playSfx(s);
+}
+
+// WebAudio sfx — named one-shot tones (no assets, all synthesized)
+let _actx = null;
+function playSfx(name) {
+  try {
+    if (!_actx) _actx = new (window.AudioContext || window.webkitAudioContext)();
+    const t = _actx.currentTime, osc = _actx.createOscillator(), g = _actx.createGain();
+    const FREQ = { jump: 320, coin: 880, hit: 140, win: 660, die: 90, beep: 440 };
+    const f0 = FREQ[name] || 520;
+    osc.type = name === 'hit' || name === 'die' ? 'sawtooth' : 'square';
+    osc.frequency.setValueAtTime(f0, t);
+    if (name === 'coin') osc.frequency.exponentialRampToValueAtTime(f0 * 1.6, t + 0.09);
+    if (name === 'win') osc.frequency.exponentialRampToValueAtTime(f0 * 1.5, t + 0.25);
+    if (name === 'die') osc.frequency.exponentialRampToValueAtTime(f0 * 0.4, t + 0.4);
+    g.gain.setValueAtTime(0.06, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.28);
+    osc.connect(g); g.connect(_actx.destination);
+    osc.start(t); osc.stop(t + 0.3);
+  } catch (e) { /* audio unavailable */ }
 }
 
 async function start() {

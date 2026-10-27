@@ -1,0 +1,90 @@
+# climb.veldt — a real-time platformer (engine builtins)
+# WASD/arrows move, SPACE/up jumps. The grown plat_move policy
+# auto-plays when no keys are held. Veldt studio -> /play/climb
+#   agent "improve plat_move" evolves the jump/walk policy.
+
+# --- breedable policy: pick a move when no keys are held ---
+# (px,py,ex,ey) -> [dx,jump] — walk toward the exit, jump over gaps/walls
+grow fn plat_move(px: int, py: int, ex: int, ey: int)
+        test plat_move(2, 11, 34, 3) == [1, 0] {
+    let dx = 0
+    let j = 0
+    if ex > px { dx = 1 }
+    if ex < px { dx = -1 }
+    if ey < py and dx == 0 { j = 1 }   # exit above — jump toward it
+    return [dx, j]
+}
+
+# --- the level: a platformer map as tile rows ---
+# floor, raised platforms, a pit to jump. Solid = #.
+let lvl = canvas_new(36, 14, " ")
+lvl = canvas_fill(lvl, 0, 13, 36, 1, "#")     # ground
+lvl = canvas_fill(lvl, 5, 10, 6, 1, "#")      # platform 1
+lvl = canvas_fill(lvl, 13, 7, 6, 1, "#")      # platform 2
+lvl = canvas_fill(lvl, 21, 4, 6, 1, "#")      # platform 3
+lvl = canvas_fill(lvl, 29, 10, 5, 1, "#")     # upper walk
+lvl = canvas_fill(lvl, 14, 13, 4, 1, " ")     # a pit in the ground
+
+let g = game_new(36, 14)
+let player = entity("player", 2, 11, "hero")
+let exit = entity("exit", 34, 12, "exit")
+let coins = [entity("coin", 7, 9, "coin"), entity("coin", 16, 6, "coin"),
+             entity("coin", 24, 3, "coin"), entity("coin", 31, 9, "coin")]
+let hp = 100
+let score = 0
+let won = false
+
+# --- real-time platformer loop ---
+while game_running() and not won {
+    let k = keys()
+    let dx = 0
+    let jump = 0
+    if k.contains("left") { dx = -1 }
+    if k.contains("right") { dx = 1 }
+    if k.contains("up") or k.contains("space") { jump = 1 }
+    if dx == 0 and jump == 0 {
+        let m = plat_move(player["x"], player["y"], exit["x"], exit["y"])
+        dx = m[0]
+        jump = m[1]
+    }
+
+    # horizontal — move if the target tile is open
+    let p2 = ent_move(player, dx, 0)
+    if not tile_solid(lvl, p2["x"], p2["y"]) { player = p2 }
+
+    # jump — launch up only when grounded
+    if jump == 1 and on_ground(player, lvl) {
+        player = ent_vel(player, 0, -1.6)
+    }
+    # gravity + land
+    player = physics_tick(player, lvl, 0.35)
+
+    # grab coins
+    let remaining = []
+    let gi = 0
+    while gi < coins.len() {
+        let c = coins[gi]
+        if collide(player, c) {
+            score = score + 100
+        } else {
+            remaining.append(c)
+        }
+        gi = gi + 1
+    }
+    coins = remaining
+
+    if collide(player, exit) { won = true }
+
+    let hud = dict()
+    hud["score"] = score
+    hud["coins"] = coins.len()
+    let scene = [player, exit]
+    gi = 0
+    while gi < coins.len() {
+        scene.append(coins[gi])
+        gi = gi + 1
+    }
+    game_frame(g, scene, hud, lvl)
+    sleep(80)
+}
+print("finished — score " + score)
