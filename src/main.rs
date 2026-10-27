@@ -906,10 +906,16 @@ fn main() {
                         // drop program-level noise — a wrapped body is a
                         // module of one fn by construction; the garden
                         // calls it dynamically, nothing here does
+                        // probes already cover birth-trials — a `grow fn`
+                        // without a test clause is only a warning if the
+                        // family has no probes either
+                        let has_probes = v.probes.get(name)
+                            .map(|p| !p.is_empty()).unwrap_or(false);
                         let warns: Vec<String> = lint(&[wrapped])
                             .into_iter()
                             .filter(|w| !w.contains("defined but never called")
-                                && !w.contains("no top-level statements"))
+                                && !w.contains("no top-level statements")
+                                && !(has_probes && w.contains("has no test clause")))
                             .filter(|w| !bugs_only
                                 || crate::evolve::is_realbug_warning(w))
                             .collect();
