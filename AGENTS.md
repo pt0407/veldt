@@ -49,6 +49,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] rewrite convergence reporting: rewrite_one now detects when the rewritten body is identical to an existing variant and reports "rewrites to name#K (already exists)" instead of silently deduping. Post-tend garden: --all --dry is 0 — every reachable idiom was rewritten in place by the tend pass.
 - [Devin/main-side] stats --exact recount: 32 proven-equivalent (up from 27 — min/max/sum/unique/index_of ops unlocked families). `veldt help rewrite` shipped. `veldt tend` ran live: 16 healed + 41 idiom-optimized. stats now tracks "idiom rewrite" as a mutation source (56 births, avg fitness 1.07).
 - [Devin/main-side] CLI `veldt tend` now runs the idiom pass too (was only inside evolve --tend): healthy variants get in-place idiom rewrites (same variants, no new birth) alongside sick-healing. Live run: 16 healed + 41 idiom-optimized. `veldt rewrite <name#N> --show` previews rewritten source without birthing.
 - [Devin/main-side] tend now optimizes: tend_garden applies idiom_rewrite_body (new self-free pass) after dead-code repairs — `veldt tend` and `evolve --tend` rewrite sort-extremum/dedup/linsearch/accum idioms in place as part of healing. 21/21 evolve tests.

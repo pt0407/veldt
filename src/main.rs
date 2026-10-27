@@ -6253,7 +6253,18 @@ fn rewrite_one(veldt: &mut veldt::Veldt, name: &str, vid: u32, quiet: bool) -> b
     };
     let mut evolver = evolve::Evolver::new();
     let new_body = evolver.rewrite_idioms(&entry.body);
-    if format!("{:?}", new_body) == format!("{:?}", entry.body) { return false; }
+    let new_key = format!("{:?}", new_body);
+    if new_key == format!("{:?}", entry.body) { return false; }
+    // convergence — the rewritten body is identical to an existing
+    // variant; point at it instead of birthing a silent duplicate
+    if let Some(dup) = veldt.functions[name].iter()
+        .find(|e| format!("{:?}", e.body) == new_key) {
+        if !quiet {
+            println!("{}#{} — rewrites to {}#{} (already exists, nothing born)",
+                     name, vid, name, dup.id);
+        }
+        return false;
+    }
     let source = format!("fn {}(...) {{ [idiom rewrite of {}#{}] }}", name, name, vid);
     let new_id = veldt.grow_function_full(name, entry.params.clone(), new_body,
         entry.tests.clone(), &source, vec![entry.id],
