@@ -49,6 +49,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] contains idiom: membership early-exit loops rewritten to xs.contains(t) — both `for x in xs { if x==t {return true} } return false` and the while-index form. SMT: take/skip (concrete n) + list Slice with concrete bounds added as exact ops.
 - [Devin/main-side] CSE fix 2: the reassign guard was top-level-only — `dy = v` inside nested if/while bodies slipped through and broke hero_move#4 AGAIN (birthed twice). Guard now recurses into If/While/For/Try/Match bodies for BOTH the dup-var check and the dx-check. Pruned the bad hero_move#4; the idiom correctly refuses hero_move now (dy IS assigned in nested ifs). 22/22.
 - [Devin/main-side] CSE BUGFIX: the dedup could drop `let dy` even when `dy` was reassigned downstream — produced `dy assigned but never declared` in hero_move#4. Guard added: bail when the dup var is an Assign target in the tail. Pruned the bad variant; re-sweep born clean. New test covers the reassign case. 22/22.
 - [Devin/main-side] CSE idiom live-run: 33 dry matches -> 6 births (the rest converged to existing variants — dedup working as designed). hero_move#1-3 CSE'd (the `let dy = same expr` lint hits). 22/22 evolve tests.

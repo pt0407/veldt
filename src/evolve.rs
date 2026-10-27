@@ -980,7 +980,109 @@ impl Evolver {
         if let Some(r) = Self::accum_window(win) { return Some(r); }
         if let Some(r) = Self::linsearch_window(win) { return Some(r); }
         if let Some(r) = Self::dedup_window(win) { return Some(r); }
+        if let Some(r) = Self::contains_window(win) { return Some(r); }
+        if let Some(r) = Self::while_contains_window(win) { return Some(r); }
         Self::cse_window(win)
+    }
+
+    /// Membership early-exit loop -> `xs.contains(t)`:
+    ///   `for x in xs { if x == t { return true } } return false`
+    fn contains_window(win: &[Stmt]) -> Option<(usize, Vec<Stmt>)> {
+        if win.len() < 2 { return None; }
+        let (x, xs, t) = match &win[0] {
+            Stmt::For(x, xs, body) if body.len() == 1 => {
+                match &body[0] {
+                    Stmt::If(
+                        Expr::BinOp(l, BinOp::Eq, r),
+                        then_b, els
+                    ) if els.is_none() && then_b.len() == 1
+                        && matches!(&then_b[0], Stmt::Return(Some(e))
+                            if matches!(e, Expr::Bool(true))) =>
+                    {
+                        let (l, r) = (l.as_ref(), r.as_ref());
+                        let t = if matches!(l, Expr::Var(v) if v == x) { r }
+                            else if matches!(r, Expr::Var(v) if v == x) { l }
+                            else { return None; };
+                        if matches!(t, Expr::Var(v) if v == x) { return None; }
+                        (x.clone(), xs.clone(), t.clone())
+                    }
+                    _ => return None,
+                }
+            }
+            _ => return None,
+        };
+        if !matches!(&win[1], Stmt::Return(Some(e)) if matches!(e, Expr::Bool(false))) {
+            return None;
+        }
+        let set: std::collections::HashSet<String> = [x.clone()].into_iter().collect();
+        if expr_uses(&t, &set) { return None; }
+        Some((2, vec![Stmt::Return(Some(Expr::MethodCall(
+            Box::new(xs), "contains".into(), vec![t])))]))
+    }
+
+    /// While-index membership test -> `xs.contains(t)`:
+    ///   `let i=0; while i<xs.len() { if xs[i]==t { return true } i+=1 }
+    ///    return false`
+    fn while_contains_window(win: &[Stmt]) -> Option<(usize, Vec<Stmt>)> {
+        if win.len() < 3 { return None; }
+        let i_name = match &win[0] {
+            Stmt::Let(n, Expr::Int(0)) | Stmt::Assign(n, Expr::Int(0)) => n.clone(),
+            _ => return None,
+        };
+        let (xs, t) = match &win[1] {
+            Stmt::While(cond, body) => {
+                let xs = match cond {
+                    Expr::BinOp(l, BinOp::Lt, r) => {
+                        if !matches!(l.as_ref(), Expr::Var(v) if *v == i_name) { return None; }
+                        match r.as_ref() {
+                            Expr::MethodCall(b, m, a) if m == "len" && a.is_empty() =>
+                                (**b).clone(),
+                            _ => return None,
+                        }
+                    }
+                    _ => return None,
+                };
+                if body.len() != 2 { return None; }
+                let is_incr = |s: &Stmt| matches!(s,
+                    Stmt::Assign(t2, Expr::BinOp(l2, BinOp::Add, r2))
+                        if *t2 == i_name
+                        && matches!(l2.as_ref(), Expr::Var(v) if *v == i_name)
+                        && matches!(r2.as_ref(), Expr::Int(1)));
+                let if_s = if is_incr(&body[0]) { &body[1] }
+                    else if is_incr(&body[1]) { &body[0] }
+                    else { return None; };
+                let t = match if_s {
+                    Stmt::If(c, then_b, _) if then_b.len() == 1
+                        && matches!(&then_b[0], Stmt::Return(Some(e))
+                            if matches!(e, Expr::Bool(true))) =>
+                    {
+                        match c {
+                            Expr::BinOp(l, BinOp::Eq, r) => {
+                                let elem = |e: &Expr| matches!(e,
+                                    Expr::Index(b, i2)
+                                        if b.as_ref() == &xs
+                                        && matches!(i2.as_ref(), Expr::Var(v) if *v == i_name));
+                                if elem(l) { (**r).clone() }
+                                else if elem(r) { (**l).clone() }
+                                else { return None; }
+                            }
+                            _ => return None,
+                        }
+                    }
+                    _ => return None,
+                };
+                (xs, t)
+            }
+            _ => return None,
+        };
+        if !matches!(&win[2], Stmt::Return(Some(e)) if matches!(e, Expr::Bool(false))) {
+            return None;
+        }
+        let set: std::collections::HashSet<String> =
+            [i_name.clone()].into_iter().collect();
+        if expr_uses(&t, &set) { return None; }
+        Some((3, vec![Stmt::Return(Some(Expr::MethodCall(
+            Box::new(xs), "contains".into(), vec![t])))]))
     }
 
     /// `let dy = E` where an earlier `let dx = E` (identical pure
@@ -2772,6 +2874,31 @@ mod asymptotic_proof {
         let out = evolver.mutate_body(&body, Mutation::IdiomRewrite);
         let src = crate::fmt::format_program(&out);
         assert!(src.contains("let dy"), "impure CSE:\n{}", src);
+    }
+
+    #[test]
+    fn idiom_rewrite_contains_membership_loop() {
+        let mut evolver = Evolver::new();
+        // for-form: for x in xs { if x == t { return true } } return false
+        let body = parse_fn_body(
+            "for x in xs {\n  if x == t { return true }\n}\nreturn false");
+        let out = evolver.mutate_body(&body, Mutation::IdiomRewrite);
+        let src = crate::fmt::format_program(&out);
+        assert!(src.contains("contains") && !src.contains("for"),
+            "membership for-loop not rewritten:\n{}", src);
+        // while-form: let i=0; while i<xs.len() { if xs[i]==t {return true} i+=1 } return false
+        let body = parse_fn_body(
+            "let i = 0\nwhile i < xs.len() {\n  if xs[i] == t { return true }\n  i += 1\n}\nreturn false");
+        let out = evolver.mutate_body(&body, Mutation::IdiomRewrite);
+        let src = crate::fmt::format_program(&out);
+        assert!(src.contains("contains") && !src.contains("while"),
+            "membership while-loop not rewritten:\n{}", src);
+        // tail returns -1 (linsearch shape) -> NOT contains
+        let body = parse_fn_body(
+            "for x in xs {\n  if x == t { return true }\n}\nreturn -1");
+        let out = evolver.mutate_body(&body, Mutation::IdiomRewrite);
+        let src = crate::fmt::format_program(&out);
+        assert!(!src.contains("contains("), "wrong tail:\n{}", src);
     }
 
     #[test]
