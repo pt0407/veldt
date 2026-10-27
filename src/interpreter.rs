@@ -121,6 +121,8 @@ pub struct GameIo {
     pub keys: std::sync::Mutex<Vec<String>>,
     /// latest emitted game_frame scene (serialized JSON) — /api/game/frame reads it
     pub frame: std::sync::Mutex<Option<String>>,
+    /// pending sound events — sfx() pushes, game_frame drains into the scene
+    pub sfx: std::sync::Mutex<Vec<String>>,
     /// session alive — game_running() polls this; /api/game/stop clears it
     pub running: std::sync::atomic::AtomicBool,
 }
@@ -130,6 +132,7 @@ impl GameIo {
         std::sync::Arc::new(GameIo {
             keys: std::sync::Mutex::new(Vec::new()),
             frame: std::sync::Mutex::new(None),
+            sfx: std::sync::Mutex::new(Vec::new()),
             running: std::sync::atomic::AtomicBool::new(true),
         })
     }
@@ -2885,6 +2888,35 @@ impl Interpreter {
                     _ => im::Vector::new() };
                 Ok(Some(Value::List(ents)))
             }
+            "sfx" => {
+                // sfx(name) → queue a sound event for this frame — the
+                // browser plays it via WebAudio; CLI mode rings a bell
+                let name = match args.get(0) {
+                    Some(Value::Str(s)) => s.to_string(),
+                    _ => return Err("sfx(name) expects a string".into()),
+                };
+                match &self.game_io {
+                    Some(io) => { io.sfx.lock().unwrap().push(name); }
+                    None => {
+                        if let Some(buf) = &mut self.print_buffer {
+                            buf.push_str(&format!("[sfx:{}]", name));
+                        }
+                    }
+                }
+                Ok(Some(Value::Null))
+            }
+            "beep" => {
+                // beep(freq, ms) → a terminal bell / tone for CLI games
+                let (freq, ms) = match (args.get(0), args.get(1)) {
+                    (Some(f), Some(m)) => (Self::num_f(f)?, Self::num_f(m)?),
+                    _ => return Err("beep(freq, ms) expects two numbers".into()),
+                };
+                let _ = (freq, ms);
+                if let Some(buf) = &mut self.print_buffer {
+                    buf.push('\x07');
+                } else { print!("\x07"); }
+                Ok(Some(Value::Null))
+            }
             "scene_find" => {
                 // scene_find(scene, tag) → list of entities with that tag
                 let (d, tag) = match (args.get(0), args.get(1)) {
@@ -2931,6 +2963,10 @@ impl Interpreter {
                     },
                     _ => serde_json::Value::Null,
                 };
+                // drain any queued sfx into this frame — the browser plays them
+                let sfx_events: Vec<String> = self.game_io.as_ref()
+                    .map(|io| std::mem::take(&mut *io.sfx.lock().unwrap()))
+                    .unwrap_or_default();
                 let scene = serde_json::json!({
                     "w": state.get("w").map(Self::json_num).unwrap_or(0.0),
                     "h": state.get("h").map(Self::json_num).unwrap_or(0.0),
@@ -2938,6 +2974,7 @@ impl Interpreter {
                     "camera_y": state.get("camera_y").map(Self::json_num).unwrap_or(0.0),
                     "entities": entities.iter().map(Self::entity_json).collect::<Vec<_>>(),
                     "map": map_rows,
+                    "sfx": sfx_events,
                     "hud": match hud { Value::Dict(hd) => hd.iter()
                         .map(|(k,v)| (k.clone(), Self::json_val(v)))
                         .collect::<serde_json::Map<_,_>>().into(),

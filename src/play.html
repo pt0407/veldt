@@ -152,6 +152,28 @@ function paint(frame) {
   const meta = Object.entries(hud).map(([k, v]) => `${k} ${v}`).join(' · ');
   document.getElementById('hudMeta').textContent = meta;
   document.getElementById('hudTitle').textContent = NAME.toUpperCase();
+  // sound events — a named tone per sfx() the program emitted this frame
+  for (const s of (f.sfx || [])) playSfx(s);
+}
+
+// WebAudio sfx — named one-shot tones (no assets, all synthesized)
+let _actx = null;
+function playSfx(name) {
+  try {
+    if (!_actx) _actx = new (window.AudioContext || window.webkitAudioContext)();
+    const t = _actx.currentTime, osc = _actx.createOscillator(), g = _actx.createGain();
+    const FREQ = { jump: 320, coin: 880, hit: 140, win: 660, die: 90, beep: 440 };
+    const f0 = FREQ[name] || 520;
+    osc.type = name === 'hit' || name === 'die' ? 'sawtooth' : 'square';
+    osc.frequency.setValueAtTime(f0, t);
+    if (name === 'coin') osc.frequency.exponentialRampToValueAtTime(f0 * 1.6, t + 0.09);
+    if (name === 'win') osc.frequency.exponentialRampToValueAtTime(f0 * 1.5, t + 0.25);
+    if (name === 'die') osc.frequency.exponentialRampToValueAtTime(f0 * 0.4, t + 0.4);
+    g.gain.setValueAtTime(0.06, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.28);
+    osc.connect(g); g.connect(_actx.destination);
+    osc.start(t); osc.stop(t + 0.3);
+  } catch (e) { /* audio unavailable */ }
 }
 
 async function start() {
