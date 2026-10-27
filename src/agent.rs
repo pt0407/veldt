@@ -241,6 +241,9 @@ pub fn respond(task: &str, editor_source: &str, veldt: &mut Veldt) -> AgentRespo
     if hasw(&["adopt"]) {
         return adopt_intent(&words, veldt);
     }
+    if hasw(&["verify", "prove"]) {
+        return verify_intent(&words, veldt);
+    }
     if hasw(&["evolve", "mutate", "generation"]) {
         return evolve_intent(&words, veldt);
     }
@@ -1615,6 +1618,19 @@ fn verify_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
         Some(n) => n,
         None => return plain("Verify which family? e.g. \"verify fib\"."),
     };
+    // exact first: Z3 proves equivalence or finds a real counterexample
+    #[cfg(feature = "smt")]
+    {
+        match crate::smt::verify_exact_on_veldt(veldt, &name) {
+            Ok(None) => return plain(&format!(
+                "{} — PROVABLY EQUIVALENT: every healthy variant matches the fittest under Z3.",
+                name)),
+            Ok(Some((id, cex))) => return plain(&format!(
+                "{}#{} is PROVABLY DIVERGENT at ({}) — `veldt verify {} --exact --quarantine` demotes it.",
+                name, id, cex.join(", "), name)),
+            Err(_) => {} // encoding can't reach — fall to bounded
+        }
+    }
     match crate::verify_family_find_divergent(&name) {
         Some(id) => plain(&format!(
             "{} — variant #{} diverges on a sampled input. The family doesn't agree.", name, id)),
