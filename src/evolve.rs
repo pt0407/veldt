@@ -960,7 +960,78 @@ impl Evolver {
                 _ => {}
             }
         }
-        Self::accum_window(win)
+        if let Some(r) = Self::accum_window(win) { return Some(r); }
+        Self::linsearch_window(win)
+    }
+
+    /// O(n) hand-rolled linear search -> `xs.index_of(t)` builtin:
+    ///   `let i = 0; while i < xs.len() { if xs[i] == t { return i } i += 1 }`
+    ///   `return -1`  ->  `return xs.index_of(t)`
+    fn linsearch_window(win: &[Stmt]) -> Option<(usize, Vec<Stmt>)> {
+        if win.len() < 3 { return None; }
+        let i_name = match &win[0] {
+            Stmt::Let(n, Expr::Int(0)) | Stmt::Assign(n, Expr::Int(0)) => n.clone(),
+            _ => return None,
+        };
+        let (xs, t) = match &win[1] {
+            Stmt::While(cond, body) => {
+                let xs = match cond {
+                    Expr::BinOp(l, BinOp::Lt, r) => {
+                        if !matches!(l.as_ref(), Expr::Var(v) if *v == i_name) { return None; }
+                        match r.as_ref() {
+                            Expr::MethodCall(b, m, a) if m == "len" && a.is_empty() =>
+                                (**b).clone(),
+                            _ => return None,
+                        }
+                    }
+                    _ => return None,
+                };
+                // body must be [If(xs[i] == t, [return i]), i += 1] (either order)
+                if body.len() != 2 { return None; }
+                let is_incr = |s: &Stmt| matches!(s,
+                    Stmt::Assign(t2, Expr::BinOp(l2, BinOp::Add, r2))
+                        if *t2 == i_name
+                        && matches!(l2.as_ref(), Expr::Var(v) if *v == i_name)
+                        && matches!(r2.as_ref(), Expr::Int(1)));
+                let if_s = if is_incr(&body[0]) { &body[1] }
+                    else if is_incr(&body[1]) { &body[0] }
+                    else { return None; };
+                let t = match if_s {
+                    Stmt::If(c, then_b, _) if then_b.len() == 1
+                        && matches!(&then_b[0], Stmt::Return(Some(r))
+                            if matches!(r, Expr::Var(v) if *v == i_name)) =>
+                    {
+                        match c {
+                            Expr::BinOp(l, BinOp::Eq, r) => {
+                                let elem = |e: &Expr| matches!(e,
+                                    Expr::Index(b, i2)
+                                        if b.as_ref() == &xs
+                                        && matches!(i2.as_ref(), Expr::Var(v) if *v == i_name));
+                                if elem(l) { (**r).clone() }
+                                else if elem(r) { (**l).clone() }
+                                else { return None; }
+                            }
+                            _ => return None,
+                        }
+                    }
+                    _ => return None,
+                };
+                (xs, t)
+            }
+            _ => return None,
+        };
+        // tail: return -1
+        if !matches!(&win[2], Stmt::Return(Some(e))
+            if matches!(e, Expr::Int(-1))
+               || matches!(e, Expr::UnaryOp(UnaryOp::Neg, i)
+                    if matches!(i.as_ref(), Expr::Int(1)))) {
+            return None;
+        }
+        let set: std::collections::HashSet<String> =
+            [i_name.clone()].into_iter().collect();
+        if expr_uses(&t, &set) { return None; }
+        Some((3, vec![Stmt::Return(Some(Expr::MethodCall(
+            Box::new(xs), "index_of".into(), vec![t])))]))
     }
 
     /// O(n) accumulate loop -> O(1) closed form:
@@ -2459,6 +2530,23 @@ mod asymptotic_proof {
         let out = evolver.mutate_body(&body, Mutation::IdiomRewrite);
         let src = crate::fmt::format_program(&out);
         assert!(src.contains("for"), "unsafe rewrite:\n{}", src);
+    }
+
+    #[test]
+    fn idiom_rewrite_linsearch_to_index_of() {
+        let mut evolver = Evolver::new();
+        let body = parse_fn_body(
+            "let i = 0\nwhile i < xs.len() {\n  if xs[i] == t { return i }\n  i += 1\n}\nreturn -1");
+        let out = evolver.mutate_body(&body, Mutation::IdiomRewrite);
+        let src = crate::fmt::format_program(&out);
+        assert!(src.contains("index_of") && !src.contains("while"),
+            "linsearch not rewritten:\n{}", src);
+        // t referencing i must NOT rewrite
+        let body = parse_fn_body(
+            "let i = 0\nwhile i < xs.len() {\n  if xs[i] == i { return i }\n  i += 1\n}\nreturn -1");
+        let out = evolver.mutate_body(&body, Mutation::IdiomRewrite);
+        let src = crate::fmt::format_program(&out);
+        assert!(src.contains("while"), "unsafe rewrite:\n{}", src);
     }
 
     #[test]

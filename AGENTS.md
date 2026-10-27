@@ -49,6 +49,14 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] list.index_of EXISTS NOW + linsearch idiom: xs.index_of(v) builtin added (position or -1, values_eq, 2n steps) — help/reference promised it but the method was missing. linsearch_window: `let i=0; while i<xs.len() { if xs[i]==t { return i } i+=1 } return -1` -> `return xs.index_of(t)` guarded by t-not-using-i. 20/20 evolve tests.
+- [Devin/main-side] list.index_of EXISTS NOW + linsearch idiom:
+  `xs.index_of(v)` builtin added (position or -1, values_eq, 2n
+  steps) — the help/reference already promised it but the method
+  was missing. linsearch_window: `let i=0; while i<xs.len() { if
+  xs[i]==t { return i } i+=1 } return -1` -> `return xs.index_of(t)`,
+  guarded by t-not-using-i. Test: idiom_rewrite_linsearch_to_index_of
+  (+unsafe-guard). 20/20 evolve tests.
 - [Devin/main-side] SMT ROUND 2: exact list ops (sum->x0+..+xN,
   contains->disjunction, index_of->ite-chain, first/last/push) +
   range(n) with concrete n + Expr::Interp -> vstr_cat/vstr_of chain.

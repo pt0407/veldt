@@ -5123,6 +5123,15 @@ impl Interpreter {
                 None => Err("contains(x) needs an argument".into()),
                 }
             },
+            (Value::List(items), "index_of") => {
+                self.step_count += (items.len() as u64) * 2;
+                match args.get(0) {
+                    Some(v) => Ok(Value::Int(
+                        items.iter().position(|i| self.values_eq(i, v))
+                            .map(|p| p as i64).unwrap_or(-1))),
+                    None => Err("index_of(x) needs an argument".into()),
+                }
+            },
             (Value::List(items), "enumerate") => {
                 self.step_count += (items.len() as u64) * 2;
                 Ok(Value::List(
