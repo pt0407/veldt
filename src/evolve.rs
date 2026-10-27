@@ -572,22 +572,6 @@ impl Evolver {
         }
     }
 
-    fn describe_mutation(&self, m: Mutation, name: &str, id: u32) -> String {
-        match m {
-            Mutation::Constant => format!("constant mutation on {}#{}", name, id),
-            Mutation::Operator => format!("operator mutation on {}#{}", name, id),
-            Mutation::StatementSwap => format!("statement swap on {}#{}", name, id),
-            Mutation::DeadCodeRemoval => format!("dead code removal on {}#{}", name, id),
-            Mutation::Simplify => format!("simplification on {}#{}", name, id),
-            Mutation::ConstFold => format!("constant folding on {}#{}", name, id),
-            Mutation::DeadBranch => format!("dead branch elimination on {}#{}", name, id),
-            Mutation::ConstProp => format!("constant propagation on {}#{}", name, id),
-            Mutation::HoistInvariant => format!("loop-invariant hoist on {}#{}", name, id),
-            Mutation::EarlyExit => format!("early-exit fusion on {}#{}", name, id),
-            Mutation::IdiomRewrite => format!("algorithmic idiom rewrite on {}#{}", name, id),
-        }
-    }
-
     /// Pick + apply a mutation; re-roll (≤6x) when it leaves the body
     /// unchanged — conditional operators can't fire on every shape, and
     /// no-op children only burn budget downstream (clone rejection).
@@ -2169,14 +2153,6 @@ pub(crate) fn boundary_value(t: &Type, i: usize) -> Option<crate::interpreter::V
 }
 
 /// Constant condition truthiness — for dead-branch elimination.
-fn const_truthy(e: &Expr) -> Option<bool> {
-    match e {
-        Expr::Bool(b) => Some(*b),
-        Expr::Int(n) => Some(*n != 0),
-        Expr::Null => Some(false),
-        _ => None,
-    }
-}
 
 /// Pure literal — safe to substitute across statements.
 fn is_const_expr(e: &Expr) -> bool {
