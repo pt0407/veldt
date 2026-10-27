@@ -1644,3 +1644,17 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   ('make a X' / 'veldt game new --X'). veldt report — consolidated
   garden readout. VM parity verified for the whole engine surface.
   help game + reference.md updated. Suite: 82/82 + 50/50 green.
+- [Devin/main-side] OVERNIGHT part 3 — SIM-FITNESS EVOLUTION + genres:
+  veldt sim <game> [--pin fn=N] — a real headless playthrough that
+  reports won/score as JSON (interp.pin forces a name#N dispatch).
+  veldt evolve --sim <game> [--family F] --until-win — GENERATIONAL
+  playthrough-fitness: every cycle's healthy mutants play the real
+  game, the winner's fitness reflects the actual outcome, the next
+  mutation breeds from the variant that plays best. Auto-detects the
+  policy fn from the game's grow fn. Verified: snake_dir variants
+  scored 10-200 across generations; plat_move scores 0 (honest hard
+  game). This is evolution breeding WINNERS by playthrough, not proxy.
+  7 GENRE TEMPLATES on the DSL: topdown/platformer/shooter/snake/
+  breakout/racer (+ ascii default + rogue) — 'veldt game new --<genre>'
+  or 'agent make a X'; '--genres' lists them. help game + reference.md
+  cover the full surface. Suite: 82/82 + 50/50 green.
