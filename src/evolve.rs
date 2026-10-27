@@ -967,6 +967,7 @@ impl Evolver {
         if let Some(r) = Self::contains_window(win) { return Some(r); }
         if let Some(r) = Self::while_contains_window(win) { return Some(r); }
         if let Some(r) = Self::count_window(win) { return Some(r); }
+        if let Some(r) = Self::map_filter_window(win) { return Some(r); }
         Self::cse_window(win)
     }
 
@@ -1232,6 +1233,79 @@ impl Evolver {
                 if !is_push { return None; }
                 return Some((2, vec![Stmt::Let(out_name, Expr::MethodCall(
                     Box::new(xs.clone()), "unique".into(), vec![]))]));
+            }
+        }
+        None
+    }
+
+    /// `let out = []; for x in xs { out = out.push(f(x)) } return out`
+    /// (or `out.append(f(x))`)  ->  `return xs.map(fn(x){ return f(x) })`.
+    /// Filter form: `if cond { out = out.push(x) }` -> `xs.filter(fn(x){return cond})`.
+    fn map_filter_window(win: &[Stmt]) -> Option<(usize, Vec<Stmt>)> {
+        if win.len() < 3 { return None; }
+        let out_name = match &win[0] {
+            Stmt::Let(n, Expr::List(items)) if items.is_empty() => n.clone(),
+            _ => return None,
+        };
+        if let Stmt::For(x, xs, body) = &win[1] {
+            if body.is_empty() { return None; }
+            // `return out` right after the loop
+            let ret_out = matches!(&win[2],
+                Stmt::Return(Some(Expr::Var(v))) if v == &out_name);
+            if !ret_out { return None; }
+            let lam = |body_stmts: Vec<Stmt>| Expr::Lambda(
+                vec![crate::ast::Param {
+                    name: x.clone(),
+                    typ: crate::ast::Type::Any,
+                }],
+                body_stmts,
+            );
+            // helper: is `s` an `out.append(E)` or `out = out.push(E)`?
+            let pushed = |s: &Stmt| -> Option<Expr> {
+                match s {
+                    Stmt::ExprStmt(Expr::MethodCall(o, m, a))
+                        if m == "append" && a.len() == 1
+                        && matches!(o.as_ref(), Expr::Var(v) if v == &out_name) =>
+                        Some(a[0].clone()),
+                    Stmt::Assign(t, Expr::MethodCall(o, m, a))
+                        if t == &out_name && m == "push" && a.len() == 1
+                        && matches!(o.as_ref(), Expr::Var(v) if v == &out_name) =>
+                        Some(a[0].clone()),
+                    _ => None,
+                }
+            };
+            let mut out_used = std::collections::HashSet::new();
+            out_used.insert(out_name.clone());
+            // map form: body == [ push(f(x)) ]
+            if body.len() == 1 {
+                if let Some(f) = pushed(&body[0]) {
+                    if expr_uses(&f, &out_used) { return None; }
+                    // map-identity `out.push(x)` -> `return xs`
+                    if matches!(&f, Expr::Var(v) if v == x) {
+                        return Some((3, vec![Stmt::Return(Some(
+                            xs.clone()))]));
+                    }
+                    return Some((3, vec![Stmt::Return(Some(
+                        Expr::MethodCall(
+                            Box::new(xs.clone()),
+                            "map".into(),
+                            vec![lam(vec![Stmt::Return(Some(f))])],
+                        )))]));
+                }
+            }
+            // filter form: body == [ if cond { push(x) } ]
+            if let Stmt::If(cond, then_b, None) = &body[0] {
+                if body.len() != 1 || then_b.len() != 1 { return None; }
+                if let Some(f) = pushed(&then_b[0]) {
+                    if !matches!(&f, Expr::Var(v) if v == x) { return None; }
+                    if expr_uses(cond, &out_used) { return None; }
+                    return Some((3, vec![Stmt::Return(Some(
+                        Expr::MethodCall(
+                            Box::new(xs.clone()),
+                            "filter".into(),
+                            vec![lam(vec![Stmt::Return(Some(cond.clone()))])],
+                        )))]));
+                }
             }
         }
         None
@@ -2938,6 +3012,29 @@ mod asymptotic_proof {
         let out = evolver.mutate_body(&body, Mutation::IdiomRewrite);
         let src = crate::fmt::format_program(&out);
         assert!(src.contains("for"), "unsafe count rewrite:\n{}", src);
+    }
+
+    #[test]
+    fn idiom_rewrite_map_filter_loops() {
+        let mut evolver = Evolver::new();
+        // map: let out = []; for x in xs { out.append(x * 2) } return out
+        let body = parse_fn_body(
+            "let out = []\nfor x in xs {\n  out.append(x * 2)\n}\nreturn out");
+        let out = evolver.mutate_body(&body, Mutation::IdiomRewrite);
+        let src = crate::fmt::format_program(&out);
+        assert!(src.contains("map"), "map loop not rewritten:\n{}", src);
+        // filter: let out = []; for x in xs { if x > 2 { out.append(x) } } return out
+        let body = parse_fn_body(
+            "let out = []\nfor x in xs {\n  if x > 2 { out.append(x) }\n}\nreturn out");
+        let out = evolver.mutate_body(&body, Mutation::IdiomRewrite);
+        let src = crate::fmt::format_program(&out);
+        assert!(src.contains("filter"), "filter loop not rewritten:\n{}", src);
+        // bail: pushed expr uses the accumulator — must NOT rewrite
+        let body = parse_fn_body(
+            "let out = []\nfor x in xs {\n  out.append(out.len())\n}\nreturn out");
+        let out = evolver.mutate_body(&body, Mutation::IdiomRewrite);
+        let src = crate::fmt::format_program(&out);
+        assert!(!src.contains("map"), "unsafe map rewrite:\n{}", src);
     }
 
     #[test]
