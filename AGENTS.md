@@ -49,6 +49,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] idioms #11 + #12: "n = n + 1" element-count loop -> "xs.len()"; "found = true" flag loop -> "xs.contains(t)" (non-early-exit form — complements the early-return contains_window). Guards: target must not use loop var or accumulator.
 - [Devin/main-side] Loop-var fold generalized: "t=init; for x in iter { t += x }" emitted init + iter.sum() for ANY op before — now picks the fold method by op (Add->sum, Mul->product); `t *= x` -> init * iter.product() and Z3-proves equivalent. Non-fold ops bail.
 - [Devin/main-side] 10th idiom: manual extremum scan "let m=xs[0]; for x in xs { if x>m {m=x} } return m" -> "xs.max()" (and < for min). Live sweep: 28 matches found, 4 born (rest converged to existing bodies). All 4 operand-order forms handled; == and mixed comparators bail.
 - [Devin/main-side] tend --exact + rewrite --exact: both paths now gate idiom rewrites on Z3 proof via verify_bodies_exact — a rewrite that diverges or isn't provable is skipped/reported, never applied or born. Fixed a real panic: verify_bodies_exact skipped param_supported() so unsupported types (Any/Struct/Fn) hit make_sym_param's unreachable!() — now bails honestly. Also: lint warns `not x in y` parses as `(not x) in y`.

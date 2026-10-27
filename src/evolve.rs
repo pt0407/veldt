@@ -969,6 +969,7 @@ impl Evolver {
         if let Some(r) = Self::count_window(win) { return Some(r); }
         if let Some(r) = Self::map_filter_window(win) { return Some(r); }
         if let Some(r) = Self::extremum_scan_window(win) { return Some(r); }
+        if let Some(r) = Self::len_flag_window(win) { return Some(r); }
         Self::cse_window(win)
     }
 
@@ -1234,6 +1235,67 @@ impl Evolver {
                 if !is_push { return None; }
                 return Some((2, vec![Stmt::Let(out_name, Expr::MethodCall(
                     Box::new(xs.clone()), "unique".into(), vec![]))]));
+            }
+        }
+        None
+    }
+
+    /// `let n = 0; for x in xs { n = n + 1 } return n` -> `return xs.len()`.
+    /// `let found = false; for x in xs { if x == t { found = true } }
+    ///  return found` -> `return xs.contains(t)` (non-early-exit flag form).
+    fn len_flag_window(win: &[Stmt]) -> Option<(usize, Vec<Stmt>)> {
+        if win.len() < 3 { return None; }
+        // `0` for the len form, `false` for the flag form
+        let (v_name, is_zero, is_false) = match &win[0] {
+            Stmt::Let(n, Expr::Int(0)) | Stmt::Assign(n, Expr::Int(0)) =>
+                (n.clone(), true, false),
+            Stmt::Let(n, Expr::Bool(false)) | Stmt::Assign(n, Expr::Bool(false)) =>
+                (n.clone(), false, true),
+            _ => return None,
+        };
+        if let Stmt::For(x, xs, body) = &win[1] {
+            if body.len() != 1 { return None; }
+            if !matches!(&win[2], Stmt::Return(Some(Expr::Var(v))) if v == &v_name) {
+                return None;
+            }
+            // form A: `n = n + 1` or `n += 1` counting every element -> xs.len()
+            if is_zero {
+                let is_inc = matches!(&body[0],
+                    Stmt::Assign(t, Expr::BinOp(l, BinOp::Add, r))
+                        if t == &v_name
+                        && matches!(l.as_ref(), Expr::Var(v) if v == &v_name)
+                        && matches!(r.as_ref(), Expr::Int(1)))
+                    || matches!(&body[0],
+                        Stmt::Assign(t, Expr::BinOp(l, BinOp::Add, r))
+                            if t == &v_name
+                            && matches!(l.as_ref(), Expr::Int(1))
+                            && matches!(r.as_ref(), Expr::Var(v) if v == &v_name));
+                if is_inc {
+                    return Some((3, vec![Stmt::Return(Some(Expr::MethodCall(
+                        Box::new(xs.clone()), "len".into(), vec![])))]));
+                }
+            }
+            // form B: `let found = false; for x in xs { if x == t {
+            //   found = true } } return found` -> xs.contains(t)
+            if is_false {
+                if let Stmt::If(
+                    Expr::BinOp(l, BinOp::Eq, r), then_b, els) = &body[0] {
+                    if els.is_none() && then_b.len() == 1 {
+                        if matches!(&then_b[0],
+                            Stmt::Assign(t, Expr::Bool(true)) if t == &v_name) {
+                            let (l, r) = (l.as_ref(), r.as_ref());
+                            let target = if matches!(l, Expr::Var(v) if v == x) { r }
+                                else if matches!(r, Expr::Var(v) if v == x) { l }
+                                else { return None; };
+                            let mut used = std::collections::HashSet::new();
+                            used.insert(x.clone()); used.insert(v_name.clone());
+                            if expr_uses(target, &used) { return None; }
+                            return Some((3, vec![Stmt::Return(Some(Expr::MethodCall(
+                                Box::new(xs.clone()), "contains".into(),
+                                vec![target.clone()])))]));
+                        }
+                    }
+                }
             }
         }
         None
@@ -3125,6 +3187,29 @@ mod asymptotic_proof {
                     src, crate::fmt::format_program(&after), why),
             }
         }
+    }
+
+    #[test]
+    fn idiom_rewrite_len_and_flag_loops() {
+        let mut evolver = Evolver::new();
+        // element count -> xs.len()
+        let body = parse_fn_body(
+            "let n = 0\nfor x in xs { n = n + 1 }\nreturn n");
+        let out = evolver.mutate_body(&body, Mutation::IdiomRewrite);
+        let src = crate::fmt::format_program(&out);
+        assert!(src.contains("len"), "count loop not rewritten:\n{}", src);
+        // found-flag -> xs.contains(t)
+        let body = parse_fn_body(
+            "let found = false\nfor x in xs {\n  if x == t { found = true }\n}\nreturn found");
+        let out = evolver.mutate_body(&body, Mutation::IdiomRewrite);
+        let src = crate::fmt::format_program(&out);
+        assert!(src.contains("contains"), "flag loop not rewritten:\n{}", src);
+        // bail: flag set on a different condition (ne)
+        let body = parse_fn_body(
+            "let found = false\nfor x in xs {\n  if x != t { found = true }\n}\nreturn found");
+        let out = evolver.mutate_body(&body, Mutation::IdiomRewrite);
+        let src = crate::fmt::format_program(&out);
+        assert!(!src.contains("contains"), "unsafe flag rewrite:\n{}", src);
     }
 
     #[test]
