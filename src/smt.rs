@@ -1306,6 +1306,9 @@ fn vany() -> VAnySort {
         .variant("vbool", vec![("x", DatatypeAccessor::sort(Sort::bool()))])
         .variant("vstr", vec![("x", DatatypeAccessor::sort(vstr_sort()))])
         .variant("vnull", vec![])
+        // NOTE: no `vlist` — DatatypeAccessor can't express
+        // Array(Int, VAny) fields (no nested self-reference). Lists
+        // inside dicts stay an honest bail.
         .finish();
     VAnySort { dt }
 }
