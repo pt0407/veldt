@@ -464,7 +464,7 @@ impl Evolver {
     }
 
     /// Typed random value generation for probes.
-    fn gen_value(&mut self, typ: &Type) -> Option<crate::interpreter::Value> {
+    pub(crate) fn gen_value(&mut self, typ: &Type) -> Option<crate::interpreter::Value> {
         self.gen_value_scaled(typ, 0)
     }
 

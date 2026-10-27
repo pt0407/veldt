@@ -247,7 +247,7 @@ impl HealthChecker {
 
     /// Call a variant through the VM (boxed-Value ABI path) or the
     /// tree-walker — identical dispatch semantics either way.
-    fn call_one(interp: &mut Interpreter, vm: &mut Option<crate::vm::Vm>,
+    pub(crate) fn call_one(interp: &mut Interpreter, vm: &mut Option<crate::vm::Vm>,
                 name: &str, id: Option<u32>, args: Vec<Value>)
         -> Result<Value, String> {
         match vm {
@@ -277,7 +277,7 @@ impl HealthChecker {
         Some(v)
     }
 
-    fn load_snapshot_into_interp(
+    pub(crate) fn load_snapshot_into_interp(
         functions: &std::collections::HashMap<String, Vec<FunctionEntry>>,
         variables: &std::collections::HashMap<String, crate::veldt::VariableEntry>,
         structs: &std::collections::HashMap<String, crate::veldt::StructEntry>,

@@ -677,6 +677,75 @@ fn main() {
                 tournament(&args[2], args.get(3).map(|s| s.as_str()));
             }
         }
+        // veldt probe <name> [count] — plant probes by running the
+        // fittest variant on generated inputs. Bare lineages get
+        // selection pressure (probes are the birth-trial domain).
+        "probe" => {
+            let count: usize = args.iter().position(|a| a == "-n")
+                .and_then(|p| args.get(p + 1))
+                .and_then(|s| s.parse().ok()).unwrap_or(8);
+            let mut veldt = veldt::Veldt::new();
+            if let Err(e) = veldt.load() { eprintln!("Error: {}", e); process::exit(1); }
+            // --all: every lineage with zero probes (the bare set)
+            let names: Vec<String> = if args.iter().any(|a| a == "--all") {
+                veldt.functions.keys()
+                    .filter(|n| !veldt.probes.contains_key(*n)
+                        || veldt.probes[*n].is_empty())
+                    .cloned().collect()
+            } else {
+                match args.get(2) {
+                    Some(n) => vec![n.clone()],
+                    None => { eprintln!("Usage: veldt probe <name>|--all [-n count]"); process::exit(1); }
+                }
+            };
+            let mut total = 0usize;
+            for name in names {
+            let Some(entry) = veldt.get_fittest_variant(&name).cloned() else {
+                eprintln!("no fittest variant of '{}'", name); continue;
+            };
+            let mut ev = evolve::Evolver::new();
+            let mut interp = interpreter::Interpreter::with_step_limit(10000);
+            interp.caps = crate::interpreter::Caps::sandboxed();
+            health::HealthChecker::load_snapshot_into_interp(
+                &veldt.functions, &veldt.variables, &veldt.structs, &mut interp);
+            interp.functions.entry(name.clone()).or_default()
+                .push(crate::interpreter::FunctionVariant {
+                    id: entry.id,
+                    fitness: entry.fitness,
+                    def: crate::interpreter::FunctionDef {
+                        params: std::rc::Rc::new(entry.params.clone()),
+                        body: entry.body.clone().into(),
+                    },
+                });
+            let born_ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs()).unwrap_or(0);
+            let mut vm: Option<crate::vm::Vm> = None;
+            let mut planted = 0usize;
+            for _ in 0..count {
+                let args_v: Vec<crate::interpreter::Value> = entry.params.iter()
+                    .filter_map(|p| ev.gen_value(&p.typ)).collect();
+                if args_v.len() != entry.params.len() { continue; }
+                if let Ok(v) = health::HealthChecker::call_one(
+                    &mut interp, &mut vm, &name, Some(entry.id), args_v.clone()) {
+                    let ser_args: Vec<String> = args_v.iter()
+                        .filter_map(|a| serde_json::to_string(a).ok()).collect();
+                    let ser_out = serde_json::to_string(&v).unwrap_or_default();
+                    let niche = evolve::Evolver::niche_signature(&args_v);
+                    veldt.probes.entry(name.clone()).or_default().push(veldt::Probe {
+                        args: ser_args, expected: ser_out, niche,
+                        born: born_ts, scale: 0,
+                    });
+                    planted += 1;
+                }
+            }
+            println!("  {}#{}: {} probe(s) planted", name, entry.id, planted);
+            total += planted;
+            }
+            veldt.save().unwrap_or_else(|e| eprintln!("Save error: {}", e));
+            println!("planted {} probe(s) total — bare lineages get selection pressure",
+                     total);
+        }
         "fuzz" => {
             if args.len() < 3 {
                 eprintln!("Usage: veldt fuzz <name>|--all  (boundary corpus vs every variant)");
