@@ -3327,8 +3327,23 @@ fn print_help(topic: Option<&str>) {
 veldt rewrite <name#N> --exact — only birth if Z3 proves the rewrite sound\nveldt tend — heals sick AND idiom-optimizes healthy variants in place\nagent \"rewrite <name#N>\" — same path via the Gardener",
         "filter" => "--filter <expr> — the variant query DSL (usable in garden/evolve/stats/test/fuzz/find/lineage/adopt/diff/verify/bench/tournament/absorb + /api/filter)\n  fields: fitness age usage size args lifespan last_used niches born trial_score\n          efficiency parents healing health trust origin calls family niche:<name>\n  ops: > < >= <= == != ~ (contains) | connectors: && (AND) || (OR) | prefix ! or 'not ' (NOT)\n  e.g. --filter \"family == fib && fitness > 1.5\" · \"niche:int:big > 0.5\" · \"!health == sick\"\n  --sort <field> — sort variants (garden/stats/lineage/find/evolve + /api/filter?sort=)\n  fields: fitness age usage size args lifespan last_used niches fit_rate usage_rate\n          size_rate efficiency niche_score id origin health trust born trial_score\n          efficiency parents healing niche:<name> | e.g. --sort fit_rate",
         "probe" => "veldt probe <name> [-n count] — plant probes on a family (fittest on generated inputs)\nveldt probe --all — plant on every bare lineage\nagent \"probe <name>\" · \"probe all\" — same via the Gardener\nProbes = the birth-trial domain — bare lineages get selection pressure.\n/api/probe — same via the server",
+        "verify" => "veldt verify <name> — bounded: variants run a shared input corpus and must agree
+veldt verify <name> --exact — Z3 proof: encode every non-fittest variant as a formula over its params and solve f(x) != v(x); Unsat = provably equivalent, Sat = real counterexample
+veldt verify --all --exact [--quarantine] — audit every multi-variant family; --quarantine demotes provably-divergent variants to Dying; --strict exits 1
+veldt diff <a#N> <b#M> --exact — pairwise SMT divergence before the source diff
+veldt adopt <name#N> --exact — promote to Canonical only if Z3 proves equivalence
+Coverage: int/float/bool/str/list<scalar>/dict/any params; for/while/try/match/if; 4-elem symbolic lists; VAny-tagged dicts + null + type_err error-parity. Honest bails: symbolic dict keys, list-in-dict, unbounded loops.",
+        "stats" => "veldt stats — garden census: lineages, variants, health/trust/probes/niches
+veldt stats --lint — warning census (defect split + top kinds)
+veldt stats --exact — per-family SMT census: proven-equivalent / divergent / bail-to-bounded + bail-reason histogram
+veldt stats --verified — bounded-check census",
+        "adopt" => "veldt adopt <name#N> — promote a variant to Canonical: dispatch prefers it
+veldt adopt <name#N> --exact — SMT-gated: only promotes if Z3 proves equivalence to the fittest",
+        "tend" => "veldt tend [family] — heal sick variants on demand (repair + re-trial)
+veldt tend --exact — in-place idiom rewrites only when Z3 proves them semantics-preserving
+veldt evolve --tend — self-maintaining cycles",
         "lint" | "check" => "veldt check <file> [--strict] [--json|--watch|--fail] — parse + ~91-check lint\n  veldt check - --strict — read the program from stdin\n  veldt check --suppress <s> — drop warnings containing <s> (repeatable)\n  veldt check --garden [family] — lint every variant body\n  veldt check --garden --bugs — defect-class warnings only\n  veldt check --garden --fix [--verify] — repair dead code (+ re-trial)\n  veldt check --garden --watch — re-lint on garden saves\n  veldt fix <file> [--check] — same repairs on a source file (in-place + fmt)\n  veldt stats --lint — garden census (defect split + top warning kinds)\n  veldt adopt <name#N> --lint — refuse to promote defect-carrying variants\n  veldt tend [family] — heal sick variants on demand\n  veldt evolve --tend — self-maintaining cycles (heal + clean per cycle)\n  veldt bench --lint — strict-lint timing per file + garden census\n  evolve rejects mutants introducing defect warnings ([LINT] events)",
-        _ => "veldt help <topic> — run, repl, agent, evolve, garden, builtins, strings, lists, types, registry, sandbox, filter, lint, rewrite, game",
+        _ => "veldt help <topic> — run, repl, agent, evolve, garden, verify, stats, probe, adopt, tend, rewrite, lint, builtins, strings, lists, types, registry, sandbox, filter, game",
     };
     println!("{}", text);
 }
