@@ -1061,6 +1061,7 @@ impl Evolver {
         if let Some(r) = Self::extremum_scan_window(win) { return Some(r); }
         if let Some(r) = Self::len_flag_window(win) { return Some(r); }
         if let Some(r) = Self::while_for_window(win) { return Some(r); }
+        if let Some(r) = Self::alias_window(win) { return Some(r); }
         Self::cse_window(win)
     }
 
@@ -1329,6 +1330,53 @@ impl Evolver {
             }
         }
         None
+    }
+
+    /// `let l = <Var x>; <rest>` -> `<rest with l := x>` — var-alias
+    /// elimination (the `let l = x` copies the lint flags). Guards:
+    /// `l` is never reassigned after the let (subst is unsound if it
+    /// diverges from x's value).
+    fn alias_window(win: &[Stmt]) -> Option<(usize, Vec<Stmt>)> {
+        if win.len() < 2 { return None; }
+        let (l_name, x_name) = match &win[0] {
+            Stmt::Let(n, Expr::Var(v)) => (n.clone(), v.clone()),
+            _ => return None,
+        };
+        if l_name == x_name { return None; }
+        // bail if `l` is reassigned anywhere in the rest of the window —
+        // the alias is only valid while l == x
+        for s in &win[1..] {
+            let mut bad = false;
+            fn check_assigns(s: &Stmt, l: &str, bad: &mut bool) {
+                match s {
+                    Stmt::Assign(n, _) if n == l => *bad = true,
+                    Stmt::Let(n, _) if n == l => *bad = true, // shadowed — safe but skip
+                    Stmt::If(_, t, b) => {
+                        t.iter().for_each(|s| check_assigns(s, l, bad));
+                        if let Some(b) = b { b.iter().for_each(|s| check_assigns(s, l, bad)); }
+                    }
+                    Stmt::While(_, b) | Stmt::For(_, _, b) =>
+                        b.iter().for_each(|s| check_assigns(s, l, bad)),
+                    Stmt::Try(t, _, c) => {
+                        t.iter().for_each(|s| check_assigns(s, l, bad));
+                        c.iter().for_each(|s| check_assigns(s, l, bad));
+                    }
+                    Stmt::Match(_, arms, els) => {
+                        arms.iter().for_each(|(_, b)| b.iter().for_each(|s| check_assigns(s, l, bad)));
+                        if let Some(b) = els { b.iter().for_each(|s| check_assigns(s, l, bad)); }
+                    }
+                    _ => {}
+                }
+            }
+            check_assigns(s, &l_name, &mut bad);
+            if bad { return None; }
+        }
+        // `l` must actually be used — else the let is dead (repair_dead_lets
+        // handles it, not this idiom)
+        if !win[1..].iter().any(|s| stmt_uses_var(s, &l_name)) { return None; }
+        let rest: Vec<Stmt> = win[1..].iter()
+            .map(|s| subst_var_stmt(s, &l_name, &x_name)).collect();
+        Some((win.len(), rest))
     }
 
     /// `let i = 0; while i < xs.len() { <body using xs[i]> i += 1 }`
@@ -3483,6 +3531,22 @@ mod asymptotic_proof {
                     src, crate::fmt::format_program(&after), why),
             }
         }
+    }
+
+    #[test]
+    fn idiom_rewrite_var_alias() {
+        let mut evolver = Evolver::new();
+        // let l = x -> substitute l := x, drop the let
+        let body = parse_fn_body("let l = x\nreturn l + 1");
+        let out = evolver.mutate_body(&body, Mutation::IdiomRewrite);
+        let src = crate::fmt::format_program(&out);
+        assert!(src.contains("x + 1") && !src.contains("let l"),
+            "alias not eliminated:\n{}", src);
+        // bail: l is reassigned after the let
+        let body = parse_fn_body("let l = x\nl = 9\nreturn l");
+        let out = evolver.mutate_body(&body, Mutation::IdiomRewrite);
+        let src = crate::fmt::format_program(&out);
+        assert!(src.contains("let l"), "unsafe alias rewrite:\n{}", src);
     }
 
     #[test]

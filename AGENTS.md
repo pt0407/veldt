@@ -49,6 +49,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] idiom #15: `let l = x` var-alias elimination — substitutes l := x, drops the let. Guards: bails if l is reassigned or shadowed later. Live: 38 matches across game/engine families (the `let l = x` lint hits). Also: while-index->for (#14) unlocked find_move (step-budget -> proven).
 - [Devin/main-side] idiom #14: `while i < xs.len() { ... i += 1 }` -> `for x in xs { xs[i] := x }` — normalizes while-index loops so the for-based idioms (contains/count/len/etc) can match. Bails when `i` is used beyond `xs[i]` positions. Live: 19 matches, 3 born. `agent "verify <name>"` — Z3-exact first, bounded fallback. 34 proven / 0 divergent / 14 bails.
 - [Devin/main-side] same position-keyed param binding + void-return divergence applied to verify_pair_exact AND verify_variant_exact — all 3 exact paths now agree: renamed params are rebinds not unbound, void-return-vs-value is PROVABLY DIVERGENT. verify --all --exact --quarantine now demotes all 9 shout void variants + sq#1 + score#45 (10 total).
 - [Devin/main-side] verify_exact_on_veldt: (a) variants bind their OWN param names position-keyed to the shared symbols — a renamed param no longer bails as `unbound var` (shout's 8-variant family unlocked); (b) a variant producing no return while fittest returns a value reports PROVABLY DIVERGENT (returns void ≠ value) not `no return value` bail. shout#1 correctly flagged divergent.
