@@ -1422,7 +1422,11 @@ fn param_supported(t: &Type) -> bool {
     match t {
         Type::Int | Type::Float | Type::Bool | Type::Str => true,
         Type::List(inner) => matches!(**inner, Type::Int | Type::Float | Type::Bool),
-        Type::Struct(n) => n == "dict",
+        Type::Struct(n) => n == "dict" || n == "any",
+        // `Any` params encode as a bare `VAny` scalar — tag-dispatch on
+        // reads, type_err on mismatch. Composite ops (index/method)
+        // honest-bail.
+        Type::Any => true,
         _ => false,
     }
 }
@@ -1469,6 +1473,15 @@ fn make_sym_param(name: &str, t: &Type, flat_syms: &mut Vec<Dynamic>) -> SymVal 
             let arr = Array::fresh_const(name, &vstr_sort(), &va.dt.sort);
             flat_syms.push(arr.clone().into());
             SymVal::Dict(arr)
+        }
+        Type::Any | Type::Struct(_) => {
+            // `any`/`Any` param -> bare VAny scalar (tag-dispatch reads);
+            // `dict` was handled above — this arm catches `any` +
+            // bare Any. Other Struct names bail via param_supported.
+            let va = vany();
+            let d = FuncDecl::new(name, &[], &va.dt.sort).apply(&[]);
+            flat_syms.push(d.clone());
+            SymVal::Scalar(d)
         }
         _ => unreachable!(),
     }
