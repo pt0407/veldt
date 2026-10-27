@@ -204,6 +204,7 @@ fn main() {
             // accumulation, linsearch -> index_of)
             let target = args.get(2).map(|s| s.as_str()).unwrap_or("");
             if target == "--all" {
+                let dry = args.iter().any(|a| a == "--dry");
                 let mut veldt = veldt::Veldt::new();
                 if let Err(e) = veldt.load() { eprintln!("Error: {}", e); process::exit(1); }
                 let targets: Vec<(String, u32)> = veldt.functions.iter()
@@ -211,10 +212,25 @@ fn main() {
                     .collect();
                 let mut n = 0;
                 for (name, vid) in targets {
-                    if rewrite_one(&mut veldt, &name, vid, true) { n += 1; }
+                    if dry {
+                        // preview only — check the rewrite fires without birthing
+                        if let Some(e) = veldt.functions.get(&name)
+                            .and_then(|vs| vs.iter().find(|e| e.id == vid)) {
+                            let mut ev = evolve::Evolver::new();
+                            if format!("{:?}", ev.rewrite_idioms(&e.body))
+                                != format!("{:?}", e.body) {
+                                println!("  {}#{} — idiom match", name, vid);
+                                n += 1;
+                            }
+                        }
+                    } else if rewrite_one(&mut veldt, &name, vid, true) { n += 1; }
                 }
-                if let Err(e) = veldt.save() { eprintln!("Save error: {}", e); }
-                println!("rewrite --all: {} optimized variants born", n);
+                if !dry {
+                    if let Err(e) = veldt.save() { eprintln!("Save error: {}", e); }
+                }
+                println!("rewrite --all{}: {} optimized variants{}",
+                    if dry { " --dry" } else { "" }, n,
+                    if dry { " would be rewritten" } else { " born" });
             } else {
                 rewrite_variant(target);
             }
