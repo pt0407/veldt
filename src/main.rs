@@ -4595,6 +4595,80 @@ fn arity_expr(e: &ast::Expr,
     }
 }
 
+/// every `Var` name used in an expr (fn/let-declared names are NOT
+/// vars — a Var that isn't bound is a real undeclared-var bug)
+fn collect_var_uses(e: &ast::Expr, acc: &mut Vec<String>) {
+    use ast::*;
+    match e {
+        Expr::Var(n) => acc.push(n.clone()),
+        Expr::BinOp(l, _, r) => { collect_var_uses(l, acc); collect_var_uses(r, acc); }
+        Expr::UnaryOp(_, x) => collect_var_uses(x, acc),
+        Expr::Call(_, _, a) | Expr::List(a) | Expr::Interp(a) =>
+            for x in a { collect_var_uses(x, acc) },
+        Expr::MethodCall(o, _, a) => { collect_var_uses(o, acc);
+            for x in a { collect_var_uses(x, acc) } }
+        Expr::Index(o, i) => { collect_var_uses(o, acc); collect_var_uses(i, acc); }
+        Expr::Slice(o, lo, hi) => { collect_var_uses(o, acc);
+            if let Some(x) = lo { collect_var_uses(x, acc) }
+            if let Some(x) = hi { collect_var_uses(x, acc) } }
+        Expr::FieldAccess(o, _) | Expr::SafeGet(o, _, _) => collect_var_uses(o, acc),
+        Expr::ListComp(h, v, i, c) => {
+            // the comp var is bound inside; check iter + cond + head
+            // for OTHER undeclared vars
+            collect_var_uses(i, acc);
+            let mut inner: Vec<String> = Vec::new();
+            collect_var_uses(h, &mut inner);
+            if let Some(c) = c { collect_var_uses(c, &mut inner) }
+            acc.extend(inner.into_iter().filter(|n| n != v));
+        }
+        Expr::StructLit(_, f) => for (_, x) in f { collect_var_uses(x, acc) },
+        _ => {}
+    }
+}
+
+/// warn on Var uses / assign targets in `s` that aren't declared in
+/// `declared` — a var that doesn't exist is a real defect, not style.
+fn check_undeclared(s: &ast::Stmt,
+                    declared: &std::collections::HashSet<String>,
+                    out: &mut Vec<String>) {
+    use ast::*;
+    // the stmt's own declaration name (let x = ...) — `let x = <expr
+    // reading x>` is covered by a dedicated check elsewhere
+    let (targets, own_decl) = match s {
+        Stmt::Let(n, e) => (vec![e], Some(n.as_str())),
+        Stmt::Assign(n, e) => {
+            if !declared.contains(n) {
+                out.push(format!("{} assigned but never declared (let, param, or for-var)", n));
+            }
+            (vec![e], None)
+        }
+        Stmt::Print(e) | Stmt::ExprStmt(e) => (vec![e], None),
+        Stmt::Return(Some(e)) => (vec![e], None),
+        Stmt::FieldAssign(o, _, v) | Stmt::IndexAssign(o, _, v) =>
+            (vec![o, v], None),
+        Stmt::If(c, _, _) | Stmt::While(c, _) => (vec![c], None),
+        Stmt::For(_, it, _) => (vec![it], None),
+        Stmt::Match(e, _, _) => (vec![e], None),
+        Stmt::LetDestructure(names, e) => {
+            for n in names {
+                if !declared.contains(n) {
+                    out.push(format!("{} destructured but never declared", n));
+                }
+            }
+            (vec![e], None)
+        }
+        _ => (Vec::new(), None),
+    };
+    let mut used = Vec::new();
+    for e in targets { collect_var_uses(e, &mut used); }
+    for v in used {
+        if Some(v.as_str()) == own_decl { continue; }
+        if !declared.contains(v.as_str()) {
+            out.push(format!("undeclared variable `{}` — no let, param, or for-var binds it", v));
+        }
+    }
+}
+
 fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
               outer: &mut std::collections::HashSet<String>) {
     use ast::*;
@@ -4734,6 +4808,11 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
         }
         if stmt_has_not_in(s) {
             out.push("`not x in y` parses as `(not x) in y` — did you mean `not (x in y)`?".into());
+        }
+        {
+            let mut declared = outer.clone();
+            for (bi, n) in &bound { if *bi < i { declared.insert((*n).clone()); } }
+            check_undeclared(s, &declared, out);
         }
         match s {
             Stmt::Grow(GrowItem::Fn(name, params, body, tests)) => {

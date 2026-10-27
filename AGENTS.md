@@ -49,6 +49,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] lint: undeclared-variable check — `Var`/`Assign`/`FieldAssign`/`IndexAssign`/`LetDestructure` targets not bound by let/param/for-var -> warning. Caught the class of bug SMT showed as `unbound var` bails (shout: params differ across variants -> fittest-env lookup fails — the bodies are fine under their own signatures). No false positives in the live garden.
 - [Devin/main-side] agent "probe <name>|all" — gardener verb for probe-planting (shared evolve::plant_probes with `veldt probe`). Every lineage now has probes — zero bare.
 - [Devin/main-side] gen_value_in + Struct/dict arms: `dict` params parse as `Type::Struct("dict")` (no Type::Dict variant) — the Struct arm now synthesizes a real Value::Dict for that name; true Structs construct fields recursively from veldt.structs. `veldt probe --all` now plants on EVERY lineage — zero bare families (was 14+3). route_event/game_step/fib2 all probed.
 - [Devin/main-side] probe NOTE for gardener lane: route_event/game_step/fib2 stay bare — their params are Struct/Dict (gen_value can't synthesize them). If you want probes on those families, extend gen_value with a Struct arm (construct from veldt.structs fields) or Dict arm.
