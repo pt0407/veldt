@@ -2894,12 +2894,23 @@ fn main() {
                         scored.push((v.id, score, won));
                         eprintln!("[SIM] {}#{} → {} (won: {})", fam, v.id, score, won);
                     }
+                    // the best playthrough gets a real fitness bump — the
+                    // variant that actually wins the game becomes the
+                    // family's champion, not the one that proxy-scored best
                     if let Some((id, score, won)) = scored.iter()
                         .max_by(|a, b| (a.2 as u8).cmp(&(b.2 as u8)).then(
                             a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)))
                     {
                         eprintln!("[SIM] best playthrough: {}#{} — score {} won {}",
                                   fam, id, score, won);
+                        if let Some(vs) = veldt.functions.get_mut(&fam) {
+                            if let Some(e) = vs.iter_mut().find(|e| e.id == *id) {
+                                let sim_fit = *score + if *won { 1000.0 } else { 0.0 };
+                                e.fitness = e.fitness.max(sim_fit);
+                                eprintln!("[SIM] {}#{} promoted — fitness {:.2} (playthrough)",
+                                          fam, id, e.fitness);
+                            }
+                        }
                     }
                 }
             }
