@@ -2233,8 +2233,11 @@ fn main() {
                 let nb = evolve::Evolver::idiom_rewrite_body(&entry.body);
                 if nb != entry.body {
                     entry.body = nb;
+                    // re-trial so fitness/efficiency reflect the new body
+                    health::HealthChecker::check_at_birth_with(&mut entry, &veldt, false);
                     idiomed += 1;
-                    eprintln!("[TEND] {}#{} — idiom optimized", name, id);
+                    eprintln!("[TEND] {}#{} — idiom optimized (fitness {:.2}, eff {:.2}x)",
+                              name, id, entry.fitness, entry.efficiency);
                     if let Some(vs) = veldt.functions.get_mut(&name) {
                         for e in vs.iter_mut() {
                             if e.id == id { *e = entry.clone(); break; }

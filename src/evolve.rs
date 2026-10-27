@@ -2356,6 +2356,8 @@ impl Evolver {
             let idiomed = Self::idiom_rewrite_body(&entry.body);
             if idiomed != entry.body {
                 entry.body = idiomed;
+                // re-trial so fitness/efficiency reflect the new body
+                HealthChecker::check_at_birth_with(&mut entry, veldt, self.use_vm);
                 repaired += 1; changed = true;
             }
             if changed {
