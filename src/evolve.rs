@@ -2826,8 +2826,8 @@ fn stmt_uses_var(s: &Stmt, name: &str) -> bool {
         Stmt::Match(e, arms, els) => euse(e)
             || arms.iter().any(|(_, b)| b.iter().any(|x| stmt_uses_var(x, name)))
             || els.as_ref().map(|x| x.iter().any(|x| stmt_uses_var(x, name))).unwrap_or(false),
-        Stmt::FieldAssign(o, _, v) | Stmt::IndexAssign(o, _, v) =>
-            euse(o) || euse(v),
+        Stmt::FieldAssign(o, _, v) => euse(o) || euse(v),
+        Stmt::IndexAssign(o, i2, v) => euse(o) || euse(i2) || euse(v),
         Stmt::LetDestructure(_, e) => euse(e),
         _ => false,
     }
@@ -3605,6 +3605,14 @@ mod asymptotic_proof {
         // for-element + sum() — the while-for normalizes then the accum idiom fires
         assert!(src.contains("sum") || src.contains("for x in xs"),
             "while-index loop not rewritten:\n{}", src);
+        // bail: xs[i] = v — mutating the element keeps i alive
+        // in the IndexAssign index position (subst can't drop it)
+        let body = parse_fn_body(
+            "let i = 0\nwhile i < xs.len() { xs[i] = xs[i] * 2 i += 1 }\nreturn xs");
+        let out = evolver.mutate_body(&body, Mutation::IdiomRewrite);
+        let src = crate::fmt::format_program(&out);
+        assert!(!src.contains("for x in xs"),
+            "broken rewrite — IndexAssign index i dropped:\n{}", src);
         // bail: i used in the body beyond xs[i] (return i)
         let body = parse_fn_body(
             "let i = 0\nwhile i < xs.len() { if xs[i] == t { return i } i += 1 }\nreturn -1");
