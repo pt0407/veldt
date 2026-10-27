@@ -1598,7 +1598,8 @@ impl Interpreter {
                 if args.len() != 1 { return Err("abs() expects 1 argument".into()); }
                 match &args[0] {
                     Value::Int(n) => Ok(Some(Value::Int(n.abs()))),
-                    _ => Err("abs() expects an integer".into()),
+                    Value::Float(f) => Ok(Some(Value::Float(f.abs()))),
+                    _ => Err("abs() expects a number".into()),
                 }
             }
             "str" => {
