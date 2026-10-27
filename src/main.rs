@@ -475,7 +475,17 @@ fn main() {
                 eprintln!("'{}' already exists — won't overwrite", path);
                 process::exit(1);
             }
-            let src = game_template(name);
+            let src = if args.iter().any(|a| a == "--platformer") {
+                platformer_template(name)
+            } else if args.iter().any(|a| a == "--topdown" || a == "--realtime") {
+                realtime_game_template(name)
+            } else if args.iter().any(|a| a == "--shooter" || a == "--shmup") {
+                shooter_template(name)
+            } else if args.iter().any(|a| a == "--snake") {
+                snake_template(name)
+            } else {
+                game_template(name)
+            };
             if let Err(e) = std::fs::write(&path, &src) {
                 eprintln!("write failed: {}", e);
                 process::exit(1);
@@ -2954,17 +2964,21 @@ fn print_help(topic: Option<&str>) {
         "garden" => "veldt garden [--sick|--obituaries|--json|--filter <expr>] — census\n  --family <name> — one lineage's census (+ --detail for the full dashboard)\n  --filter <expr> — composable query: fields fitness age usage size args\n    lifespan last_used niches health trust origin calls; ops > < >= <= == != ~\n    `&&` for AND, `||` for OR. e.g. --filter \"fitness > 1.5 && age < 100\"\n  veldt lineage <name> · veldt stats [--json] [--brief] [--top|--detail] [--family <n>] [--filter <expr>] [--sort <field>] · veldt test <name>|--all\n  veldt adopt <name#N> · veldt fuzz <name>|--all · veldt find <substr>\n  veldt diff <a#n> <b#n> · veldt absorb · veldt tournament <url>",
         "builtins" => "len type str int float print eprint input read_stdin args exit\n  abs max min round floor ceil sqrt pow rand date now sleep env\n  fetch post serve match_path read_file write_file ls exists\n  dict get put has keys values items merge delete get_or\n  re_match re_find re_replace re_split re_captures format\n  canvas_* grid_* ui_* bt_* balance_* astar* bfs los fov turn fsm_next\n  rand* roll dice choice weighted_choice noise2 fbm perlin poisson_disc\n  voronoi delaunay wfc maze_gen flood_fill neighbors lerp clamp dist aabb\n  smoothstep bezier point_in_poly convex_hull ease_* bounce line_points",
         "game" | "engine" => "veldt's 2D game engine — real-time playable games\n  \
-  game_new(w,h) scene state · entity(name,x,y,sprite) objects ·\n  \
-  ent_move/ent_vel move+velocity · collide(a,b) AABB · collide_tile(e,map) ·\n  \
-  tile_at/tile_solid terrain read · on_ground grounded check ·\n  \
-  physics_tick(e,map,grav) gravity+jump+land · camera_xy scrolling ·\n  \
-  keys() held-key poll · game_frame(state,entities,hud,map?) emit scene ·\n  \
-  game_running() session-alive · sleep(ms) pacing ·\n  \
-  scene_new/spawn/despawn/entities/find entity management ·\n  \
-  anim(e,frames)+anim_tick sprite animation · sfx(name)/beep audio ·\n  \
-  game_over/ui_menu/ui_prompt overlays\n\
-  play: `veldt studio` -> /play/<name> (WASD real-time) · /site/<name> (watch)\n\
-  templates: `agent \"make a game/topdown/platformer\"` · improve hero_move/plat_move",
+  WORLD: game_new(w,h) · camera_xy / camera_follow(state,e,dz) scrolling ·\n  \
+    tile_at/tile_solid map read · game_frame(state,entities,hud,map?) emit\n  \
+  ENTITIES: entity(name,x,y,sprite) · ent_def(name,fields)+spawn(type,x,y) DSL ·\n  \
+    scene_new/spawn/despawn/entities/find management · scene_each(s,fn) iterate\n  \
+  MOTION: ent_move/ent_vel · integrate(e,map,dt) velocity physics ·\n  \
+    physics_tick(e,map,grav) gravity+jump+land · move_toward(e,tx,ty,spd) chase\n  \
+  QUERIES: collide(a,b) AABB · collide_any/collide_all(e,scene) hits ·\n  \
+    collide_tile(e,map) · in_radius(e,scene,r) area · dist(a,b) · on_ground\n  \
+  INPUT: keys() held · key_pressed(k) edge-triggered (jump on press) ·\n  \
+    game_running() session · sleep(ms) pacing\n  \
+  EFFECTS: sfx(name)/beep audio · emit/particle(name,x,y) visual fx ·\n  \
+    anim(e,frames)+anim_tick sprites · cooldown(key,n)/every fire-rate ·\n  \
+    bullet(x,y,vx,vy,sprite) projectiles · game_over/ui_menu/ui_prompt overlays\n\
+  play: `veldt studio` -> /play/<name> · `veldt play <name>` headless\n\
+  genres: `agent \"make a game/topdown/platformer/shooter/snake\"`",
         "strings" => "s.len() s.trim() s.ltrim() s.rtrim() s.to_lower() s.to_upper()\n  s.split(sep) s.replace(a,b) s.contains(x) s.starts_with(p) s.ends_with(p)\n  s.chars() s.repeat(n) s.pad(n[,ch]) s.split_at(i) s[a:b]",
         "lists" => "xs.len() xs.push(v) xs.pop() xs.contains(v) xs.join(sep)\n  xs.enumerate() xs.zip(ys) xs.flatten() xs.take(n) xs.skip(n)\n  xs.sort() xs.sort_by(f) xs.group_by(f) xs.min_by(f) xs.max_by(f)\n  xs.reverse() xs.index_of(v) xs[a:b] xs[-1]",
         "types" => "int float str bool list dict set null fn — types are advisory docs\n  `x in xs` membership · `??` null-coalesce · `?.` safe access · `|>` pipe",
@@ -7778,6 +7792,108 @@ while game_running() and not lost and hp > 0 {
 }
 if foes.len() == 0 { print("cleared — " + score) }
 else { if hp <= 0 { print("shot down — " + score) } else { print("over") } }
+"##;
+    src.replace("GAME_NAME", name)
+}
+
+/// `veldt game new <name> --snake` / `agent "make a snake"` — the classic
+/// snake: a growing tail, food pickups, self/wall collision ends the run.
+/// The grown `snake_dir` policy steers when no key is held.
+pub(crate) fn snake_template(name: &str) -> String {
+    let src = r##"# GAME_NAME.veldt — a real-time snake (engine builtins)
+# WASD/arrows steer. The grown snake_dir policy auto-steers when no key
+#   is held — `agent "improve snake_dir"` evolves it.
+
+grow fn snake_dir(hx: int, hy: int, fx: float, fy: float)
+        test snake_dir(15, 7, 8.0, 7.0) == [-1, 0] {
+    # steer toward the food: dominant axis first, then the other
+    let dx = 0
+    let dy = 0
+    if fx > hx { dx = 1 } else { if fx < hx { dx = -1 } }
+    if dx == 0 {
+        if fy > hy { dy = 1 } else { if fy < hy { dy = -1 } }
+    }
+    return [dx, dy]
+}
+
+# --- world (the DSL: the snake is a body of segment entities) ---
+let g = game_new(30, 15)
+ent_def("head", dict().put("sprite", "snake").put("tag", "head"))
+ent_def("body", dict().put("sprite", "body").put("tag", "body"))
+ent_def("food", dict().put("sprite", "coin").put("tag", "food"))
+let s = scene_new(30, 15)
+let s = spawn(s, "head", 15, 7)
+let s = spawn(s, "food", 8, 7)
+# the tail is a list of [x,y] trail positions
+let tail = []
+let len = 3
+let score = 0
+let dead = false
+
+# --- real-time snake loop ---
+while game_running() and not dead {
+    let h = scene_find(s, "head")[0]
+    let k = keys()
+    let dx = 0
+    let dy = 0
+    if k.contains("left") { dx = -1 }
+    if k.contains("right") { dx = 1 }
+    if k.contains("up") { dy = -1 }
+    if k.contains("down") { dy = 1 }
+    if dx == 0 and dy == 0 {
+        let f = scene_find(s, "food")[0]
+        let m = snake_dir(h["x"], h["y"], f["x"], f["y"])
+        dx = m[0]
+        dy = m[1]
+    }
+    if dx != 0 or dy != 0 {
+        # grow the tail: the old head cell becomes a body segment —
+        # the tail list is immutable so skip(1) drops the oldest cell
+        tail.append([h["x"], h["y"]])
+        while tail.len() > len { tail = tail.skip(1) }
+        let nh = ent_move(h, dx, dy)
+        nh["x"] = clamp(nh["x"], 0, 29)
+        nh["y"] = clamp(nh["y"], 0, 14)
+        # wall/self collision — the snake can't leave or bite itself
+        let i = 0
+        while i < tail.len() {
+            let seg = tail[i]
+            if nh["x"] == seg[0] and nh["y"] == seg[1] { dead = true }
+            i = i + 1
+        }
+        s = scene_despawn(s, h["name"])
+        s = scene_spawn(s, nh)
+        h = nh
+    }
+    # eat food — collide_any tells us the head touched it
+    let f = scene_find(s, "food")[0]
+    if collide(h, f) {
+        score = score + 10
+        len = len + 1
+        sfx("coin")
+        emit("coin", f["x"], f["y"])
+        s = scene_despawn(s, f["name"])
+        s = spawn(s, "food", rand_range(2, 27), rand_range(2, 12))
+    }
+    # render the tail as body entities over the head
+    let i = 0
+    let scene_list = [h]
+    while i < tail.len() {
+        let seg = tail[i]
+        let b = entity("seg" + i, seg[0], seg[1], "body")
+        scene_list.append(b)
+        i = i + 1
+    }
+    let f2 = scene_find(s, "food")
+    if f2.len() > 0 { scene_list.append(f2[0]) }
+    let hud = dict()
+    hud["score"] = score
+    hud["len"] = len
+    game_frame(g, scene_list, hud)
+    sleep(90)
+}
+if dead { print("bit itself — length " + len + " score " + score) }
+else { print("session over — score " + score) }
 "##;
     src.replace("GAME_NAME", name)
 }
