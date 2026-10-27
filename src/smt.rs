@@ -108,9 +108,20 @@ struct SymState {
     last: Option<SymVal>,
     /// Path assumptions (e.g. loop exited within UNROLL_BOUND, divisor != 0).
     assumptions: Vec<Bool>,
+    /// Names the first construct we couldn't encode — diagnostics only.
+    bail_reason: Option<String>,
 }
 
 impl SymState {
+    fn note(&mut self, why: impl Into<String>) {
+        if self.bail_reason.is_none() {
+            self.bail_reason = Some(why.into());
+        }
+    }
+    fn reason(&self) -> String {
+        self.bail_reason.clone().unwrap_or_else(|| "unsupported construct".into())
+    }
+
     fn new(env: HashMap<String, SymVal>) -> Self {
         Self {
             env,
@@ -120,6 +131,7 @@ impl SymState {
             steps: 0,
             last: None,
             assumptions: Vec::new(),
+            bail_reason: None,
         }
     }
 
@@ -209,6 +221,7 @@ fn merge_states(cond: &Bool, mut t: SymState, mut f: SymState) -> Option<SymStat
         steps: t.steps.max(f.steps),
         last,
         assumptions: t.assumptions,
+        bail_reason: t.bail_reason.or(f.bail_reason),
     })
 }
 
@@ -217,10 +230,47 @@ fn body_to_smt(
     env: HashMap<String, SymVal>,
     veldt: &veldt::Veldt,
     fuel: u32,
-) -> Option<(SymVal, Vec<Bool>)> {
+) -> Result<(SymVal, Vec<Bool>), String> {
     let mut state = SymState::new(env);
-    exec_stmts(stmts, &mut state, veldt, fuel)?;
-    state.final_value()
+    if exec_stmts(stmts, &mut state, veldt, fuel).is_none() {
+        return Err(state.reason());
+    }
+    let reason = if state.bail_reason.is_some() {
+        state.reason()
+    } else {
+        "no return value produced".to_string()
+    };
+    match state.final_value() {
+        Some(v) => Ok(v),
+        None => Err(reason),
+    }
+}
+
+fn stmt_kind(s: &Stmt) -> &'static str {
+    match s {
+        Stmt::Let(..) => "let", Stmt::Assign(..) => "assign",
+        Stmt::If(..) => "if", Stmt::While(..) => "while",
+        Stmt::For(..) => "for", Stmt::Return(_) => "return",
+        Stmt::ExprStmt(_) => "expr", Stmt::Match(..) => "match",
+        Stmt::Try(..) => "try", Stmt::Print(_) => "print",
+        Stmt::FnDef(..) => "fn", Stmt::Grow(..) => "grow",
+        _ => "other",
+    }
+}
+
+fn expr_kind(e: &Expr) -> &'static str {
+    match e {
+        Expr::Int(_) => "int", Expr::Float(_) => "float",
+        Expr::Str(_) => "str", Expr::Bool(_) => "bool",
+        Expr::Null => "null", Expr::List(_) => "list-literal",
+        Expr::Var(_) => "var", Expr::BinOp(..) => "binop",
+        Expr::UnaryOp(..) => "unop", Expr::Call(..) => "call",
+        Expr::MethodCall(..) => "method", Expr::FieldAccess(..) => "field",
+        Expr::StructLit(..) => "struct", Expr::Index(..) => "index",
+        Expr::Slice(..) => "slice", Expr::Lambda(..) => "lambda",
+        Expr::ListComp(..) => "list-comp", Expr::SafeGet(..) => "safe-get",
+        _ => "expr",
+    }
 }
 
 fn exec_stmts(
@@ -229,9 +279,18 @@ fn exec_stmts(
     veldt: &veldt::Veldt,
     fuel: u32,
 ) -> Option<()> {
+    macro_rules! run_sub {
+        ($st:expr, $b:expr) => {
+            if exec_stmts($b, &mut $st, veldt, fuel).is_none() {
+                if let Some(r) = $st.bail_reason.clone() { state.note(r); }
+                return None;
+            }
+        }
+    }
     for s in stmts {
         state.steps += 1;
         if state.steps > MAX_SYM_STEPS {
+            state.note("step budget (nested/oversized loops)");
             return None;
         }
         match s {
@@ -257,7 +316,10 @@ fn exec_stmts(
                 });
                 return Some(());
             }
-            Stmt::Return(None) => return None,
+            Stmt::Return(None) => {
+                state.note("bare return");
+                return None;
+            }
             Stmt::ExprStmt(e) => {
                 state.last = Some(expr_to_smt(e, state, veldt, fuel)?);
             }
@@ -267,9 +329,9 @@ fn exec_stmts(
                     .as_bool()?;
                 let mut then_st = state.clone();
                 let mut else_st = state.clone();
-                exec_stmts(then_stmts, &mut then_st, veldt, fuel)?;
+                run_sub!(then_st, then_stmts);
                 if let Some(eb) = else_stmts {
-                    exec_stmts(eb, &mut else_st, veldt, fuel)?;
+                    run_sub!(else_st, eb);
                 }
                 *state = merge_states(&c, then_st, else_st)?;
             }
@@ -277,12 +339,18 @@ fn exec_stmts(
                 let sv = expr_to_smt(scrutinee, state, veldt, fuel)?;
                 let mut cur = state.clone();
                 if let Some(eb) = else_arm {
-                    exec_stmts(eb, &mut cur, veldt, fuel)?;
+                    run_sub!(cur, eb);
                 }
                 for (pat, body) in arms.iter().rev() {
                     let mut arm_st = state.clone();
-                    let pv = expr_to_smt(pat, &mut arm_st, veldt, fuel)?;
-                    exec_stmts(body, &mut arm_st, veldt, fuel)?;
+                    let pv = match expr_to_smt(pat, &mut arm_st, veldt, fuel) {
+                        Some(v) => v,
+                        None => {
+                            if let Some(r) = arm_st.bail_reason.clone() { state.note(r); }
+                            return None;
+                        }
+                    };
+                    run_sub!(arm_st, body);
                     let c = sv.eq_val(&pv)?;
                     cur = merge_states(&c, arm_st, cur)?;
                 }
@@ -292,12 +360,12 @@ fn exec_stmts(
                 let mut try_st = state.clone();
                 let outer_err = try_st.err.take();
                 try_st.in_try += 1;
-                exec_stmts(try_stmts, &mut try_st, veldt, fuel)?;
+                run_sub!(try_st, try_stmts);
                 try_st.in_try -= 1;
                 if let Some(err_c) = try_st.err.take() {
                     try_st.err = outer_err;
                     let mut catch_st = state.clone();
-                    exec_stmts(catch_stmts, &mut catch_st, veldt, fuel)?;
+                    run_sub!(catch_st, catch_stmts);
                     *state = merge_states(&err_c, catch_st, try_st)?;
                 } else {
                     try_st.err = outer_err;
@@ -312,7 +380,7 @@ fn exec_stmts(
                     let go = state.active();
                     let mut body_st = state.clone();
                     body_st.env.insert(var.clone(), item);
-                    exec_stmts(body, &mut body_st, veldt, fuel)?;
+                    run_sub!(body_st, body);
                     *state = merge_states(&go, body_st, state.clone())?;
                 }
             }
@@ -326,7 +394,7 @@ fn exec_stmts(
                         break;
                     }
                     let mut body_st = state.clone();
-                    exec_stmts(body, &mut body_st, veldt, fuel)?;
+                    run_sub!(body_st, body);
                     *state = merge_states(&go, body_st, state.clone())?;
                 }
                 let c_after = expr_to_smt(cond, state, veldt, fuel)?
@@ -335,7 +403,10 @@ fn exec_stmts(
                 let exited = (state.active() & &c_after).not();
                 state.assumptions.push(exited);
             }
-            _ => return None,
+            _ => {
+                state.note(format!("stmt {}", stmt_kind(s)));
+                return None;
+            }
         }
     }
     Some(())
@@ -387,7 +458,13 @@ fn expr_to_smt(
         Expr::Float(f) => Some(SymVal::Scalar(float_to_real(*f)?.into())),
         Expr::Bool(b) => Some(SymVal::Scalar(Bool::from_bool(*b).into())),
         Expr::Str(v) => Some(SymVal::Scalar(vstr_const(&format!("lit_{}", v)))),
-        Expr::Var(name) => state.env.get(name).cloned(),
+        Expr::Var(name) => match state.env.get(name) {
+            Some(v) => Some(v.clone()),
+            None => {
+                state.note(format!("unbound var `{}`", name));
+                None
+            }
+        },
         Expr::Slice(o, lo, hi) => {
             let lst = expr_to_smt(o, state, veldt, fuel)?;
             if let SymVal::List(items) = lst {
@@ -561,6 +638,10 @@ fn expr_to_smt(
                     }
                     Some(SymVal::Scalar(acc))
                 }
+                (SymVal::List(_), m, _) => {
+                    state.note(format!("list.{}", m));
+                    None
+                }
                 (SymVal::Scalar(sv), m, nargs) => {
                     // String methods as uninterpreted functions over VStr.
                     // (return sort, expected arg count)
@@ -570,7 +651,10 @@ fn expr_to_smt(
                         "upper" | "lower" | "to_upper" | "to_lower" | "trim"
                         | "ltrim" | "rtrim" | "replace" | "repeat" | "pad"
                         | "substr" => vstr_sort(),
-                        _ => return None,
+                        _ => {
+                            state.note(format!("str.{}", m));
+                            return None;
+                        }
                     };
                     let expected = match m {
                         "replace" | "substr" => 2,
@@ -729,19 +813,35 @@ fn expr_to_smt(
                         let decl = FuncDecl::new("sqrt", &[&r_sort], &r_sort);
                         return Some(SymVal::Scalar(decl.apply(&[&xr])));
                     }
-                    _ => return None,
+                    _ => {
+                        state.note(format!("builtin {}()", name));
+                        return None;
+                    }
                 }
             }
             if fuel == 0 {
+                state.note("call fuel exhausted (recursion depth)");
                 return None;
             }
-            let entry = veldt
-                .functions
-                .get(name)?
-                .iter()
-                .find(|v| Some(v.id) == *vid)
-                .or_else(|| veldt.get_fittest_variant(name))?;
+            let entry = match veldt.functions.get(name) {
+                None => {
+                    state.note(format!("call {}() not in garden", name));
+                    return None;
+                }
+                Some(vs) => match vs.iter()
+                    .find(|v| Some(v.id) == *vid)
+                    .or_else(|| veldt.get_fittest_variant(name)) {
+                    Some(e) => e,
+                    None => {
+                        state.note(format!("{}#{} not found", name,
+                            vid.map(|v| v.to_string()).unwrap_or_default()));
+                        return None;
+                    }
+                },
+            };
             if entry.params.len() != args.len() {
+                state.note(format!("{}() arity {}/{}", name,
+                    args.len(), entry.params.len()));
                 return None;
             }
             let mut callee_env = HashMap::new();
@@ -754,13 +854,21 @@ fn expr_to_smt(
             }
             let mut sub_st = SymState::new(callee_env);
             sub_st.steps = state.steps;
-            exec_stmts(&entry.body, &mut sub_st, veldt, fuel - 1)?;
+            if exec_stmts(&entry.body, &mut sub_st, veldt, fuel - 1).is_none() {
+                if let Some(r) = sub_st.bail_reason.clone() {
+                    state.note(format!("{}(): {}", name, r));
+                }
+                return None;
+            }
             state.steps = sub_st.steps;
             let (val, mut a_sub) = sub_st.final_value()?;
             state.assumptions.append(&mut a_sub);
             Some(val)
         }
-        _ => None,
+        _ => {
+            state.note(format!("expr {}", expr_kind(e)));
+            None
+        }
     }
 }
 
@@ -885,14 +993,14 @@ pub fn verify_exact_on_veldt(
         }
 
         let (f_smt, f_assumptions) = body_to_smt(&f_body, base_env.clone(), veldt, 8)
-            .ok_or_else(|| "fittest uses non-SMT ops".to_string())?;
+            .map_err(|r| format!("fittest: {}", r))?;
 
         for v in &v_cloned {
             if v.id == f_id || !matches!(v.health, veldt::Health::Healthy) {
                 continue;
             }
             let (v_smt, v_assumptions) = body_to_smt(&v.body, base_env.clone(), veldt, 8)
-                .ok_or_else(|| format!("{}#{} uses non-SMT ops", name, v.id))?;
+                .map_err(|r| format!("{}#{}: {}", name, v.id, r))?;
             let eq = f_smt
                 .eq_val(&v_smt)
                 .ok_or_else(|| format!("{}#{} return sort mismatch", name, v.id))?;
@@ -973,9 +1081,9 @@ pub fn verify_variant_exact(
             base_env.insert(p.name.clone(), sv);
         }
         let (f_smt, f_assumptions) = body_to_smt(&f_body, base_env.clone(), veldt, 8)
-            .ok_or_else(|| "fittest uses non-SMT ops".to_string())?;
+            .map_err(|r| format!("fittest: {}", r))?;
         let (v_smt, v_assumptions) = body_to_smt(&target.body, base_env, veldt, 8)
-            .ok_or_else(|| format!("{}#{} uses non-SMT ops", name, vid))?;
+            .map_err(|r| format!("{}#{}: {}", name, vid, r))?;
         let eq = f_smt
             .eq_val(&v_smt)
             .ok_or_else(|| format!("{}#{} return sort mismatch", name, vid))?;

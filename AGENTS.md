@@ -49,6 +49,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] SMT bail diagnostics: verify --exact now NAMES the blocking construct (e.g. "fittest: str.split", "step budget (nested/oversized loops)", "unbound var `name`", "stmt match") instead of "uses non-SMT ops". Implemented via SymState.bail_reason + run_sub! propagation through If/While/For/Try/Match/call-inline sub-states. body_to_smt now returns Result<_, reason>. Also added exact take/skip (concrete n) + list Slice (concrete bounds) to the symbolic evaluator.
 - [Devin/main-side] veldt verify --all --exact [--quarantine]: whole-garden Z3 sweep — every non-fittest variant proven/divergent/bail per family; --quarantine demotes PROVABLY divergent variants to Dying; --strict exits 1 on any divergence. Live run: 188 proven, 1 divergent (sq#1 @ x=1), 96 honest bails. SMT also gained exact take/skip (concrete n) + list Slice (concrete bounds).
 - [Devin/main-side] Honest scoring fix: in-place idiom rewrites (tend + evolve --tend) now re-trial via check_at_birth_with so fitness/efficiency reflect the NEW body — before, an O(n log n) -> O(n) in-place rewrite kept the old efficiency score.
 - [Devin/main-side] contains idiom: membership early-exit loops rewritten to xs.contains(t) — both `for x in xs { if x==t {return true} } return false` and the while-index form. SMT: take/skip (concrete n) + list Slice with concrete bounds added as exact ops.
