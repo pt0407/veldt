@@ -519,7 +519,10 @@ fn main() {
                 eprintln!("No game '{}' — try: climb, hunt, rogue, snek, blaster", args[2]);
                 process::exit(1);
             }
-            let out = run_program_capture(&path);
+            // --pin fn=N — run the playthrough with that variant driving
+            let pin = args.iter().position(|a| a == "--pin")
+                .and_then(|p| args.get(p + 1)).cloned();
+            let out = run_program_capture_pin(&path, pin.as_deref());
             // surface the game's verdict line — won/lost, score, hp, turns
             let verdict = out.lines().rev()
                 .find(|l| l.contains("escaped") || l.contains("devoured")
@@ -6627,8 +6630,14 @@ fn read_garden_json(path: &str) -> serde_json::Value {
 
 /// Run a program in a subprocess and capture its stdout — for /api/play.
 pub fn run_program_capture(path: &str) -> String {
+    run_program_capture_pin(path, None)
+}
+pub fn run_program_capture_pin(path: &str, pin: Option<&str>) -> String {
     let exe = std::env::current_exe().unwrap_or_else(|_| "veldt".into());
-    match std::process::Command::new(exe).arg("run").arg(path).output() {
+    let mut cmd = std::process::Command::new(exe);
+    cmd.arg("run").arg(path);
+    if let Some(p) = pin { cmd.arg("--pin").arg(p); }
+    match cmd.output() {
         Ok(o) => String::from_utf8_lossy(&o.stdout).to_string(),
         Err(e) => format!("Error running {}: {}", path, e),
     }
@@ -6697,6 +6706,19 @@ fn run_program(path: &str, trace: bool, evolve_after: bool) {
     // game_running() true, keys() empty (auto-policy drives), game_frame
     // writes the scene buffer we can surface.
     interp.game_io = Some(interpreter::GameIo::headless());
+    // --pin fn=N — force a named function's dispatch to a specific variant
+    // (sim-fitness: run the game with that variant driving, not the fittest)
+    if let Some(pin_arg) = std::env::args().nth(
+        std::env::args().position(|a| a == "--pin").map(|p| p + 1).unwrap_or(usize::MAX)) {
+        if let Some((n, id)) = pin_arg.split('=').collect::<Vec<_>>().split_first() {
+            if let Some(idstr) = pin_arg.split('=').nth(1) {
+                if let Ok(vid) = idstr.parse::<u32>() {
+                    interp.pin = Some((n.to_string(), vid));
+                    eprintln!("[PIN] {} -> variant #{}", n, vid);
+                }
+            }
+        }
+    }
 
     // Run the program
     let run_res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(

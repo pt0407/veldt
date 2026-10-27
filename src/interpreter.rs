@@ -118,6 +118,9 @@ pub struct Interpreter {
     pub entity_counter: u64,
     /// cooldown state — cooldown(key, n) counts ticks per key (fire rates)
     pub cooldowns: HashMap<String, u64>,
+    /// pinned variant override — during `veldt sim --pin fn=N`, calls to `fn`
+    /// route to variant N instead of the fittest (sim-fitness scoring)
+    pub pin: Option<(String, u32)>,
 }
 
 /// Shared state for a live game session: browser key events in,
@@ -257,6 +260,7 @@ impl Interpreter {
             ent_defs: HashMap::new(),
             entity_counter: 0,
             cooldowns: HashMap::new(),
+            pin: None,
         }
     }
 
@@ -1231,7 +1235,12 @@ impl Interpreter {
                         None => format!("Undefined function: {}", name),
                     }
                 })?;
-            let chosen = match variant {
+            // a pinned variant override — `veldt sim --pin fn=N` forces the
+            // named function's dispatch to that variant for the playthrough
+            let pinned = if variant.is_none() {
+                self.pin.as_ref().filter(|(n, _)| n == name).map(|(_, id)| *id)
+            } else { None };
+            let chosen = match variant.or(pinned) {
                 Some(id) => variants.iter().find(|v| v.id == id)
                     .ok_or_else(|| format!("Variant {}#{} not found", name, id))?,
                 None => {
