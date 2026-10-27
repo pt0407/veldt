@@ -2905,6 +2905,24 @@ pub struct StageSpec {
 }
 
 fn generate_intent(t: &str, words: &[&str], veldt: &mut Veldt) -> AgentResponse {
+    // "make a game" — a whole program, not a function: scaffold a
+    // playable game (maze + canvas render + ui HUD + bt AI + turn loop)
+    // with an evolve-able `game_step` policy the Gardener can breed.
+    if t.contains("game") {
+        let name = extract_name(words).unwrap_or_else(|| "quest".to_string());
+        let path = format!("examples/{}.veldt", name);
+        if std::path::Path::new(&path).exists() {
+            return plain(&format!("'{}' already exists — pick another name or `veldt play {}`", path, name));
+        }
+        let src = crate::game_template(&name);
+        match std::fs::write(&path, &src) {
+            Ok(_) => return plain(&format!(
+                "Wrote {} — a playable game (maze + HUD + enemy AI).\n\
+                 `veldt play {}` to run it; `improve game_step` or \
+                 `evolve` to breed a smarter move policy.", path, name)),
+            Err(e) => return plain(&format!("Couldn't write {}: {}", path, e)),
+        }
+    }
     if let Some(resp) = try_templates(t, words, veldt) {
         return resp;
     }
