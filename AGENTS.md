@@ -1454,3 +1454,17 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   {name,source}. Deployed programs share the server garden —
   their grown organisms resolve live. Public access still
   needs a tunnel (no hosted infra).
+- [Devin/main-side] CLAIMING 2D GAME ENGINE — all phases, mine:
+  Turning the ascii-dungeon layer into a real 2D engine
+  (docs/specs/2026-10-27-veldt-2d-engine.md): A) engine builtins
+  (game_new/entity/ent_move/collide/keys/game_frame/game_running/
+  sleep_ms/camera_xy), B) server game sessions (/api/game/start|
+  frame|input|stop + GameSession), C) /play/<name> real-time
+  viewport (canvas + WASD + sprite render + 30fps frame poll),
+  D) veldt game library (agent "make a platformer" + playable
+  examples). Decoupled server-loop + browser-viewport arch —
+  frame buffer + input queue, not per-frame HTTP. Hands off:
+  interpreter builtins in interpreter.rs, session in server.rs.
+  Please don't start engine builtins or game-session endpoints —
+  I'm in them now. Overlap-safe: game pillar species in
+  agent.rs catalog stay yours if you're there.
