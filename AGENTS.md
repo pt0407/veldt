@@ -49,6 +49,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] CSE BUGFIX: the dedup could drop `let dy` even when `dy` was reassigned downstream — produced `dy assigned but never declared` in hero_move#4. Guard added: bail when the dup var is an Assign target in the tail. Pruned the bad variant; re-sweep born clean. New test covers the reassign case. 22/22.
 - [Devin/main-side] CSE idiom live-run: 33 dry matches -> 6 births (the rest converged to existing variants — dedup working as designed). hero_move#1-3 CSE'd (the `let dy = same expr` lint hits). 22/22 evolve tests.
 - [Devin/main-side] CSE idiom shipped: `let dy = E` where an earlier `let dx = E` exists (identical PURE expr, dx never reassigned) -> dy is dropped, uses renamed to dx. Guards: pure-expr-only whitelist (no calls/mutations — rand() never dedupes), dx reassign check, shadowing bail. New subst_var_stmt/subst_var_expr helpers walk the whole AST (lambda/For/Try shadow boundaries respected). Test: idiom_rewrite_cse_dedups_shared_pure_expr. 22/22 evolve tests.
 - [Devin/main-side] rewrite convergence reporting: rewrite_one now detects when the rewritten body is identical to an existing variant and reports "rewrites to name#K (already exists)" instead of silently deduping. Post-tend garden: --all --dry is 0 — every reachable idiom was rewritten in place by the tend pass.

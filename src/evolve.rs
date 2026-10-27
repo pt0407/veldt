@@ -1031,6 +1031,11 @@ impl Evolver {
             }
             if shadowed { continue; }
             if let Some(dx) = earlier {
+                // bail when the dup var is REASSIGNED downstream —
+                // aliasing would smash dx with dy's new value
+                let name_reassigned = win[i+1..].iter().any(|st|
+                    matches!(st, Stmt::Assign(n, _) if *n == name));
+                if name_reassigned { continue; }
                 // rewrite: keep win[..i], drop the redundant let, rename
                 let mut out: Vec<Stmt> = win[..i].to_vec();
                 for st in &win[i+1..] {
@@ -2746,6 +2751,12 @@ mod asymptotic_proof {
         let out = evolver.mutate_body(&body, Mutation::IdiomRewrite);
         let src = crate::fmt::format_program(&out);
         assert!(src.contains("let dy"), "unsafe CSE:\n{}", src);
+        // reassigned dup var -> must NOT dedup (aliasing would be wrong)
+        let body = parse_fn_body(
+            "let dx = a + b\nlet dy = a + b\ndy = c\nreturn dx + dy");
+        let out = evolver.mutate_body(&body, Mutation::IdiomRewrite);
+        let src = crate::fmt::format_program(&out);
+        assert!(src.contains("let dy"), "unsafe CSE on reassigned var:\n{}", src);
         // impure expr (call) -> must NOT dedup
         let body = parse_fn_body(
             "let dx = rand()\nlet dy = rand()\nreturn dx + dy");
