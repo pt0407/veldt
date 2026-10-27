@@ -6185,10 +6185,16 @@ fn rewrite_one(veldt: &mut veldt::Veldt, name: &str, vid: u32, quiet: bool) -> b
 fn rewrite_variant(target: &str) {
     let (name, vid) = match target.split_once('#') {
         Some((n, i)) => (n.to_string(), i.parse::<u32>().unwrap_or(0)),
-        None => { eprintln!("usage: veldt rewrite <name#N>"); process::exit(1); }
+        None => (target.to_string(), 0), // vid 0 -> fittest below
     };
     let mut veldt = veldt::Veldt::new();
     if let Err(e) = veldt.load() { eprintln!("Error loading veldt: {}", e); process::exit(1); }
+    let vid = if vid == 0 {
+        match veldt.get_fittest_variant(&name) {
+            Some(e) => e.id,
+            None => { eprintln!("{} not found (no variants)", name); process::exit(1); }
+        }
+    } else { vid };
     let entry = match veldt.functions.get(&name)
         .and_then(|vs| vs.iter().find(|e| e.id == vid)) {
         Some(e) => e.clone(),
