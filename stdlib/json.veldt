@@ -1,0 +1,21 @@
+# stdlib/json — JSON encode/decode for veldt
+# `import "json"` then json::parse(s), json::stringify(v), json::get(obj, key)…
+
+fn parse(s: str) { return json_parse(s) }
+fn stringify(v: any) { return json_stringify(v) }
+fn get(obj: dict, key: str) { return obj[key] }
+fn keys(obj: dict) { return obj.keys() }
+fn has(obj: dict, key: str) { return obj.keys().contains(key) }
+fn merge(a: dict, b: dict) {
+    let out = dict()
+    for k in a.keys() { out[k] = a[k] }
+    for k in b.keys() { out[k] = b[k] }
+    return out
+}
+fn from_list(xs: list) {
+    let out = dict()
+    let i = 0
+    for x in xs { out[str(i)] = x
+    i = i + 1 }
+    return out
+}

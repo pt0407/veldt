@@ -1,0 +1,9 @@
+# stdlib/http — HTTP client + server helpers for veldt
+# `import "http"` then http::get(url), http::send(url, body), http::serve(port, fn)…
+
+fn get(url: str) { return fetch(url) }
+fn send(url: str, body: str) { return post(url, body) }
+fn serve_on(port: int, handler: fn) { serve(port, handler) }
+fn get_json(url: str) { return json_parse(fetch(url)) }
+fn send_json(url: str, body: dict) { return post(url, json_stringify(body)) }
+fn ok(resp: any) { return resp != null and resp != "" }

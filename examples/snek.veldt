@@ -72,6 +72,9 @@ while game_running() and not dead {
         emit("coin", f["x"], f["y"])
         s = scene_despawn(s, f["name"])
         s = spawn(s, "food", rand_range(2, 27), rand_range(2, 12))
+        # reaching the target length is a WIN — a real winnable condition
+        # so evolve --sim --until-win can find a policy that fills the board
+        if len >= 12 { won = true; sfx("win"); emit("win", f["x"], f["y"]) }
     }
     # render the tail as body entities over the head
     let i = 0

@@ -1,0 +1,28 @@
+# stdlib/result — Result/Option helpers for veldt
+# `import "result"` then result::ok(v), result::err(e), result::is_ok(r)…
+# a Result is a dict {ok: v} or {err: e}; an Option is {some: v} or {none: true}.
+
+fn ok(v: any) { return dict().put("ok", v) }
+fn err(e: any) { return dict().put("err", e) }
+fn is_ok(r: dict) { return r.keys().contains("ok") }
+fn is_err(r: dict) { return r.keys().contains("err") }
+fn unwrap(r: dict) { return r["ok"] }
+fn unwrap_or(r: dict, default: any) {
+    let out = default
+    if r.keys().contains("ok") { out = r["ok"] }
+    return out
+}
+fn map(r: dict, f: fn) {
+    let out = r
+    if r.keys().contains("ok") { out = dict().put("ok", f(r["ok"])) }
+    return out
+}
+fn some(v: any) { return dict().put("some", v) }
+fn none() { return dict().put("none", true) }
+fn is_some(o: dict) { return o.keys().contains("some") }
+fn is_none(o: dict) { return o.keys().contains("none") }
+fn or_else(o: dict, default: any) {
+    let out = default
+    if o.keys().contains("some") { out = o["some"] }
+    return out
+}

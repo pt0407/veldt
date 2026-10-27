@@ -1,0 +1,12 @@
+# stdlib/rand — randomness helpers for veldt
+# `import "rand"` then rand::between(a,b), rand::unit(), rand::pick(xs)…
+
+fn between(a: int, b: int) { return rand_range(a, b) }
+fn unit() { return randf() }
+fn coin() { return rand_bool() }
+fn sign() { return rand_sign() }
+fn gauss() { return rand_gauss() }
+fn pick(xs: list) { return xs[rand_range(0, xs.len() - 1)] }
+fn shuffle(xs: list) { return rand_shuffle(xs) }
+fn permute(xs: list) { return rand_permute(xs) }
+fn chance(p: float) { return randf() < p }
