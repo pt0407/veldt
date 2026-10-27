@@ -2979,6 +2979,27 @@ impl Interpreter {
                 };
                 Ok(Some(Value::List(hits.into())))
             }
+            "move_toward" | "approach" => {
+                // move_toward(e, tx, ty, speed) — step the entity toward a
+                // target at speed — the chase/flee movement games hand-roll.
+                let (e, tx, ty, sp) = match (args.get(0), args.get(1), args.get(2), args.get(3)) {
+                    (Some(Value::Dict(e)), Some(tx), Some(ty), Some(sp)) =>
+                        (e.clone(), Self::num_f(tx)?, Self::num_f(ty)?, Self::num_f(sp)?),
+                    _ => return Err("move_toward(e, tx, ty, speed) expects dict + 3 nums".into()),
+                };
+                let ex = e.get("x").map(|v| Self::num_f(v).unwrap_or(0.0)).unwrap_or(0.0);
+                let ey = e.get("y").map(|v| Self::num_f(v).unwrap_or(0.0)).unwrap_or(0.0);
+                let dx = tx - ex; let dy = ty - ey;
+                let d = (dx * dx + dy * dy).sqrt();
+                let step = sp.min(d);
+                let (nx, ny) = if d > 0.0 {
+                    (ex + dx / d * step, ey + dy / d * step)
+                } else { (ex, ey) };
+                let mut out = e.clone();
+                out.insert("x".into(), Value::Float(nx));
+                out.insert("y".into(), Value::Float(ny));
+                Ok(Some(Value::Dict(out)))
+            }
             "collide_all" => {
                 // collide_all(e, scene) → list of every scene entity
                 // overlapping e — area effects, multi-hit, pickups-in-radius.
