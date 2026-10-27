@@ -968,6 +968,7 @@ impl Evolver {
         if let Some(r) = Self::while_contains_window(win) { return Some(r); }
         if let Some(r) = Self::count_window(win) { return Some(r); }
         if let Some(r) = Self::map_filter_window(win) { return Some(r); }
+        if let Some(r) = Self::extremum_scan_window(win) { return Some(r); }
         Self::cse_window(win)
     }
 
@@ -1233,6 +1234,55 @@ impl Evolver {
                 if !is_push { return None; }
                 return Some((2, vec![Stmt::Let(out_name, Expr::MethodCall(
                     Box::new(xs.clone()), "unique".into(), vec![]))]));
+            }
+        }
+        None
+    }
+
+    /// `let m = xs[0]; for x in xs { if x > m { m = x } } return m`
+    /// -> `return xs.max()` (or `.min()` for `<`). Manual extremum scan.
+    fn extremum_scan_window(win: &[Stmt]) -> Option<(usize, Vec<Stmt>)> {
+        if win.len() < 3 { return None; }
+        let (m_name, xs_expr) = match &win[0] {
+            Stmt::Let(n, Expr::Index(o, i)) => {
+                let is_zero = matches!(i.as_ref(), Expr::Int(0));
+                if is_zero { (n.clone(), (**o).clone()) } else { return None; }
+            }
+            Stmt::Let(n, Expr::MethodCall(o, m, a))
+                if m == "first" && a.is_empty() => (n.clone(), (**o).clone()),
+            _ => return None,
+        };
+        if let Stmt::For(x, xs, body) = &win[1] {
+            if format!("{:?}", xs_expr) != format!("{:?}", xs.clone()) { return None; }
+            if body.len() != 1 { return None; }
+            // return m right after the loop
+            if !matches!(&win[2], Stmt::Return(Some(Expr::Var(v))) if v == &m_name) {
+                return None;
+            }
+            if let Stmt::If(cond, then_b, els) = &body[0] {
+                if then_b.len() != 1 { return None; }
+                // `m = x` or `m += x`? — must be a plain Assign(m, x)
+                if !matches!(&then_b[0],
+                    Stmt::Assign(t, Expr::Var(v)) if t == &m_name && v == x) {
+                    return None;
+                }
+                if els.is_some() { return None; }
+                // `x > m`/`m < x` -> xs.max(); `x < m`/`m > x` -> xs.min()
+                let is_xy = |e: &Expr| matches!(e, Expr::Var(v) if v == x);
+                let is_m  = |e: &Expr| matches!(e, Expr::Var(v) if v == &m_name);
+                let method = match cond {
+                    Expr::BinOp(l, BinOp::Gt, r)
+                        if is_xy(l) && is_m(r) => "max",
+                    Expr::BinOp(l, BinOp::Lt, r)
+                        if is_m(l) && is_xy(r) => "max",
+                    Expr::BinOp(l, BinOp::Lt, r)
+                        if is_xy(l) && is_m(r) => "min",
+                    Expr::BinOp(l, BinOp::Gt, r)
+                        if is_m(l) && is_xy(r) => "min",
+                    _ => return None,
+                };
+                return Some((3, vec![Stmt::Return(Some(Expr::MethodCall(
+                    Box::new(xs.clone()), method.into(), vec![])))]));
             }
         }
         None
@@ -3067,6 +3117,28 @@ mod asymptotic_proof {
                     src, crate::fmt::format_program(&after), why),
             }
         }
+    }
+
+    #[test]
+    fn idiom_rewrite_extremum_scan_to_max_min() {
+        let mut evolver = Evolver::new();
+        let body = parse_fn_body(
+            "let m = xs[0]\nfor x in xs {\n  if x > m { m = x }\n}\nreturn m");
+        let out = evolver.mutate_body(&body, Mutation::IdiomRewrite);
+        let src = crate::fmt::format_program(&out);
+        assert!(src.contains("max"), "max scan not rewritten:\n{}", src);
+        let body = parse_fn_body(
+            "let m = xs[0]\nfor x in xs {\n  if x < m { m = x }\n}\nreturn m");
+        let out = evolver.mutate_body(&body, Mutation::IdiomRewrite);
+        let src = crate::fmt::format_program(&out);
+        assert!(src.contains("min"), "min scan not rewritten:\n{}", src);
+        // bail: wrong comparator direction on the same shape
+        let body = parse_fn_body(
+            "let m = xs[0]\nfor x in xs {\n  if x == m { m = x }\n}\nreturn m");
+        let out = evolver.mutate_body(&body, Mutation::IdiomRewrite);
+        let src = crate::fmt::format_program(&out);
+        assert!(!src.contains(".max()") && !src.contains(".min()"),
+            "unsafe extremum rewrite:\n{}", src);
     }
 
     #[test]
