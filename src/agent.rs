@@ -57,7 +57,20 @@ pub fn execute_source_opts(source: &str, veldt: &mut Veldt, caps: crate::interpr
 /// Shared run pipeline — `use_vm` routes execution through the
 /// bytecode VM + JIT (`/api/run` `{"vm": true}`); same lex/parse/
 /// capture/events semantics as the interpreter path.
+/// Game-session variant — the program runs with a shared GameIo
+/// (browser keys in, frames out) attached to its interpreter.
+pub fn execute_source_game(source: &str, veldt: &mut Veldt,
+    io: std::sync::Arc<crate::interpreter::GameIo>) -> ExecResult {
+    execute_source_opts_full_io(source, veldt,
+        crate::interpreter::Caps::allow_all(), false, Some(io))
+}
+
 pub fn execute_source_opts_full(source: &str, veldt: &mut Veldt, caps: crate::interpreter::Caps, use_vm: bool) -> ExecResult {
+    execute_source_opts_full_io(source, veldt, caps, use_vm, None)
+}
+
+fn execute_source_opts_full_io(source: &str, veldt: &mut Veldt, caps: crate::interpreter::Caps, use_vm: bool,
+    game_io: Option<std::sync::Arc<crate::interpreter::GameIo>>) -> ExecResult {
     let mut output = String::new();
     let mut events = Vec::new();
 
@@ -92,6 +105,7 @@ pub fn execute_source_opts_full(source: &str, veldt: &mut Veldt, caps: crate::in
     interp.caps = caps;
     interp.call_stack.clear();
     veldt.load_into_interpreter(&mut interp);
+    interp.game_io = game_io;
     interp.print_buffer = Some(String::new());
 
     // fast-engine path — same garden, same capture semantics

@@ -108,6 +108,31 @@ pub struct Interpreter {
     pub importing: Vec<String>,
     // std:sandbox — capability set; denied builtins error before dispatch
     pub caps: Caps,
+    // 2D game engine — when the program runs inside a game session
+    // (/api/game/start), this is the shared input queue + frame buffer.
+    // None = CLI mode — game_frame prints a JSON frame line instead.
+    pub game_io: Option<std::sync::Arc<GameIo>>,
+}
+
+/// Shared state for a live game session: browser key events in,
+/// latest scene JSON out, and a running flag the loop polls.
+pub struct GameIo {
+    /// keys the player currently holds (browser POSTs the held-set each frame)
+    pub keys: std::sync::Mutex<Vec<String>>,
+    /// latest emitted game_frame scene (serialized JSON) — /api/game/frame reads it
+    pub frame: std::sync::Mutex<Option<String>>,
+    /// session alive — game_running() polls this; /api/game/stop clears it
+    pub running: std::sync::atomic::AtomicBool,
+}
+
+impl GameIo {
+    pub fn new() -> std::sync::Arc<Self> {
+        std::sync::Arc::new(GameIo {
+            keys: std::sync::Mutex::new(Vec::new()),
+            frame: std::sync::Mutex::new(None),
+            running: std::sync::atomic::AtomicBool::new(true),
+        })
+    }
 }
 
 #[derive(Clone)]
@@ -186,6 +211,7 @@ impl Interpreter {
             call_stack: Vec::new(),
             importing: Vec::new(),
             caps: Caps::allow_all(),
+            game_io: None,
         }
     }
 
@@ -607,7 +633,8 @@ impl Interpreter {
                 match op {
                     UnaryOp::Neg => match v {
                         Value::Int(n) => Ok(Value::Int(-n)),
-                        _ => Err("Cannot negate non-integer".into()),
+                        Value::Float(f) => Ok(Value::Float(-f)),
+                        _ => Err("Cannot negate non-number".into()),
                     },
                     UnaryOp::Not => match v {
                         Value::Bool(b) => Ok(Value::Bool(!b)),
@@ -1021,6 +1048,50 @@ impl Interpreter {
             (Value::Float(x), Value::Float(y)) => x.partial_cmp(y).unwrap_or(Ordering::Equal),
             (Value::Str(x), Value::Str(y)) => x.cmp(y),
             _ => Ordering::Equal,
+        }
+    }
+
+    /// 2D engine helpers — num coercion + Value→serde_json for game_frame
+    fn num_f(v: &Value) -> Result<f64, String> {
+        match v {
+            Value::Int(i) => Ok(*i as f64),
+            Value::Float(f) => Ok(*f),
+            _ => Err("expected a number".into()),
+        }
+    }
+    fn json_num(v: &Value) -> f64 {
+        match v { Value::Int(i) => *i as f64, Value::Float(f) => *f, _ => 0.0 }
+    }
+    fn json_val(v: &Value) -> serde_json::Value {
+        match v {
+            Value::Int(i) => serde_json::json!(i),
+            Value::Float(f) => serde_json::json!(f),
+            Value::Str(s) => serde_json::json!(s),
+            Value::Bool(b) => serde_json::json!(b),
+            Value::Null => serde_json::Value::Null,
+            Value::List(l) => serde_json::json!(
+                l.iter().map(Self::json_val).collect::<Vec<_>>()),
+            Value::Dict(d) => d.iter()
+                .map(|(k, v)| (k.clone(), Self::json_val(v)))
+                .collect::<serde_json::Map<_,_>>().into(),
+            other => serde_json::json!(format!("{:?}", other)),
+        }
+    }
+    fn entity_json(v: &Value) -> serde_json::Value {
+        match v {
+            Value::Dict(d) => serde_json::json!({
+                "name": d.get("name").map(Self::json_val)
+                    .unwrap_or(serde_json::Value::Null),
+                "x": d.get("x").map(Self::json_num).unwrap_or(0.0),
+                "y": d.get("y").map(Self::json_num).unwrap_or(0.0),
+                "sprite": d.get("sprite").map(Self::json_val)
+                    .unwrap_or(serde_json::Value::Null),
+                "vx": d.get("vx").map(Self::json_num).unwrap_or(0.0),
+                "vy": d.get("vy").map(Self::json_num).unwrap_or(0.0),
+                "tag": d.get("tag").map(Self::json_val)
+                    .unwrap_or(serde_json::Value::Null),
+            }),
+            other => serde_json::json!(format!("{:?}", other)),
         }
     }
 
@@ -2586,6 +2657,138 @@ impl Interpreter {
                 }
                 let mut d2 = d.clone();
                 d2.insert("cells".to_string(), Value::List(rows2));
+                Ok(Some(Value::Dict(d2)))
+            }
+            "game_new" => {
+                // game_new(w, h) → a game-state dict: world dims + camera
+                let (w, h) = match (args.get(0), args.get(1)) {
+                    (Some(Value::Int(w)), Some(Value::Int(h))) => (*w as f64, *h as f64),
+                    _ => return Err("game_new(w, h) expects two ints".into()),
+                };
+                let mut d = im::HashMap::new();
+                d.insert("w".into(), Value::Float(w));
+                d.insert("h".into(), Value::Float(h));
+                d.insert("camera_x".into(), Value::Float(0.0));
+                d.insert("camera_y".into(), Value::Float(0.0));
+                d.insert("t".into(), Value::Int(0));
+                Ok(Some(Value::Dict(d)))
+            }
+            "entity" => {
+                // entity(name, x, y, sprite) → an entity dict {name,x,y,sprite,vx,vy,tag}
+                let (name, x, y, sprite) = match (args.get(0), args.get(1), args.get(2), args.get(3)) {
+                    (Some(Value::Str(n)), Some(x), Some(y), Some(Value::Str(s))) =>
+                        (n.clone(), Self::num_f(x)?, Self::num_f(y)?, s.clone()),
+                    _ => return Err("entity(name, x, y, sprite) expects str + 2 nums + str".into()),
+                };
+                let mut d = im::HashMap::new();
+                d.insert("name".into(), Value::Str(name));
+                d.insert("x".into(), Value::Float(x));
+                d.insert("y".into(), Value::Float(y));
+                d.insert("sprite".into(), Value::Str(sprite));
+                d.insert("vx".into(), Value::Float(0.0));
+                d.insert("vy".into(), Value::Float(0.0));
+                d.insert("tag".into(), Value::Str("".into()));
+                Ok(Some(Value::Dict(d)))
+            }
+            "ent_move" => {
+                // ent_move(e, dx, dy) → entity moved by dx,dy
+                let (d, dx, dy) = match (args.get(0), args.get(1), args.get(2)) {
+                    (Some(Value::Dict(d)), Some(x), Some(y)) =>
+                        (d.clone(), Self::num_f(x)?, Self::num_f(y)?),
+                    _ => return Err("ent_move(e, dx, dy) expects dict + 2 nums".into()),
+                };
+                let mut d2 = d.clone();
+                let (nx, ny) = (Self::num_f(d.get("x").unwrap_or(&Value::Int(0)))? + dx,
+                                Self::num_f(d.get("y").unwrap_or(&Value::Int(0)))? + dy);
+                d2.insert("x".into(), Value::Float(nx));
+                d2.insert("y".into(), Value::Float(ny));
+                Ok(Some(Value::Dict(d2)))
+            }
+            "ent_vel" => {
+                // ent_vel(e, vx, vy) → entity with velocity set
+                let (d, vx, vy) = match (args.get(0), args.get(1), args.get(2)) {
+                    (Some(Value::Dict(d)), Some(x), Some(y)) =>
+                        (d.clone(), Self::num_f(x)?, Self::num_f(y)?),
+                    _ => return Err("ent_vel(e, vx, vy) expects dict + 2 nums".into()),
+                };
+                let mut d2 = d.clone();
+                d2.insert("vx".into(), Value::Float(vx));
+                d2.insert("vy".into(), Value::Float(vy));
+                Ok(Some(Value::Dict(d2)))
+            }
+            "collide" => {
+                // collide(a, b) → AABB overlap — cells share the same ~1-tile space
+                let (a, b) = match (args.get(0), args.get(1)) {
+                    (Some(Value::Dict(a)), Some(Value::Dict(b))) => (a, b),
+                    _ => return Err("collide(a, b) expects two entity dicts".into()),
+                };
+                let ax = Self::num_f(a.get("x").unwrap_or(&Value::Int(0)))?;
+                let ay = Self::num_f(a.get("y").unwrap_or(&Value::Int(0)))?;
+                let bx = Self::num_f(b.get("x").unwrap_or(&Value::Int(0)))?;
+                let by = Self::num_f(b.get("y").unwrap_or(&Value::Int(0)))?;
+                let hit = (ax - bx).abs() < 1.0 && (ay - by).abs() < 1.0;
+                Ok(Some(Value::Bool(hit)))
+            }
+            "keys" => {
+                // keys() → list of held keys from the session input queue
+                let pressed: Vec<String> = self.game_io.as_ref()
+                    .map(|io| io.keys.lock().unwrap().clone())
+                    .unwrap_or_default();
+                Ok(Some(Value::List(pressed.into_iter()
+                    .map(|s| Value::Str(s.into())).collect())))
+            }
+            "game_frame" => {
+                // game_frame(state, entities, hud) → emit the scene JSON to
+                // the session frame buffer (or print it in CLI mode)
+                let (state, entities, hud) = match (args.get(0), args.get(1), args.get(2)) {
+                    (Some(Value::Dict(s)), Some(Value::List(e)), Some(h)) =>
+                        (s, e.clone(), h),
+                    _ => return Err("game_frame(state, entities, hud) expects dict + list + any".into()),
+                };
+                let scene = serde_json::json!({
+                    "w": state.get("w").map(Self::json_num).unwrap_or(0.0),
+                    "h": state.get("h").map(Self::json_num).unwrap_or(0.0),
+                    "camera_x": state.get("camera_x").map(Self::json_num).unwrap_or(0.0),
+                    "camera_y": state.get("camera_y").map(Self::json_num).unwrap_or(0.0),
+                    "entities": entities.iter().map(Self::entity_json).collect::<Vec<_>>(),
+                    "hud": match hud { Value::Dict(hd) => hd.iter()
+                        .map(|(k,v)| (k.clone(), Self::json_val(v)))
+                        .collect::<serde_json::Map<_,_>>().into(),
+                        _ => serde_json::json!(hud) },
+                });
+                let line = scene.to_string();
+                match &self.game_io {
+                    Some(io) => {
+                        *io.frame.lock().unwrap() = Some(line);
+                        Ok(Some(Value::Null))
+                    }
+                    None => {
+                        if let Some(buf) = &mut self.print_buffer {
+                            buf.push_str(&line); buf.push('\n');
+                        } else {
+                            println!("{}", line);
+                        }
+                        Ok(Some(Value::Null))
+                    }
+                }
+            }
+            "game_running" => {
+                // game_running() → bool — the session is alive
+                let r = self.game_io.as_ref()
+                    .map(|io| io.running.load(std::sync::atomic::Ordering::Relaxed))
+                    .unwrap_or(true);
+                Ok(Some(Value::Bool(r)))
+            }
+            "camera_xy" => {
+                // camera_xy(state, x, y) → state with the camera offset set
+                let (d, x, y) = match (args.get(0), args.get(1), args.get(2)) {
+                    (Some(Value::Dict(d)), Some(x), Some(y)) =>
+                        (d.clone(), Self::num_f(x)?, Self::num_f(y)?),
+                    _ => return Err("camera_xy(state, x, y) expects dict + 2 nums".into()),
+                };
+                let mut d2 = d.clone();
+                d2.insert("camera_x".into(), Value::Float(x));
+                d2.insert("camera_y".into(), Value::Float(y));
                 Ok(Some(Value::Dict(d2)))
             }
             "canvas_ellipse" => {
