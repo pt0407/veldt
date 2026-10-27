@@ -1144,9 +1144,14 @@ impl Interpreter {
                 Some(id) => variants.iter().find(|v| v.id == id)
                     .ok_or_else(|| format!("Variant {}#{} not found", name, id))?,
                 None => {
-                    // dispatch to the fittest loaded variant
+                    // dispatch to the fittest variant that can take this call —
+                    // skip arity mismatches so a variant born at a different
+                    // signature doesn't break the family's real calls
                     variants.iter()
+                        .filter(|v| v.def.params.len() == args.len())
                         .max_by(|a, b| a.fitness.partial_cmp(&b.fitness).unwrap_or(std::cmp::Ordering::Equal))
+                        .or_else(|| variants.iter()
+                            .max_by(|a, b| a.fitness.partial_cmp(&b.fitness).unwrap_or(std::cmp::Ordering::Equal)))
                         .unwrap()
                 }
             };
