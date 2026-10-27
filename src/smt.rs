@@ -881,6 +881,41 @@ fn expr_to_smt_raw(
                         let c = if is_min { ar.le(&br) } else { ar.ge(&br) };
                         return Some(SymVal::Scalar(c.ite(&ar, &br).into()));
                     }
+                    ("float", 1) => {
+                        let x = expr_to_smt(&args[0], state, veldt, fuel)?.into_scalar().or_else(|| { state.note("aggregate where scalar expected"); None })?;
+                        let xr = as_real_coerced(&x).or_else(|| { state.note("float(): non-numeric"); None })?;
+                        return Some(SymVal::Scalar(xr.into()));
+                    }
+                    ("int", 1) => {
+                        let x = expr_to_smt(&args[0], state, veldt, fuel)?.into_scalar().or_else(|| { state.note("aggregate where scalar expected"); None })?;
+                        if let Some(xi) = x.as_int() {
+                            return Some(SymVal::Scalar(xi.into()));
+                        }
+                        // real -> int: truncating cast
+                        let xr = as_real_coerced(&x).or_else(|| { state.note("int(): non-numeric"); None })?;
+                        let r2i = FuncDecl::new("r2i", &[&Sort::real()], &Sort::int());
+                        return Some(SymVal::Scalar(r2i.apply(&[&xr])));
+                    }
+                    ("len", 1) => {
+                        match expr_to_smt(&args[0], state, veldt, fuel)? {
+                            SymVal::List(items) =>
+                                return Some(SymVal::Scalar(Int::from_i64(items.len() as i64).into())),
+                            SymVal::Scalar(sv) if sv.get_sort() == vstr_sort() => {
+                                let decl = FuncDecl::new("vstr_len", &[&vstr_sort()], &Sort::int());
+                                return Some(SymVal::Scalar(decl.apply(&[&sv])));
+                            }
+                            _ => {
+                                state.note("len(): not a list/str");
+                                return None;
+                            }
+                        }
+                    }
+                    ("str", 1) | ("bool", 1) => {
+                        let x = expr_to_smt(&args[0], state, veldt, fuel)?.into_scalar().or_else(|| { state.note("aggregate where scalar expected"); None })?;
+                        let ret = if name == "str" { vstr_sort() } else { Sort::bool() };
+                        let decl = FuncDecl::new(format!("cast_{}", name), &[&x.get_sort()], &ret);
+                        return Some(SymVal::Scalar(decl.apply(&[&x])));
+                    }
                     ("sqrt", 1) => {
                         let x = expr_to_smt(&args[0], state, veldt, fuel)?.into_scalar().or_else(|| { state.note("aggregate where scalar expected"); None })?;
                         let xr = as_real_coerced(&x)?;
@@ -947,6 +982,7 @@ fn expr_to_smt_raw(
                 return None;
             }
             let SymVal::List(items) = expr_to_smt(iter, state, veldt, fuel)? else {
+                state.note("list-comp over non-list");
                 return None;
             };
             let mut out = Vec::with_capacity(items.len());
