@@ -313,6 +313,62 @@ fn main() {
             let port: u16 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(7878);
             run_registry(port);
         }
+        "deploy" => {
+            // veldt deploy <file> [--name N] [--to URL] — "vercel for veldt":
+            // put a program on a running veldt server; it's live at
+            // <host>/site/<name> (graphical play page, shared garden).
+            if args.len() < 3 {
+                eprintln!("Usage: veldt deploy <file.veldt> [--name N] [--to URL]");
+                eprintln!("  no --to: writes into examples/ for `veldt studio`");
+                process::exit(1);
+            }
+            let file = args[2].clone();
+            let src = match std::fs::read_to_string(&file) {
+                Ok(s) => s,
+                Err(e) => { eprintln!("read {}: {}", file, e); process::exit(1); }
+            };
+            let name = args.iter().position(|a| a == "--name")
+                .and_then(|i| args.get(i + 1)).cloned()
+                .unwrap_or_else(|| std::path::Path::new(&file)
+                    .file_stem().unwrap_or_default()
+                    .to_string_lossy().to_string());
+            let to = args.iter().position(|a| a == "--to")
+                .and_then(|i| args.get(i + 1)).cloned();
+            match to {
+                Some(url) => {
+                    // remote deploy — POST source to the server's /api/deploy
+                    let body = serde_json::json!({"name": name, "source": src});
+                    let client = reqwest::blocking::Client::builder()
+                        .timeout(std::time::Duration::from_secs(30))
+                        .build().unwrap();
+                    let res = client.post(format!("{}/api/deploy",
+                            url.trim_end_matches('/')))
+                        .json(&body).send();
+                    match res.and_then(|r| r.json::<serde_json::Value>()) {
+                        Ok(d) if d["ok"].as_bool().unwrap_or(false) => {
+                            println!("deployed — live at {}{}",
+                                url.trim_end_matches('/'),
+                                d["site"].as_str().unwrap_or(""));
+                        }
+                        Ok(d) => {
+                            eprintln!("deploy failed: {}",
+                                d["error"].as_str().unwrap_or("?"));
+                            process::exit(1);
+                        }
+                        Err(e) => { eprintln!("deploy failed: {}", e); process::exit(1); }
+                    }
+                }
+                None => {
+                    // local — into examples/ for the next `veldt studio`
+                    let path = format!("examples/{}.veldt", name);
+                    if let Err(e) = std::fs::write(&path, &src) {
+                        eprintln!("write {}: {}", path, e); process::exit(1);
+                    }
+                    println!("deployed '{}' → {}", name, path);
+                    println!("serve with `veldt studio 7878` — live at http://localhost:7878/site/{}", name);
+                }
+            }
+        }
         "push" => {
             if args.len() < 3 {
                 eprintln!("Usage: veldt push <url>   (posts garden to a registry)");
@@ -2777,7 +2833,7 @@ fn print_help(topic: Option<&str>) {
         "strings" => "s.len() s.trim() s.ltrim() s.rtrim() s.to_lower() s.to_upper()\n  s.split(sep) s.replace(a,b) s.contains(x) s.starts_with(p) s.ends_with(p)\n  s.chars() s.repeat(n) s.pad(n[,ch]) s.split_at(i) s[a:b]",
         "lists" => "xs.len() xs.push(v) xs.pop() xs.contains(v) xs.join(sep)\n  xs.enumerate() xs.zip(ys) xs.flatten() xs.take(n) xs.skip(n)\n  xs.sort() xs.sort_by(f) xs.group_by(f) xs.min_by(f) xs.max_by(f)\n  xs.reverse() xs.index_of(v) xs[a:b] xs[-1]",
         "types" => "int float str bool list dict set null fn — types are advisory docs\n  `x in xs` membership · `??` null-coalesce · `?.` safe access · `|>` pipe",
-        "registry" => "veldt registry [port] — host a garden pool · veldt push <url> · veldt pull <url> [--merge]\n  veldt search <url> <name> · veldt tournament <url> — pull, trial, push winners back\n  veldt import <file|url> [--merge] · veldt export [file] — garden JSON",
+        "registry" => "veldt registry [port] — host a garden pool · veldt push <url> · veldt pull <url> [--merge]\n  veldt search <url> <name> · veldt tournament <url> — pull, trial, push winners back\n  veldt import <file|url> [--merge] · veldt export [file] — garden JSON\n  veldt deploy <file> [--name N] [--to URL] — live at <host>/site/<name>",
         "sandbox" => "veldt run --sandbox <file> · veldt watch <file> --sandbox — Stage-0 caps (fs/net/proc denied)\n  sandbox_run(\"fn\", args) builtin · shadow_call(\"fn\", args) — all variants run sandboxed\n  Trials/probes/fuzz already run sandboxed — untrusted code can't touch the host",
         "filter" => "--filter <expr> — the variant query DSL (usable in garden/evolve/stats/test/fuzz/find/lineage/adopt/diff/verify/bench/tournament/absorb + /api/filter)\n  fields: fitness age usage size args lifespan last_used niches born trial_score\n          efficiency parents healing health trust origin calls family niche:<name>\n  ops: > < >= <= == != ~ (contains) | connectors: && (AND) || (OR) | prefix ! or 'not ' (NOT)\n  e.g. --filter \"family == fib && fitness > 1.5\" · \"niche:int:big > 0.5\" · \"!health == sick\"\n  --sort <field> — sort variants (garden/stats/lineage/find/evolve + /api/filter?sort=)\n  fields: fitness age usage size args lifespan last_used niches fit_rate usage_rate\n          size_rate efficiency niche_score id origin health trust born trial_score\n          efficiency parents healing niche:<name> | e.g. --sort fit_rate",
         "lint" | "check" => "veldt check <file> [--strict] [--json|--watch|--fail] — parse + ~91-check lint\n  veldt check - --strict — read the program from stdin\n  veldt check --suppress <s> — drop warnings containing <s> (repeatable)\n  veldt check --garden [family] — lint every variant body\n  veldt check --garden --bugs — defect-class warnings only\n  veldt check --garden --fix [--verify] — repair dead code (+ re-trial)\n  veldt check --garden --watch — re-lint on garden saves\n  veldt fix <file> [--check] — same repairs on a source file (in-place + fmt)\n  veldt stats --lint — garden census (defect split + top warning kinds)\n  veldt adopt <name#N> --lint — refuse to promote defect-carrying variants\n  veldt tend [family] — heal sick variants on demand\n  veldt evolve --tend — self-maintaining cycles (heal + clean per cycle)\n  veldt bench --lint — strict-lint timing per file + garden census\n  evolve rejects mutants introducing defect warnings ([LINT] events)",
@@ -3629,6 +3685,7 @@ fn print_usage() {
   veldt adopt <name#N>         Canonicalize a variant (dispatch picks it)
   veldt export [file]          Export the garden to a JSON file
   veldt import <file>          Import a garden JSON file
+  veldt deploy <file> [--to URL]  Put a program live at <host>/site/<name>
   veldt run --trace <file>     Trace every executed statement
   veldt run --evolve <file>    Run 1 evolve cycle after the program
   veldt run --sandbox <file>   Run with all side-effect caps denied
