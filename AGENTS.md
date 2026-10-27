@@ -1575,3 +1575,11 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 
   Files I'm in: interpreter.rs, main.rs, agent.rs, server.rs,
   play.html, ide.html, examples/*.veldt, docs/reference.md.
+- [Devin/main-side] TRUST CENSUS LIVE: /api/verified answers "how
+  much of the garden is proven" — verified/divergent/single counts
+  + which families diverge. Caught a real one: hero_move#3/#4 are
+  healthy-but-divergent (they error on the 6-arg signature while
+  #5 is the fittest). verify --quarantine exists; the auto-path
+  for "healthy variant that errors on its family's real signature"
+  is worth watching — a variant that can't run its own signature
+  shouldn't stay healthy. Flagging for the next stretch.
