@@ -2027,6 +2027,48 @@ impl Evolver {
                 } else { None }
             } else { None }
         } else if let Expr::BinOp(l, op, r) = e {
+            // xs.index_of(t) >= 0 / != -1 -> xs.contains(t)  (and
+            // the mirrored/negated forms for < 0 and == -1)
+            let idx_call = |e: &Expr| -> Option<(Expr, Expr)> {
+                if let Expr::MethodCall(o, m, a) = e {
+                    if m == "index_of" && a.len() == 1 {
+                        return Some(((**o).clone(), a[0].clone()));
+                    }
+                }
+                None
+            };
+            let is_neg_one = |e: &Expr| -> bool {
+                matches!(e, Expr::Int(-1))
+                    || matches!(e, Expr::UnaryOp(UnaryOp::Neg, i)
+                        if matches!(i.as_ref(), Expr::Int(1)))
+            };
+            if let Some((xs, t)) = idx_call(l) {
+                let contains = Expr::MethodCall(
+                    Box::new(xs.clone()), "contains".into(), vec![t.clone()]);
+                let new_e: Option<Expr> = match (&*op, r.as_ref()) {
+                    (BinOp::Ge, Expr::Int(0)) => Some(contains.clone()),
+                    (BinOp::Gt, e2) if is_neg_one(e2) => Some(contains.clone()),
+                    (BinOp::Neq, e2) if is_neg_one(e2) => Some(contains.clone()),
+                    (BinOp::Lt, Expr::Int(0)) => 
+                        Some(Expr::UnaryOp(UnaryOp::Not, Box::new(contains.clone()))),
+                    (BinOp::Eq, e2) if is_neg_one(e2) =>
+                        Some(Expr::UnaryOp(UnaryOp::Not, Box::new(contains.clone()))),
+                    _ => None,
+                };
+                if let Some(ne) = new_e { *e = ne; return true; }
+            } else if let Some((xs, t)) = idx_call(r) {
+                // mirrored: `0 <= xs.index_of(t)` / `-1 != xs.index_of(t)`
+                let contains = Expr::MethodCall(
+                    Box::new(xs.clone()), "contains".into(), vec![t.clone()]);
+                let new_e: Option<Expr> = match (&*op, l.as_ref()) {
+                    (BinOp::Le, Expr::Int(0)) => Some(contains.clone()),
+                    (BinOp::Neq, e2) if is_neg_one(e2) => Some(contains.clone()),
+                    (BinOp::Eq, e2) if is_neg_one(e2) =>
+                        Some(Expr::UnaryOp(UnaryOp::Not, Box::new(contains.clone()))),
+                    _ => None,
+                };
+                if let Some(ne) = new_e { *e = ne; return true; }
+            }
             match (op, l.as_ref(), r.as_ref()) {
                 // literal folding: Int op Int -> Int/Bool (cross-statement
                 // constant folding lands via ConstProp on the stmt level)
@@ -3186,6 +3228,24 @@ mod asymptotic_proof {
                 Err(why) => panic!("rewrite not provable: {} -> {:?}\n{}",
                     src, crate::fmt::format_program(&after), why),
             }
+        }
+    }
+
+    #[test]
+    fn simplify_index_of_check_to_contains() {
+        // xs.index_of(t) >= 0 -> xs.contains(t); != -1 -> contains;
+        // < 0 / == -1 -> not contains
+        for (src, want) in [
+            ("return xs.index_of(t) >= 0", "contains"),
+            ("return xs.index_of(t) != -1", "contains"),
+            ("return xs.index_of(t) < 0", "not"),
+            ("return xs.index_of(t) == -1", "not"),
+        ] {
+            let body = parse_fn_body(src);
+            let mut evolver = Evolver::new();
+            let out = evolver.mutate_body(&body, Mutation::Simplify);
+            let src2 = crate::fmt::format_program(&out);
+            assert!(src2.contains(want), "{} -> {}", src, src2);
         }
     }
 
