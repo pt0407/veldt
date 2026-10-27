@@ -2731,9 +2731,6 @@ fn main() {
                 }
             }
         }
-        "help" | "--help" | "-h" => {
-            print_usage();
-        }
         _ => {
             eprintln!("Unknown command: {}", command);
             print_usage();
@@ -2889,8 +2886,6 @@ fn print_stats(veldt: &veldt::Veldt) {
             "last_used" => variants.iter().map(|e| e.last_used).max().unwrap_or(0) as f64,
             "fit_rate" => variants.iter().map(|e| e.fitness / (e.age as f64 + 1.0)).sum::<f64>() / n,
             "usage_rate" => variants.iter().map(|e| e.usage_count as f64 / (e.age as f64 + 1.0)).sum::<f64>() / n,
-            "efficiency" => variants.iter().map(|e|
-                e.fitness / (crate::fmt::format_program(&e.body).len() as f64 + 1.0)).sum::<f64>() / n,
             "niche_score" => variants.iter().map(|e|
                 e.niche_scores.values().sum::<f64>() / e.niche_scores.len().max(1) as f64).sum::<f64>() / n,
             "trial_score" => variants.iter().map(|e| e.trial_score).sum::<f64>() / n,

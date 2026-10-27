@@ -4582,14 +4582,6 @@ impl Interpreter {
                     _ => Err("index_of() expects a string".into()),
                 }
             }
-            (Value::Str(s), "trim") => Ok(Value::Str(s.trim().to_string().into())),
-            (Value::Str(s), "len") => Ok(Value::Int(s.chars().count() as i64)),
-            // === Phase 1 stdlib: strings ===
-            (Value::Str(s), "replace") => match (args.get(0), args.get(1)) {
-                (Some(Value::Str(f)), Some(Value::Str(t))) =>
-                    Ok(Value::Str(s.replace(&**f, t).into())),
-                _ => Err("replace(old, new) — both strings".into()),
-            },
             (Value::Str(s), "pad") => match args.get(0) {
                 Some(Value::Int(n)) => {
                     let n = *n as usize;
@@ -4601,15 +4593,6 @@ impl Interpreter {
                         else { format!("{}{}", s, ch.to_string().repeat(n - s.len())).into() }))
                 }
                 _ => Err("pad(len[, char]) expects int".into()),
-            },
-            (Value::Str(s), "chars") => {
-                self.step_count += (s.len() / 2) as u64;
-                Ok(Value::List(
-                s.chars().map(|c| Value::Str(c.to_string().into())).collect()))
-            }
-            (Value::Str(s), "repeat") => match args.get(0) {
-                Some(Value::Int(n)) => Ok(Value::Str(s.repeat((*n).max(0) as usize).into())),
-                _ => Err("repeat(n) expects int".into()),
             },
             (Value::Str(s), "split_at") => match args.get(0) {
                 Some(Value::Int(i)) => {
@@ -4849,30 +4832,11 @@ impl Interpreter {
                 Ok(Value::List(new_items))
             }
             (Value::List(items), "len") => Ok(Value::Int(items.len() as i64)),
-            (Value::List(items), "contains") => {
-                if args.len() != 1 { return Err("contains() expects 1 argument".into()); }
-                Ok(Value::Bool(items.contains(&args[0])))
-            }
             (Value::List(items), "reverse") => {
                 self.step_count += (items.len() as u64) * 4;
                 let mut new_items = items.clone();
                 new_items = new_items.iter().rev().cloned().collect();
                 Ok(Value::List(new_items))
-            }
-            (Value::List(items), "join") => {
-                if args.len() != 1 { return Err("join() expects 1 argument".into()); }
-                match &args[0] {
-                    Value::Str(sep) => {
-                        let parts: Vec<Arc<str>> = items.iter().map(|v| match v {
-                            Value::Str(s) => s.clone(),
-                            Value::Int(n) => n.to_string().into(),
-                            Value::Bool(b) => b.to_string().into(),
-                            _ => format!("{:?}", v).into(),
-                        }).collect();
-                        Ok(Value::Str(parts.join(&**sep).into()))
-                    }
-                    _ => Err("join() expects a string separator".into()),
-                }
             }
             (Value::List(items), "get") => {
                 if args.len() != 1 { return Err("get() expects 1 argument".into()); }
@@ -4990,11 +4954,6 @@ impl Interpreter {
                     _ => Err("has() expects a string key".into()),
                 }
             }
-            (Value::Dict(entries), "keys") => {
-                let keys: Vec<Value> = entries.keys().map(|k| Value::Str(k.clone().into())).collect();
-                Ok(Value::List(keys.into_iter().collect()))
-            }
-            (Value::Str(s), "len") => Ok(Value::Int(s.chars().count() as i64)),
             (Value::Dict(entries), "len") => Ok(Value::Int(entries.len() as i64)),
             (Value::Dict(entries), "remove") => {
                 if args.len() != 1 { return Err("remove() expects 1 argument".into()); }
