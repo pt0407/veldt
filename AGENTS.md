@@ -49,6 +49,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] report noise fixed: the "HELLO -10" line in `veldt report` was a variant printing during the bounded verify pass — interp.print_buffer now swallows it.
 - [Devin/main-side] NEXT-UP pointers: (a) rewrite --all --dry shows
   25 idiom matches that stay at 25 — births land but produce bodies
   identical to existing variants (grow_function_full dedupes), so the

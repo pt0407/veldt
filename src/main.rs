@@ -2334,6 +2334,7 @@ fn main() {
             // trust census — bounded-verified multi-variant families
             let mut interp = interpreter::Interpreter::new();
             veldt.load_into_interpreter(&mut interp);
+            interp.print_buffer = Some(String::new()); // swallow variant prints during the verify pass
             let (mut v, mut d, mut sv) = (0usize, 0usize, 0usize);
             for name in veldt.functions.keys() {
                 if veldt.functions[name].len() < 2 { sv += 1; continue; }
