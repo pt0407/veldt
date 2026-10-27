@@ -49,6 +49,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] verify_exact_on_veldt: (a) variants bind their OWN param names position-keyed to the shared symbols — a renamed param no longer bails as `unbound var` (shout's 8-variant family unlocked); (b) a variant producing no return while fittest returns a value reports PROVABLY DIVERGENT (returns void ≠ value) not `no return value` bail. shout#1 correctly flagged divergent.
 - [Devin/main-side] BUG FIX: check_at_birth_with now early-returns on Health::Dying — quarantined variants (SMT-proven divergent) were getting re-trialed and healed back to Healthy because bounded probes can't distinguish them. Quarantine is now terminal; verify --all --exact --quarantine stays done (sq#1, score#45 both stuck Dying across test --all).
 - [Devin/main-side] lint: undeclared-variable check — `Var`/`Assign`/`FieldAssign`/`IndexAssign`/`LetDestructure` targets not bound by let/param/for-var -> warning. Caught the class of bug SMT showed as `unbound var` bails (shout: params differ across variants -> fittest-env lookup fails — the bodies are fine under their own signatures). No false positives in the live garden.
 - [Devin/main-side] agent "probe <name>|all" — gardener verb for probe-planting (shared evolve::plant_probes with `veldt probe`). Every lineage now has probes — zero bare.

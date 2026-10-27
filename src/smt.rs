@@ -1177,8 +1177,28 @@ pub fn verify_exact_on_veldt(
             if v.id == f_id || !matches!(v.health, veldt::Health::Healthy) {
                 continue;
             }
-            let (v_smt, v_assumptions) = match body_to_smt(&v.body, base_env.clone(), veldt, 8) {
+            // bind the variant's OWN param names to the shared
+            // symbols (position-keyed) — a variant that renamed a
+            // param is the same function under rebind, not unbound.
+            if v.params.len() != params.len() {
+                bail_notes.push(format!("{}#{}: arity {} != fittest {}",
+                                        name, v.id, v.params.len(), params.len()));
+                continue;
+            }
+            let mut v_env = base_env.clone();
+            for (vp, fp) in v.params.iter().zip(params.iter()) {
+                if let Some(sv) = base_env.get(&fp.name) {
+                    v_env.insert(vp.name.clone(), sv.clone());
+                }
+            }
+            let (v_smt, v_assumptions) = match body_to_smt(&v.body, v_env, veldt, 8) {
                 Ok(x) => x,
+                // variant returns void while fittest returns a value —
+                // semantically divergent on every input (not a bail)
+                Err(r) if r.contains("no return value") => {
+                    return Ok(Some((v.id,
+                        vec!["<variant returns void>".to_string()])));
+                }
                 Err(r) => {
                     bail_notes.push(format!("{}#{}: {}", name, v.id, r));
                     continue;
