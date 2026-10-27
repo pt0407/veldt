@@ -2143,19 +2143,24 @@ print("@N@(97) = " + @N@(97))
         let name = "plat_move";
         let code = r##"grow fn @N@(px: int, py: int, ex: int, ey: int)
         test @N@(2, 11, 34, 3) == [1, 0] {
-    # jump when the exit is above OR blocked right, else walk toward it
+    # a real platformer policy: run toward the exit's column and jump
+    # whenever climbing gains height — jump while moving (a ledge or
+    # a gap needs momentum), not just when stopped under the exit.
     let dx = 0
     let j = 0
     if ex > px { dx = 1 }
     if ex < px { dx = -1 }
-    if ey < py { j = 1 }            # exit above — jump toward it
-    if dx == 0 and ey >= py { j = 0 }  # nothing to gain below
+    # jump whenever the exit is above and we're still below it —
+    # climbing is always worth a jump in a platformer
+    if ey < py { j = 1 }
+    # also jump to clear a gap even when level — a hop never hurts
+    if ey == py and dx != 0 { j = 1 }
     return [dx, j]
 }
 "##.replace("@N@", name);
         return grow_and_report_stages(
-            vec![StageSpec { label: "jump-aware plat_move".into(), code }],
-            Some("Planted a jump-aware `plat_move` — walks toward the exit and jumps whenever it's above. Re-run the platformer to watch it climb.".into()),
+            vec![StageSpec { label: "climbing plat_move".into(), code }],
+            Some("Planted a climbing `plat_move` — runs toward the exit and jumps while moving (climbing + gap-hopping), not just under it. Re-run the platformer to watch it actually ascend.".into()),
             veldt,
         );
     }
