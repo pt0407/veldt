@@ -1974,9 +1974,22 @@ impl Interpreter {
                 let (v, lo, hi) = (num_at(args, 0)?, num_at(args, 1)?, num_at(args, 2)?);
                 Ok(Some(Value::Float(v.max(lo).min(hi))))
             }
-            "dist" => {
-                let (x1, y1, x2, y2) = (num_at(args, 0)?, num_at(args, 1)?, num_at(args, 2)?, num_at(args, 3)?);
-                Ok(Some(Value::Float(((x2 - x1).powi(2) + (y2 - y1).powi(2)).sqrt())))
+            "dist" | "distance" => {
+                // dist(x1,y1,x2,y2) 4 numbers, or dist(e1, e2) two entities —
+                // the AI range check (chase when near, aggro radius).
+                match (args.get(0), args.get(1)) {
+                    (Some(Value::Dict(a)), Some(Value::Dict(b))) => {
+                        let ax = a.get("x").map(|v| Self::num_f(v).unwrap_or(0.0)).unwrap_or(0.0);
+                        let ay = a.get("y").map(|v| Self::num_f(v).unwrap_or(0.0)).unwrap_or(0.0);
+                        let bx = b.get("x").map(|v| Self::num_f(v).unwrap_or(0.0)).unwrap_or(0.0);
+                        let by = b.get("y").map(|v| Self::num_f(v).unwrap_or(0.0)).unwrap_or(0.0);
+                        Ok(Some(Value::Float(((bx - ax).powi(2) + (by - ay).powi(2)).sqrt())))
+                    }
+                    _ => {
+                        let (x1, y1, x2, y2) = (num_at(args, 0)?, num_at(args, 1)?, num_at(args, 2)?, num_at(args, 3)?);
+                        Ok(Some(Value::Float(((x2 - x1).powi(2) + (y2 - y1).powi(2)).sqrt())))
+                    }
+                }
             }
             "aabb" => {
                 // aabb(ax,ay,aw,ah, bx,by,bw,bh) — rect overlap
@@ -2939,6 +2952,32 @@ impl Interpreter {
                     _ => None,
                 };
                 Ok(Some(hit.unwrap_or(Value::Null)))
+            }
+            "in_radius" => {
+                // in_radius(e, scene, r) → entities within r of e — the
+                // area query (aggro radius, explosion, pickup magnet).
+                let (e, scene, r) = match (args.get(0), args.get(1), args.get(2)) {
+                    (Some(Value::Dict(e)), Some(Value::Dict(s)), Some(r)) =>
+                        (e.clone(), s.clone(), Self::num_f(r)?),
+                    _ => return Err("in_radius(e, scene, r) expects dict + dict + num".into()),
+                };
+                let ex = e.get("x").map(|v| Self::num_f(v).unwrap_or(0.0)).unwrap_or(0.0);
+                let ey = e.get("y").map(|v| Self::num_f(v).unwrap_or(0.0)).unwrap_or(0.0);
+                let my_name = e.get("name").and_then(|v| match v {
+                    Value::Str(n) => Some(n.to_string()), _ => None }).unwrap_or_default();
+                let hits: Vec<Value> = match scene.get("entities") {
+                    Some(Value::Dict(ents)) => ents.iter().filter_map(|(k, v)| {
+                        if *k == my_name { return None; }
+                        if let Value::Dict(o) = v {
+                            let ox = o.get("x").map(|v| Self::num_f(v).unwrap_or(0.0)).unwrap_or(0.0);
+                            let oy = o.get("y").map(|v| Self::num_f(v).unwrap_or(0.0)).unwrap_or(0.0);
+                            let dd = ((ex - ox).powi(2) + (ey - oy).powi(2)).sqrt();
+                            if dd <= r { Some(Value::Dict(o.clone())) } else { None }
+                        } else { None }
+                    }).collect(),
+                    _ => Vec::new(),
+                };
+                Ok(Some(Value::List(hits.into())))
             }
             "collide_all" => {
                 // collide_all(e, scene) → list of every scene entity
