@@ -1389,8 +1389,19 @@ fn expr_to_smt_raw(
                 state.note("list-comp with filter (variable length)");
                 return None;
             }
-            let SymVal::List(items) = expr_to_smt(iter, state, veldt, fuel)? else {
-                state.note("list-comp over non-list");
+            let it_sv = expr_to_smt(iter, state, veldt, fuel)?;
+            // `[k for k in dict]` — store-spine keys like `for`
+            let items: Vec<SymVal> = if let SymVal::Dict(arr) = &it_sv {
+                let ks = dict_keys(arr);
+                if ks.is_empty() {
+                    state.note("list-comp over symbolic dict");
+                    return None;
+                }
+                ks.into_iter().map(SymVal::Scalar).collect()
+            } else if let SymVal::List(items) = it_sv {
+                items
+            } else {
+                state.note("list-comp over non-list/dict");
                 return None;
             };
             let mut out = Vec::with_capacity(items.len());
