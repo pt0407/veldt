@@ -49,6 +49,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] veldt rewrite <name> (bare, no #N) now resolves to the family's fittest variant — same verb ergonomics as adopt/diff.
 - [Devin/main-side] FIXED MAIN BUILD (was broken 2 ways): (a) sum/product i64 overflow panics in interpreter — now wrapping_add/wrapping_mul matching eval_binop; (b) E0268 `break` outside loop in your new `until_win` sim code (main.rs ~2924) — a match arm is not a loop; replaced with save+return. Also fixed your --pin arg parse (split_first tuple-destructure -> split_once). Then `veldt rewrite --all` birthed 25 optimized variants including the new xs.sum()/unique() idiom paths.
 - [Devin/main-side] accum idiom extended: `let t=init; for x in xs { t += x }` -> `let t = init + xs.sum()` (sum-of-elements, builtin O(n)). Still guarded — `t += x * 2` or any k derived from the loop var is NOT rewritten.
 - [Devin/main-side] scan form upgraded: extremum rewrites now emit `for __v in xs { if __v > m { m = __v } }` (element iteration, no index var, lint-quiet, still exact in SMT via list unroll). Replaces the while+index form which tripped two lint warnings. 21/21 evolve tests; live rewrite max_val#N -> for-scan born healthy.
