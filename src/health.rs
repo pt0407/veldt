@@ -330,9 +330,32 @@ impl HealthChecker {
 
         for test in &entry.tests {
             total += 1;
+            // The call must hit THE VARIANT UNDER TEST (entry.id), not
+            // name-dispatch to the fittest — else a broken variant
+            // passes on the incumbent's answers, and once it's fittest
+            // it poisons every later trial with its own errors.
+            let call_result = match &test.call {
+                Expr::Call(cname, _, cargs) if cname == &entry.name => {
+                    let mut arg_vals = Vec::with_capacity(cargs.len());
+                    let mut arg_err = None;
+                    for a in cargs {
+                        match interp.eval_expr_in_scope(a) {
+                            Ok(v) => arg_vals.push(v),
+                            Err(e) => { arg_err = Some(e); break; }
+                        }
+                    }
+                    match arg_err {
+                        Some(e) => Err(format!("Test arg failed: {}", e)),
+                        None => Self::call_one(&mut interp, &mut vm,
+                                               &entry.name, Some(entry.id),
+                                               arg_vals),
+                    }
+                }
+                _ => interp.eval_expr_in_scope(&test.call),
+            };
             match &test.expected {
                 Some(expected) => {
-                    match (interp.eval_expr_in_scope(&test.call),
+                    match (call_result,
                            interp.eval_expr_in_scope(expected)) {
                         (Ok(call_val), Ok(expected_val)) => {
                             if Self::values_equal(&call_val, &expected_val) {
@@ -344,7 +367,7 @@ impl HealthChecker {
                     }
                 }
                 None => {
-                    match interp.eval_expr_in_scope(&test.call) {
+                    match call_result {
                         Ok(v) => {
                             if Self::is_truthy_pub(&v) { passed += 1; }
                         }
