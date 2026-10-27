@@ -2223,6 +2223,52 @@ fn main() {
                 println!("{:<16} {:>6}ms {}", name, ms, if r.success { "ok" } else { "FAIL" });
             }
         }
+        "report" | "status" => {
+            // veldt report — the consolidated "state of the system" readout:
+            // garden health census + trust (verified/divergent) + recent
+            // evolution activity in one compact summary.
+            let mut veldt = veldt::Veldt::new();
+            if let Err(e) = veldt.load() {
+                eprintln!("Error loading veldt: {}", e);
+                process::exit(1);
+            }
+            let mut healthy = 0usize; let mut sick = 0usize; let mut dying = 0usize;
+            let mut variants = 0usize;
+            let mut recent_births = 0usize; let mut recent_deaths = 0usize;
+            for (_n, vs) in &veldt.functions {
+                for e in vs {
+                    variants += 1;
+                    match e.health {
+                        veldt::Health::Healthy => healthy += 1,
+                        veldt::Health::Sick(_) => sick += 1,
+                        veldt::Health::Dying => dying += 1,
+                        _ => {}
+                    }
+                }
+            }
+            for o in &veldt.obituaries { let _ = o; recent_deaths += 1; }
+            println!("veldt report — garden state");
+            println!("  variants   {} ({} healthy · {} sick · {} dying)",
+                     variants, healthy, sick, dying);
+            println!("  families   {}", veldt.functions.len());
+            println!("  deaths     {}", recent_deaths);
+            // trust census — bounded-verified multi-variant families
+            let mut interp = interpreter::Interpreter::new();
+            veldt.load_into_interpreter(&mut interp);
+            let (mut v, mut d, mut sv) = (0usize, 0usize, 0usize);
+            for name in veldt.functions.keys() {
+                if veldt.functions[name].len() < 2 { sv += 1; continue; }
+                match verify_on_interp(&mut interp, name, false) {
+                    Some(_) => d += 1,
+                    None => v += 1,
+                }
+            }
+            println!("  trust      {} verified · {} divergent · {} single-variant",
+                     v, d, sv);
+            if let Some(hist) = veldt.fitness_history.last() {
+                println!("  fitness    latest {:.2}", hist);
+            }
+        }
         "stats" => {
             let mut veldt = veldt::Veldt::new();
             if let Err(e) = veldt.load() {
