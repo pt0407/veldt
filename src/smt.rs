@@ -131,6 +131,11 @@ struct SymState {
     /// (a runtime type error). Compared across bodies so "errored"
     /// and "returned" are provably different.
     type_err: Bool,
+    /// Set when a vstr UF op encoded (`vstr_cat`, `vstr_contains`,
+    /// `str.*` method UFs). Z3 doesn't know their semantics — a `Sat`
+    /// result can be a false divergence (different-shaped-but-equal
+    /// string computations), so callers must bail not diverge.
+    uf_heavy: Bool,
 }
 
 impl SymState {
@@ -146,6 +151,7 @@ impl SymState {
     fn new(env: HashMap<String, SymVal>) -> Self {
         Self {
             type_err: Bool::from_bool(false),
+            uf_heavy: Bool::from_bool(false),
             env,
             ret: None,
             err: None,
@@ -182,14 +188,14 @@ impl SymState {
         }
     }
 
-    fn final_value(self) -> Option<(SymVal, Vec<Bool>, Bool)> {
+    fn final_value(self) -> Option<(SymVal, Vec<Bool>, Bool, Bool)> {
         let val = match (self.ret, self.last) {
             (Some((_, rv)), None) => Some(rv),
             (None, Some(lv)) => Some(lv),
             (Some((rc, rv)), Some(lv)) => merge_symval(&rc, &rv, &lv).or(Some(rv)),
             (None, None) => None,
         }?;
-        Some((val, self.assumptions, self.type_err))
+        Some((val, self.assumptions, self.type_err, self.uf_heavy))
     }
 }
 
@@ -238,6 +244,8 @@ fn merge_states(cond: &Bool, mut t: SymState, mut f: SymState) -> Option<SymStat
     Some(SymState {
         type_err: merge_dynamic(cond, &t.type_err.into(), &f.type_err.into())
             .and_then(|d| d.as_bool())?,
+        uf_heavy: merge_dynamic(cond, &t.uf_heavy.into(), &f.uf_heavy.into())
+            .and_then(|d| d.as_bool())?,
         env,
         ret,
         err,
@@ -254,7 +262,7 @@ fn body_to_smt(
     env: HashMap<String, SymVal>,
     veldt: &veldt::Veldt,
     fuel: u32,
-) -> Result<(SymVal, Vec<Bool>, Bool), String> {
+) -> Result<(SymVal, Vec<Bool>, Bool, Bool), String> {
     let mut state = SymState::new(env);
     if exec_stmts(stmts, &mut state, veldt, fuel).is_none() {
         return Err(state.reason());
@@ -659,6 +667,7 @@ fn expr_to_smt_raw(
         }
         Expr::Interp(parts) => {
             // "a{e}b" folds into vstr_cat(vstr_cat(lit_a, vstr_of(e)), lit_b)
+            state.uf_heavy = Bool::from_bool(true);
             let mut acc: Option<Dynamic> = None;
             let cat = |a: Dynamic, b: Dynamic| -> Dynamic {
                 let srt = a.get_sort();
@@ -966,6 +975,65 @@ fn expr_to_smt_raw(
                     state.note(format!("list.{}", m));
                     None
                 }
+                // --- list-producing str methods: per-index UFs ---
+                (SymVal::Scalar(sv), m, nargs)
+                    if (m == "chars" && nargs == 0)
+                       || (m == "split" && nargs == 1) => {
+                    state.uf_heavy = Bool::from_bool(true);
+                    let mut sorts = vec![sv.get_sort()];
+                    let mut vals: Vec<Dynamic> = vec![sv];
+                    for a in args {
+                        let av = expr_to_smt(a, state, veldt, fuel)?
+                            .into_scalar().or_else(|| { state.note("aggregate where scalar expected"); None })?;
+                        sorts.push(av.get_sort());
+                        vals.push(av);
+                    }
+                    // [uf(s,0), uf(s,1), uf(s,2), uf(s,3)]
+                    let mut sorts2 = sorts.clone();
+                    sorts2.push(Sort::int());
+                    let decl = FuncDecl::new(format!("vstr_{}_at", m),
+                        &sorts2.iter().collect::<Vec<_>>(), &vstr_sort());
+                    let items: Vec<SymVal> = (0..SYM_LIST_LEN)
+                        .map(|i| {
+                            let mut v = vals.clone();
+                            v.push(Int::from_i64(i as i64).into());
+                            {
+                                let refs: Vec<&dyn Ast> =
+                                    v.iter().map(|x| x as &dyn Ast).collect();
+                                SymVal::Scalar(decl.apply(&refs))
+                            }
+                        })
+                        .collect();
+                    Some(SymVal::List(items))
+                }
+                (SymVal::List(items), "join", 1) => {
+                    // join(list-of-VStr, sep) -> uf_join4(e0..e3, sep)
+                    state.uf_heavy = Bool::from_bool(true);
+                    let sep = expr_to_smt(&args[0], state, veldt, fuel)?
+                        .into_scalar().or_else(|| { state.note("aggregate where scalar expected"); None })?;
+                    let mut sorts: Vec<Sort> = items.iter()
+                        .map(|_| vstr_sort()).collect();
+                    let mut vals: Vec<Dynamic> = Vec::new();
+                    for it in &items {
+                        let d = it.as_scalar().or_else(|| { state.note("join non-scalar elem"); None })?;
+                        vals.push(d.clone());
+                    }
+                    sorts.push(sep.get_sort());
+                    vals.push(sep);
+                    let decl = FuncDecl::new("vstr_join",
+                        &sorts.iter().collect::<Vec<_>>(), &vstr_sort());
+                    {
+                        let refs: Vec<&dyn Ast> =
+                            vals.iter().map(|x| x as &dyn Ast).collect();
+                        Some(SymVal::Scalar(decl.apply(&refs)))
+                    }
+                }
+                (SymVal::Scalar(sv), "reverse", 0) => {
+                    state.uf_heavy = Bool::from_bool(true);
+                    let decl = FuncDecl::new("vstr_reverse",
+                        &[&sv.get_sort()], &vstr_sort());
+                    Some(SymVal::Scalar(decl.apply(&[&sv])))
+                }
                 (SymVal::Scalar(sv), m, nargs) => {
                     // String methods as uninterpreted functions over VStr.
                     // (return sort, expected arg count)
@@ -1026,6 +1094,7 @@ fn expr_to_smt_raw(
                         let needle = a_sv.into_scalar().or_else(|| { state.note("aggregate where scalar expected"); None })?;
                         let srt = vstr_sort();
                         if hay.get_sort() == srt && needle.get_sort() == srt {
+                            state.uf_heavy = Bool::from_bool(true);
                             let d = FuncDecl::new("vstr_contains", &[&srt, &srt], &Sort::bool());
                             d.apply(&[&hay, &needle]).as_bool().or_else(|| { state.note("vstr_contains non-bool"); None })?
                         } else {
@@ -1142,6 +1211,7 @@ fn expr_to_smt_raw(
                     && a.as_bool().is_none() =>
                 {
                     let srt = a.get_sort();
+                    state.uf_heavy = Bool::from_bool(true);
                     FuncDecl::new("vstr_cat", &[&srt, &srt], &srt)
                         .apply(&[&a, &b])
                 }
@@ -1308,8 +1378,9 @@ fn expr_to_smt_raw(
                 return None;
             }
             state.steps = sub_st.steps;
-            let (val, mut a_sub, te_sub) = sub_st.final_value()?;
+            let (val, mut a_sub, te_sub, uf_sub) = sub_st.final_value()?;
                         state.type_err = state.type_err.clone() | te_sub;
+                        state.uf_heavy = state.uf_heavy.clone() | uf_sub;
             state.assumptions.append(&mut a_sub);
             Some(val)
         }
@@ -1626,7 +1697,7 @@ pub fn verify_exact_on_veldt(
             base_env.insert(p.name.clone(), sv);
         }
 
-        let (f_smt, f_assumptions, f_te) = body_to_smt(&f_body, base_env.clone(), veldt, 8)
+        let (f_smt, f_assumptions, f_te, f_uf) = body_to_smt(&f_body, base_env.clone(), veldt, 8)
             .map_err(|r| format!("fittest: {}", r))?;
 
         let mut bail_notes: Vec<String> = Vec::new();
@@ -1648,7 +1719,7 @@ pub fn verify_exact_on_veldt(
                     v_env.insert(vp.name.clone(), sv.clone());
                 }
             }
-            let (v_smt, v_assumptions, v_te) = match body_to_smt(&v.body, v_env, veldt, 8) {
+            let (v_smt, v_assumptions, v_te, v_uf) = match body_to_smt(&v.body, v_env, veldt, 8) {
                 Ok(x) => x,
                 // variant returns void while fittest returns a value —
                 // semantically divergent on every input (not a bail)
@@ -1680,6 +1751,15 @@ pub fn verify_exact_on_veldt(
             match solver.check() {
                 SatResult::Unsat => { /* equivalent */ }
                 SatResult::Sat => {
+                    // a divergence over UF-encoded string ops can't be
+                    // trusted — congruence can't prove unequal, but a
+                    // different-shaped-but-equal string shows Sat
+                    if (f_uf.clone() | v_uf).simplify().as_bool()
+                        == Some(true) {
+                        return Err(format!(
+                            "{}#{}: str-UF ops — Sat is untrusted (bail)",
+                            name, v.id));
+                    }
                     let Some(model) = solver.get_model() else {
                         return Err("sat but no model".into());
                     };
@@ -1744,7 +1824,7 @@ pub fn verify_pair_exact(
             let sv = make_sym_param(&p.name, &p.typ, &mut flat_syms);
             base_env.insert(p.name.clone(), sv);
         }
-        let (a_smt, a_asm, a_te) = body_to_smt(&a_body, base_env.clone(), veldt, 8)
+        let (a_smt, a_asm, a_te, a_uf) = body_to_smt(&a_body, base_env.clone(), veldt, 8)
             .map_err(|r| format!("{}#{}: {}", name, a_id, r))?;
         // bind b's OWN param names to the shared symbols by position —
         // a renamed param is the same function under rebind
@@ -1762,7 +1842,7 @@ pub fn verify_pair_exact(
                 return Ok(Some(vec!["<variant returns void>".to_string()]));
             }
         }
-        let (b_smt, b_asm, b_te) = b_res
+        let (b_smt, b_asm, b_te, b_uf) = b_res
             .map_err(|r| format!("{}#{}: {}", name, b_id, r))?;
         let eq = a_smt.eq_val(&b_smt)
             .ok_or_else(|| format!("{}#{} vs #{} return sort mismatch", name, a_id, b_id))?;
@@ -1777,6 +1857,10 @@ pub fn verify_pair_exact(
         match solver.check() {
             SatResult::Unsat => Ok(None),
             SatResult::Sat => {
+                if (a_uf.clone() | b_uf).simplify().as_bool()
+                    == Some(true) {
+                    return Err("str-UF ops — Sat is untrusted (bail)".into());
+                }
                 let Some(model) = solver.get_model() else {
                     return Err("sat but no model".into());
                 };
@@ -1813,9 +1897,9 @@ pub fn verify_bodies_exact(
             let sv = make_sym_param(n, t, &mut flat_syms);
             base_env.insert(n.clone(), sv);
         }
-        let (a_smt, a_asm, a_te) = body_to_smt(before, base_env.clone(), &empty, 8)
+        let (a_smt, a_asm, a_te, a_uf) = body_to_smt(before, base_env.clone(), &empty, 8)
             .map_err(|r| format!("before: {}", r))?;
-        let (b_smt, b_asm, b_te) = body_to_smt(after, base_env, &empty, 8)
+        let (b_smt, b_asm, b_te, b_uf) = body_to_smt(after, base_env, &empty, 8)
             .map_err(|r| format!("after: {}", r))?;
         let eq = a_smt.eq_val(&b_smt)
             .ok_or_else(|| "return sort mismatch".to_string())?;
@@ -1830,6 +1914,10 @@ pub fn verify_bodies_exact(
         match solver.check() {
             SatResult::Unsat => Ok(None),
             SatResult::Sat => {
+                if (a_uf.clone() | b_uf).simplify().as_bool()
+                    == Some(true) {
+                    return Err("str-UF ops — Sat is untrusted (bail)".into());
+                }
                 let Some(model) = solver.get_model() else {
                     return Err("sat but no model".into());
                 };
@@ -1883,7 +1971,7 @@ pub fn verify_variant_exact(
             let sv = make_sym_param(&p.name, &p.typ, &mut flat_syms);
             base_env.insert(p.name.clone(), sv);
         }
-        let (f_smt, f_assumptions, f_te) = body_to_smt(&f_body, base_env.clone(), veldt, 8)
+        let (f_smt, f_assumptions, f_te, f_uf) = body_to_smt(&f_body, base_env.clone(), veldt, 8)
             .map_err(|r| format!("fittest: {}", r))?;
         // bind the variant's OWN param names to the shared symbols by
         // position — a renamed param is the same function under rebind
@@ -1904,7 +1992,7 @@ pub fn verify_variant_exact(
                 return Ok(Some(vec!["<variant returns void>".to_string()]));
             }
         }
-        let (v_smt, v_assumptions, v_te) = v_res
+        let (v_smt, v_assumptions, v_te, v_uf) = v_res
             .map_err(|r| format!("{}#{}: {}", name, vid, r))?;
         let eq = f_smt
             .eq_val(&v_smt)
@@ -1924,6 +2012,10 @@ pub fn verify_variant_exact(
         match solver.check() {
             SatResult::Unsat => Ok(None),
             SatResult::Sat => {
+                if (f_uf.clone() | v_uf).simplify().as_bool()
+                    == Some(true) {
+                    return Err("str-UF ops — Sat is untrusted (bail)".into());
+                }
                 let Some(model) = solver.get_model() else {
                     return Err("sat but no model".into());
                 };
