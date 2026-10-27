@@ -808,6 +808,48 @@ fn expr_to_smt_raw(
                             .map(|k| SymVal::Scalar(arr.select(&k)))
                             .collect()))
                 }
+                (SymVal::Dict(arr), "get_or", 2) => {
+                    let k = expr_to_smt(&args[0], state, veldt, fuel)?
+                        .into_scalar().or_else(|| { state.note("dict key non-scalar"); None })?;
+                    let dfl = expr_to_smt(&args[1], state, veldt, fuel)?
+                        .into_scalar().or_else(|| { state.note("dict default non-scalar"); None })?;
+                    let va = vany();
+                    let Some(dw) = va.wrap(&dfl) else {
+                        state.note("dict.get_or unwrappable default"); return None;
+                    };
+                    let sel = arr.select(&k);
+                    Some(SymVal::Scalar(va.is_null(&sel).ite(&dw, &sel)))
+                }
+                // merge(other) — fold other's store-spine keys into
+                // chained stores on self (both must be construct-time)
+                (SymVal::Dict(arr), "merge", 1) => {
+                    let other = expr_to_smt(&args[0], state, veldt, fuel)?;
+                    let SymVal::Dict(oarr) = &other else {
+                        state.note("dict.merge non-dict arg"); return None;
+                    };
+                    let ks = dict_keys(oarr);
+                    if ks.is_empty() {
+                        state.note("dict.merge on symbolic dict");
+                        return None;
+                    }
+                    let mut cur = arr.clone();
+                    for k in ks { cur = cur.store(&k, &oarr.select(&k)); }
+                    Some(SymVal::Dict(cur))
+                }
+                // items() — [(k,v), ...] pairs over the store-spine
+                (SymVal::Dict(arr), "items", 0) => {
+                    let ks = dict_keys(&arr);
+                    if ks.is_empty() {
+                        state.note("dict.items on symbolic dict");
+                        return None;
+                    }
+                    Some(SymVal::List(
+                        ks.into_iter()
+                            .map(|k| SymVal::List(vec![
+                                SymVal::Scalar(k.clone()),
+                                SymVal::Scalar(arr.select(&k))]))
+                            .collect()))
+                }
                 // expr-level put/set — dict().put(k,v).put(k2,v2) chains
                 (SymVal::Dict(arr), "put", 2) | (SymVal::Dict(arr), "set", 2) => {
                     let k = expr_to_smt(&args[0], state, veldt, fuel)?
