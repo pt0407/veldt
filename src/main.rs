@@ -2777,6 +2777,20 @@ fn scaffold(dir: &str) {
 
 main()
 "#).unwrap();
+    // veldt.toml — a project manifest (name, entry, version) so a
+    // project is a real thing, not just a loose file
+    let proj = std::path::Path::new(dir).file_name()
+        .and_then(|s| s.to_str()).unwrap_or("project");
+    std::fs::write(path.join("veldt.toml"), &format!(r#"# veldt project
+[project]
+name = "{}"
+version = "0.1.0"
+entry = "main.veldt"
+
+[deploy]
+# `veldt deploy` -> live at <host>/site/<name>
+name = "{}"
+"#, proj, proj)).unwrap_or_else(|e| eprintln!("manifest: {}", e));
     std::fs::write(path.join("README.md"),
         format!("# {}\n\nveldt app — `veldt run main.veldt` to start\n", dir)).unwrap();
     println!("Created {} — run: veldt run {}/main.veldt", dir, dir);
