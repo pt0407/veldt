@@ -610,7 +610,18 @@ impl Evolver {
     /// Deterministic idiom rewrite for the CLI — returns the rewritten
     /// body (unchanged body = no idiom matched).
     pub fn rewrite_idioms(&mut self, body: &[Stmt]) -> Vec<Stmt> {
-        self.mutate_body(body, Mutation::IdiomRewrite)
+        Self::idiom_rewrite_body(body)
+    }
+
+    /// Self-free idiom pass — usable from &self contexts (tend, repair).
+    pub fn idiom_rewrite_body(body: &[Stmt]) -> Vec<Stmt> {
+        if let Some((xs, is_max)) = Self::detect_sort_extremum(body) {
+            Self::make_linear_extremum_scan(&xs, is_max)
+        } else {
+            let mut b = body.to_vec();
+            Self::apply_idiom_pass(&mut b);
+            b
+        }
     }
 
     fn mutate_body(&mut self, body: &[Stmt], mutation: Mutation) -> Vec<Stmt> {
@@ -2080,6 +2091,11 @@ impl Evolver {
             let mut c = HealthChecker::repair_dead_tail(&mut entry.body);
             c |= HealthChecker::repair_dead_lets(&mut entry.body);
             if c { repaired += 1; changed = true; }
+            let idiomed = Self::idiom_rewrite_body(&entry.body);
+            if idiomed != entry.body {
+                entry.body = idiomed;
+                repaired += 1; changed = true;
+            }
             if changed {
                 if let Some(vs) = veldt.functions.get_mut(&name) {
                     for e in vs.iter_mut() {
