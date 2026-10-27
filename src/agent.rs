@@ -2972,11 +2972,16 @@ fn generate_intent(t: &str, words: &[&str], veldt: &mut Veldt) -> AgentResponse 
         let path = format!("examples/{}.veldt", name);
         let existed = std::path::Path::new(&path).exists();
         // real-time engine games vs ascii-canvas games — platformer/
-        // topdown/realtime keywords route to the 2D engine template
-        let realtime = t.contains("platformer") || t.contains("topdown")
+        // topdown/realtime keywords route to the 2D engine templates
+        let platformer = t.contains("platformer")
+            || t.contains("jump") || t.contains("side-scroller")
+            || t.contains("side scroller");
+        let realtime = platformer || t.contains("topdown")
             || t.contains("realtime") || t.contains("real-time")
             || t.contains("real time");
-        let src = if realtime {
+        let src = if platformer {
+            crate::platformer_template(&name)
+        } else if realtime {
             crate::realtime_game_template(&name)
         } else {
             crate::game_template(&name)
