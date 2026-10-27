@@ -1124,11 +1124,20 @@ impl Evolver {
             if let (Some((t, init)), Stmt::For(x, iter, body)) = (init_bind, &win[1]) {
                 if body.len() == 1 {
                     if let Some((t2, op, k)) = accum_parts(&body[0]) {
-                        if t2 == t && !uses(&k, &[&t, x]) {
-                            let closed = Expr::BinOp(
-                                Box::new(init), op,
-                                Box::new(mul(k, count_of(iter))));
-                            return Some((2, vec![Stmt::Let(t, closed)]));
+                        if t2 == t {
+                            // t = t op x (the loop var itself) -> init op ITER.sum()
+                            if matches!(&k, Expr::Var(v) if v == x) {
+                                let summed = Expr::MethodCall(
+                                    Box::new(iter.clone()), "sum".into(), vec![]);
+                                let closed = Expr::BinOp(Box::new(init), op, Box::new(summed));
+                                return Some((2, vec![Stmt::Let(t, closed)]));
+                            }
+                            if !uses(&k, &[&t, x]) {
+                                let closed = Expr::BinOp(
+                                    Box::new(init), op,
+                                    Box::new(mul(k, count_of(iter))));
+                                return Some((2, vec![Stmt::Let(t, closed)]));
+                            }
                         }
                     }
                 }
@@ -2526,9 +2535,17 @@ mod asymptotic_proof {
         let out = evolver.mutate_body(&body, Mutation::IdiomRewrite);
         let src = crate::fmt::format_program(&out);
         assert!(!src.contains("while"), "while survived:\n{}", src);
-        // invariant violation: k uses the loop var -> must NOT rewrite
+        // accumulate the loop var itself -> xs.sum() (NOT the closed-
+        // form k*n path — that would be unsound)
         let body = parse_fn_body(
             "let total = 0\nfor x in xs {\n  total += x\n}\nreturn total");
+        let out = evolver.mutate_body(&body, Mutation::IdiomRewrite);
+        let src = crate::fmt::format_program(&out);
+        assert!(src.contains("sum()") && !src.contains("for"),
+            "sum-of-elements not rewritten:\n{}", src);
+        // k derived from x (x * 2) -> must NOT rewrite at all
+        let body = parse_fn_body(
+            "let total = 0\nfor x in xs {\n  total += x * 2\n}\nreturn total");
         let out = evolver.mutate_body(&body, Mutation::IdiomRewrite);
         let src = crate::fmt::format_program(&out);
         assert!(src.contains("for"), "unsafe rewrite:\n{}", src);
