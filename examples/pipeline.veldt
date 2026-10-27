@@ -1,0 +1,43 @@
+# pipeline.veldt — Veldt as a general language, not games.
+# A data pipeline: generate a noisy sensor stream, clean it, then
+# report stats — the kind of thing a real program does.
+
+grow fn clean_stream(readings: list)
+        test clean_stream([10.0, -200.0, 20.0]) == [10.0, 20.0] {
+    # drop impossible readings (< -50 is a sensor fault), clamp the rest
+    let out = []
+    for r in readings {
+        if r > -50.0 {
+            out.append(min(120.0, r))
+        }
+    }
+    return out
+}
+
+grow fn summarize(readings: list)
+        test summarize([10.0, 20.0]) == [10.0, 20.0, 15.0] {
+    # report [min, max, mean]
+    if readings.len() == 0 { return [0.0, 0.0, 0.0] }
+    let lo = readings[0]
+    let hi = readings[0]
+    let sum = 0.0
+    for r in readings {
+        if r < lo { lo = r }
+        if r > hi { hi = r }
+        sum = sum + r
+    }
+    return [lo, hi, sum / readings.len()]
+}
+
+# --- the pipeline ---
+let stream = []
+let n = 0
+while n < 200 {
+    stream.append(rand_range(-100.0, 150.0))
+    n = n + 1
+}
+
+let cleaned = clean_stream(stream)
+let stats = summarize(cleaned)
+print("readings: " + stream.len() + " -> cleaned: " + cleaned.len())
+print("min=" + stats[0] + " max=" + stats[1] + " mean=" + stats[2])

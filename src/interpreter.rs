@@ -1812,15 +1812,25 @@ impl Interpreter {
                 Ok(Some(Value::Float((x % 1_000_000) as f64 / 1_000_000.0)))
             }
             "rand_range" => {
-                let (lo, hi) = match (args.get(0), args.get(1)) {
-                    (Some(Value::Int(lo)), Some(Value::Int(hi))) => (*lo, *hi),
-                    _ => return Err("rand_range(lo, hi) expects two ints".into()),
+                // rand_range(lo, hi) — int or float range (float args → float out)
+                let (lo, hi, is_float) = match (args.get(0), args.get(1)) {
+                    (Some(Value::Int(lo)), Some(Value::Int(hi))) => (*lo as f64, *hi as f64, false),
+                    (Some(l), Some(h)) if matches!(l, Value::Int(_)|Value::Float(_))
+                        && matches!(h, Value::Int(_)|Value::Float(_)) =>
+                        (Self::num_f(l)?, Self::num_f(h)?, true),
+                    _ => return Err("rand_range(lo, hi) expects two numbers".into()),
                 };
-                if hi <= lo { return Ok(Some(Value::Int(lo))); }
                 let mut x = self.rng_state;
                 x ^= x << 13; x ^= x >> 7; x ^= x << 17;
                 self.rng_state = x;
-                Ok(Some(Value::Int(lo + (x % ((hi - lo + 1) as u64)) as i64)))
+                if is_float {
+                    if hi <= lo { return Ok(Some(Value::Float(lo))); }
+                    let f = (x % 1_000_000) as f64 / 1_000_000.0;
+                    return Ok(Some(Value::Float(lo + f * (hi - lo))));
+                }
+                let (li, hi2) = (lo as i64, hi as i64);
+                if hi2 <= li { return Ok(Some(Value::Int(li))); }
+                Ok(Some(Value::Int(li + (x % ((hi2 - li + 1) as u64)) as i64)))
             }
             "dice" => {
                 let (n, sides) = match (args.get(0), args.get(1)) {
