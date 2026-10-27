@@ -1100,6 +1100,30 @@ impl Interpreter {
 
     /// is the cell at (x,y) of a canvas/map dict solid? Solid = any
     /// non-floor char — walls/platforms/terrain; out-of-bounds is solid.
+    /// closest_name — the "did you mean" suggestion for an undefined fn.
+    /// A plain Levenshtein over candidate names; closest within a small
+    /// threshold (2 edits short names, 3 for longer).
+    fn closest_name<'a>(name: &str, cands: impl Iterator<Item = &'a str>) -> Option<&'a str> {
+        let lev = |a: &str, b: &str| -> usize {
+            let (a, b) = (a.as_bytes(), b.as_bytes());
+            let mut row: Vec<usize> = (0..=b.len()).collect();
+            for (i, &ca) in a.iter().enumerate() {
+                let mut prev = row[0];
+                row[0] = i + 1;
+                for (j, &cb) in b.iter().enumerate() {
+                    let old = row[j + 1];
+                    row[j + 1] = (prev + usize::from(ca != cb)).min(row[j] + 1).min(row[j + 1] + 1);
+                    prev = old;
+                }
+            }
+            row[b.len()]
+        };
+        let thresh = if name.len() <= 6 { 2 } else { 3 };
+        cands.map(|c| (c, lev(name, c)))
+            .filter(|(_, d)| *d <= thresh && *d > 0)
+            .min_by_key(|(_, d)| *d).map(|(c, _)| c)
+    }
+
     fn cell_solid(d: &im::HashMap<String, Value>, x: i64, y: i64) -> bool {
         let Some(Value::List(rows)) = d.get("cells") else { return true };
         if y < 0 || y as usize >= rows.len() { return true }
@@ -1139,7 +1163,16 @@ impl Interpreter {
         // Look up user function — clone the def to avoid borrow issues
         let (chosen_id, params, body) = {
             let variants = self.functions.get(name)
-                .ok_or_else(|| format!("Undefined function: {}", name))?;
+                .ok_or_else(|| {
+                    // did-you-mean — suggest close function/builtin names so a
+                    // typo isn't just "Undefined function" with no help
+                    let cands = self.functions.keys().cloned().collect::<Vec<_>>();
+                    let close = Self::closest_name(name, cands.iter().map(|s| s.as_str()));
+                    match close {
+                        Some(s) => format!("Undefined function: {} — did you mean {}?", name, s),
+                        None => format!("Undefined function: {}", name),
+                    }
+                })?;
             let chosen = match variant {
                 Some(id) => variants.iter().find(|v| v.id == id)
                     .ok_or_else(|| format!("Variant {}#{} not found", name, id))?,
