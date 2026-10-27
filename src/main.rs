@@ -6120,6 +6120,26 @@ fn diff_variants(a: &str, b: &str) {
     };
     let ea = vs.iter().find(|e| e.id == aid).unwrap_or_else(|| { eprintln!("no {}#{}", an, aid); process::exit(1); });
     let eb = vs.iter().find(|e| e.id == bid).unwrap_or_else(|| { eprintln!("no {}#{}", bn, bid); process::exit(1); });
+    if std::env::args().any(|a| a == "--exact") {
+        // symbolic pairwise divergence — Z3 counterexample if provably
+        // different, PROVABLY EQUIVALENT if Unsat, honest bail otherwise.
+        #[cfg(feature = "smt")]
+        {
+            match smt::verify_pair_exact(&veldt, &an, aid, bid) {
+                Ok(None) =>
+                    println!("{}#{} vs #{}: PROVABLY EQUIVALENT", an, aid, bid),
+                Ok(Some(cex)) =>
+                    println!("{}#{} vs #{}: PROVABLY DIVERGENT at ({})",
+                             an, aid, bid, cex.join(", ")),
+                Err(why) =>
+                    println!("{}#{} vs #{}: bail to bounded ({})", an, aid, bid, why),
+            }
+        }
+        #[cfg(not(feature = "smt"))]
+        {
+            eprintln!("--exact requires the smt feature (cargo build --features smt)");
+        }
+    }
     let sa = crate::fmt::format_program(&ea.body);
     let sb = crate::fmt::format_program(&eb.body);
     if std::env::args().any(|a| a == "--json") {

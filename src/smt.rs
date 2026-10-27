@@ -1186,6 +1186,73 @@ pub fn verify_exact_on_veldt(
 }
 
 
+/// Exact-verify variant `vid_a` against variant `vid_b` in the same
+/// family — used by `veldt diff a#N b#M --exact` (pair-wise, not
+/// fittest-anchored). Same return contract as verify_variant_exact.
+pub fn verify_pair_exact(
+    veldt: &veldt::Veldt,
+    name: &str,
+    a_id: u32,
+    b_id: u32,
+) -> Result<Option<Vec<String>>, String> {
+    let variants = veldt
+        .functions
+        .get(name)
+        .ok_or_else(|| format!("no family '{}'", name))?;
+    let a = variants.iter().find(|v| v.id == a_id)
+        .ok_or_else(|| format!("no variant {}#{}", name, a_id))?.clone();
+    let b = variants.iter().find(|v| v.id == b_id)
+        .ok_or_else(|| format!("no variant {}#{}", name, b_id))?.clone();
+    let params = a.params.clone();
+    if params.iter().any(|p| !param_supported(&p.typ)) {
+        return Err("unsupported param type — bail to bounded".into());
+    }
+    if a.params.len() != b.params.len() {
+        return Err(format!("arity differs {}#{}={} vs {}#{}={}",
+            name, a_id, a.params.len(), name, b_id, b.params.len()));
+    }
+    let a_body = a.body.clone();
+    let b_body = b.body.clone();
+    let mut cfg = Config::new();
+    cfg.set_param_value("timeout", "250");
+    z3::with_z3_config(&cfg, move || -> Result<Option<Vec<String>>, String> {
+        let mut flat_syms: Vec<Dynamic> = Vec::new();
+        let mut base_env: HashMap<String, SymVal> = HashMap::new();
+        for p in &params {
+            let sv = make_sym_param(&p.name, &p.typ, &mut flat_syms);
+            base_env.insert(p.name.clone(), sv);
+        }
+        let (a_smt, a_asm) = body_to_smt(&a_body, base_env.clone(), veldt, 8)
+            .map_err(|r| format!("{}#{}: {}", name, a_id, r))?;
+        let (b_smt, b_asm) = body_to_smt(&b_body, base_env, veldt, 8)
+            .map_err(|r| format!("{}#{}: {}", name, b_id, r))?;
+        let eq = a_smt.eq_val(&b_smt)
+            .ok_or_else(|| format!("{}#{} vs #{} return sort mismatch", name, a_id, b_id))?;
+        let solver = Solver::new();
+        let mut sp = Params::new();
+        sp.set_u32("timeout", 200);
+        solver.set_params(&sp);
+        for x in &a_asm { solver.assert(x); }
+        for x in &b_asm { solver.assert(x); }
+        solver.assert(&eq.not());
+        match solver.check() {
+            SatResult::Unsat => Ok(None),
+            SatResult::Sat => {
+                let Some(model) = solver.get_model() else {
+                    return Err("sat but no model".into());
+                };
+                let cex: Vec<String> = flat_syms.iter()
+                    .map(|s| model.eval(s, true)
+                        .map(|x| x.to_string())
+                        .unwrap_or_else(|| "?".into()))
+                    .collect();
+                Ok(Some(cex))
+            }
+            SatResult::Unknown => Err(format!("{}#{} vs #{} — z3 undecided", name, a_id, b_id)),
+        }
+    })
+}
+
 /// Exact-verify a single target variant `vid` against the family's fittest.
 /// `Ok(None)` = provably equivalent; `Ok(Some(cex))` = counterexample found;
 /// `Err(why)` = uses ops outside the SMT fragment.
