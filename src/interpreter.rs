@@ -1141,6 +1141,15 @@ impl Interpreter {
             .min_by_key(|(_, d)| *d).map(|(c, _)| c)
     }
 
+    /// ents_overlap — two entity dicts overlap within ~1 tile (AABB-ish).
+    fn ents_overlap(a: &im::HashMap<String, Value>, b: &im::HashMap<String, Value>) -> bool {
+        let ax = a.get("x").map(|v| Self::num_f(v).unwrap_or(0.0)).unwrap_or(0.0);
+        let ay = a.get("y").map(|v| Self::num_f(v).unwrap_or(0.0)).unwrap_or(0.0);
+        let bx = b.get("x").map(|v| Self::num_f(v).unwrap_or(0.0)).unwrap_or(0.0);
+        let by = b.get("y").map(|v| Self::num_f(v).unwrap_or(0.0)).unwrap_or(0.0);
+        (ax - bx).abs() < 1.0 && (ay - by).abs() < 1.0
+    }
+
     /// ent_tile_collide — is the entity's (x,y) inside a solid map cell?
     fn ent_tile_collide(e: &im::HashMap<String, Value>, map: &im::HashMap<String, Value>) -> bool {
         let ex = e.get("x").map(|v| Self::num_f(v).unwrap_or(0.0)).unwrap_or(0.0) as i64;
@@ -2890,6 +2899,27 @@ impl Interpreter {
                 let ex = Self::num_f(e.get("x").unwrap_or(&Value::Int(0)))? as i64;
                 let ey = Self::num_f(e.get("y").unwrap_or(&Value::Int(0)))? as i64;
                 Ok(Some(Value::Bool(Self::cell_solid(d, ex, ey + 1))))
+            }
+            "collide_any" => {
+                // collide_any(e, scene) → the first scene entity overlapping e
+                // (a real "what did I hit" query — bullets, pickups, hazards).
+                // Returns the hit entity dict or null.
+                let (e, scene) = match (args.get(0), args.get(1)) {
+                    (Some(Value::Dict(e)), Some(Value::Dict(s))) => (e.clone(), s.clone()),
+                    _ => return Err("collide_any(e, scene) expects dict + dict".into()),
+                };
+                let my_name = e.get("name").and_then(|v| match v {
+                    Value::Str(n) => Some(n.to_string()), _ => None }).unwrap_or_default();
+                let hit = match scene.get("entities") {
+                    Some(Value::Dict(ents)) => ents.iter().find_map(|(k, v)| {
+                        if *k == my_name { return None; }
+                        if let Value::Dict(o) = v {
+                            if Self::ents_overlap(&e, o) { Some(Value::Dict(o.clone())) } else { None }
+                        } else { None }
+                    }),
+                    _ => None,
+                };
+                Ok(Some(hit.unwrap_or(Value::Null)))
             }
             "ent_def" => {
                 // ent_def(name, fields) — register an entity type. A real
