@@ -1715,7 +1715,7 @@ impl Interpreter {
                 Ok(Some(Value::Dict(d)))
             }
             "canvas_line" => {
-                let (c, mut x, mut y, x2, y2, ch) = match (args.get(0), args.get(1), args.get(2), args.get(3), args.get(4), args.get(5)) {
+                let (c, x, y, x2, y2, ch) = match (args.get(0), args.get(1), args.get(2), args.get(3), args.get(4), args.get(5)) {
                     (Some(Value::Dict(d)), Some(Value::Int(a)), Some(Value::Int(b)),
                      Some(Value::Int(c2)), Some(Value::Int(d2)), Some(Value::Str(ch)))
                         => (d.clone(), *a, *b, *c2, *d2, ch.clone()),
@@ -3243,7 +3243,7 @@ impl Interpreter {
                 };
                 for i in 0..(n - 3) {
                     let pt = points[i];
-                    let mut bad: Vec<bool> = tris.iter().map(|&(a, b, c)| {
+                    let bad: Vec<bool> = tris.iter().map(|&(a, b, c)| {
                         circum(points[a], points[b], points[c])
                             .map(|(ux, uy, r2)| (pt.0 - ux).powi(2) + (pt.1 - uy).powi(2) < r2)
                             .unwrap_or(false)

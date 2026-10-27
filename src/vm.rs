@@ -10,7 +10,6 @@
 
 use crate::ast::*;
 use crate::interpreter::{Interpreter, Value};
-use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 

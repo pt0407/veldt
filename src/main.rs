@@ -2270,7 +2270,7 @@ fn main() {
                         .unwrap_or(std::cmp::Ordering::Equal));
                     let mut origins: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
                     for e in vs.iter() { *origins.entry(e.origin.clone()).or_insert(0) += 1; }
-                    let mut sorted = |f: fn(&crate::veldt::FunctionEntry) -> f64| {
+                    let sorted = |f: fn(&crate::veldt::FunctionEntry) -> f64| {
                         let mut v: Vec<f64> = vs.iter().map(f).collect();
                         v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
                         v
@@ -3889,7 +3889,6 @@ fn fmt_check(path: &str) {
 /// grow fns without test clauses, statements after return, lets
 /// bound but never referenced.
 pub fn lint(stmts: &[ast::Stmt]) -> Vec<String> {
-    use ast::*;
     let mut out = Vec::new();
     // call-arity pass — calls to locally-defined fns with the
     // wrong arg count are real bugs, not just style
@@ -5228,7 +5227,6 @@ fn run_program_vm(path: &str, evolve_after: bool, trace: bool) {
 }
 
 fn start_repl() {
-    use rustyline::DefaultEditor;
     let mut veldt = veldt::Veldt::new();
     let _ = veldt.load();
     let mut interp = interpreter::Interpreter::new();
@@ -5523,11 +5521,11 @@ fn fuzz_family(name: &str, json: bool) {
             std::collections::HashMap::new();
         for v in &variants {
             if !matches!(v.health, veldt::Health::Healthy) { continue; }
-            let out = match (if let Some(v2) = &mut fuzz_vm {
+            let out = match if let Some(v2) = &mut fuzz_vm {
                 v2.jit_call(name, Some(v.id), args.clone())
             } else {
                 interp.call_function(name, Some(v.id), args.clone())
-            }) {
+            } {
                 Ok(r) => serde_json::to_string(&r).unwrap_or_default(),
                 Err(e) => format!("ERR:{}", e),
             };

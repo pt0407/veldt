@@ -794,7 +794,7 @@ async fn call_fn(
     State(state): State<Arc<AppState>>,
     Json(req): Json<CallRequest>,
 ) -> Json<serde_json::Value> {
-    let mut veldt = { state.veldt.lock().unwrap().clone() };
+    let veldt = { state.veldt.lock().unwrap().clone() };
     let mut interp = crate::interpreter::Interpreter::new();
     interp.caps = crate::interpreter::Caps::sandboxed();
     veldt.load_into_interpreter(&mut interp);
@@ -1260,7 +1260,7 @@ async fn evolve(
 }
 
 async fn clear_veldt(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
-    let mut veldt = {
+    let veldt = {
         let v = state.veldt.lock().unwrap();
         let mut new_v = v.clone();
         new_v.clear();

@@ -283,7 +283,7 @@ impl JitEngine {
             } else {
                 block_for.insert(0, entry);
             }
-            let mut get_block =
+            let get_block =
                 |b: &mut FunctionBuilder,
                  fm: &mut HashMap<usize, cranelift_codegen::ir::Block>,
                  pc: usize| -> cranelift_codegen::ir::Block {

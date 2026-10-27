@@ -448,7 +448,7 @@ fn signature_help(params: &Value, docs: &HashMap<String, Doc>) -> Option<Value> 
     // signature: find `fn name(` or `grow fn name(` in the doc, take param list
     let sig = doc.text.lines().find_map(|l| {
         let t = l.trim_start();
-        if (t.starts_with("fn ") || t.starts_with("grow fn ")) {
+        if t.starts_with("fn ") || t.starts_with("grow fn ") {
             let rest = t.trim_start_matches("grow fn ").trim_start_matches("fn ");
             if rest.starts_with(&format!("{}(", name)) {
                 return Some(rest.split(')').next().unwrap_or(rest).to_string() + ")");
