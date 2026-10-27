@@ -2213,9 +2213,37 @@ fn main() {
                     eprintln!("[TEND] {}#{} — no healer found, still sick", name, id);
                 }
             }
-            if healed > 0 {
+            // idiom pass — same rewrites as evolve --tend: optimize
+            // sort-extremum/dedup/linsearch/accum bodies in place
+            let mut idiomed = 0usize;
+            let scope: Vec<(String, u32)> = veldt.functions.iter()
+                .flat_map(|(n, vs)| vs.iter()
+                    .filter(|_| fam.map(|f| *n == *f).unwrap_or(true))
+                    .map(|e| (n.clone(), e.id)))
+                .collect();
+            for (name, id) in scope {
+                let mut entry = veldt.functions[&name].iter()
+                    .find(|e| e.id == id).cloned().unwrap();
+                let nb = evolve::Evolver::idiom_rewrite_body(&entry.body);
+                if nb != entry.body {
+                    entry.body = nb;
+                    idiomed += 1;
+                    eprintln!("[TEND] {}#{} — idiom optimized", name, id);
+                    if let Some(vs) = veldt.functions.get_mut(&name) {
+                        for e in vs.iter_mut() {
+                            if e.id == id { *e = entry.clone(); break; }
+                        }
+                    }
+                }
+            }
+            if healed > 0 || idiomed > 0 {
                 let _ = veldt.save();
+            }
+            if healed > 0 {
                 println!("tend: healed {} sick variant(s)", healed);
+            }
+            if idiomed > 0 {
+                println!("tend: {} variant(s) idiom-optimized in place", idiomed);
             }
         }
         "prune" => {
