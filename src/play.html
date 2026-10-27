@@ -78,40 +78,63 @@ document.getElementById('nameBadge').textContent = NAME;
 document.title = NAME + ' — veldt live';
 let sid = null, timer = null, held = new Set();
 
-// sprite table — sprite names → [fill, glow, shape]
+// sprite table — sprite names → [fill, glow, shape]  (shapes below)
 const SPRITES = {
-  hero:    ['#6fae7f', '#8ec5a0', 'orb'],  player: ['#6fae7f', '#8ec5a0', 'orb'],
-  hunter:  ['#d44d47', '#e05a54', 'diamond'], enemy: ['#d44d47', '#e05a54', 'diamond'],
-  exit:    ['#f0c674', '#ffd98f', 'ring'], portal: ['#f0c674', '#ffd98f', 'ring'],
-  coin:    ['#f0c674', '#ffd98f', 'crystal'], goal: ['#f0c674', '#ffd98f', 'crystal'],
+  hero:    ['#6fae7f', '#8ec5a0', 'px'],   player: ['#6fae7f', '#8ec5a0', 'px'],
+  hunter:  ['#d44d47', '#e05a54', 'px'],   enemy: ['#d44d47', '#e05a54', 'px'],
+  exit:    ['#f0c674', '#ffd98f', 'px'],   portal: ['#f0c674', '#ffd98f', 'px'],
+  coin:    ['#f0c674', '#ffd98f', 'px'],   goal:  ['#f0c674', '#ffd98f', 'px'],
   wall:    ['#1f3027', '#2e4639', 'wall'], snake: ['#4a7c59', '#6fae7f', 'seg'],
 };
 
+// pixel-sprite tilesheet — 8x8 grids per sprite name; '.' transparent.
+// Real little characters, not just shapes — the visual layer.
+const PX = {
+  hero: [
+    "..oooo..", ".o####o.", ".o#@@#o.", ".o#@@#o.", ".o####o.", "..####..",
+    ".o#..#o.", "..oooo..", ],
+  hunter: [
+    "..####..", ".######.", ".#<##>#.", ".######.", "..#..#..", ".##..##.",
+    "#......#", "........", ],
+  exit: [
+    "...oo...", "..o..o..", ".o....o.", "o..>>..o", "o..>>..o", ".o....o.",
+    "..o..o..", "...oo...", ],
+  coin: [
+    "........", "...oo...", "..o$$o..", "..$$$$..", "..$$$$..", "..o$$o..",
+    "...oo...", "........", ],
+  player: [
+    "..oooo..", ".o####o.", ".o#@@#o.", ".o#@@#o.", ".o####o.", "..####..",
+    ".o#..#o.", "..oooo..", ],
+};
+// palette per sprite — chars -> colors
+const PX_COLORS = {
+  '#': '#6fae7f', '@': '#8ec5a0', 'o': '#2e4639', '<': '#ffdbd9', '>': '#ff6b6b',
+  '$': '#ffd98f', '.': null,
+};
+const PX_HUNTER_COLORS = { '#': '#d44d47', '<': '#ff6b6b', '>': '#ff6b6b', '.': null };
+const PX_GOLD_COLORS = { '#': '#f0c674', '$': '#ffd98f', 'o': '#2e4639', '.': null };
+
 function drawSprite(ctx, ch, x, y, cell) {
-  const [fill, glow, shape] = SPRITES[ch] || ['#8ec5a0', '#8ec5a0', 'orb'];
+  const [fill, glow, shape] = SPRITES[ch] || ['#8ec5a0', '#8ec5a0', 'px'];
   ctx.save();
   if (shape === 'wall') {
     ctx.fillStyle = fill; ctx.fillRect(x, y, cell, cell);
     ctx.fillStyle = glow; ctx.fillRect(x + 1, y + 1, cell - 2, 3);
     ctx.restore(); return;
   }
-  ctx.shadowColor = glow; ctx.shadowBlur = 9; ctx.fillStyle = fill;
-  if (shape === 'diamond') {
-    ctx.beginPath(); ctx.moveTo(x + cell/2, y + 2); ctx.lineTo(x + cell - 2, y + cell/2);
-    ctx.lineTo(x + cell/2, y + cell - 2); ctx.lineTo(x + 2, y + cell/2); ctx.closePath(); ctx.fill();
-    ctx.fillStyle = '#ffdbd9'; ctx.fillRect(x + cell/2 - 1, y + cell/2 - 1, 3, 3);
-  } else if (shape === 'ring') {
-    ctx.strokeStyle = fill; ctx.lineWidth = 2.4;
-    ctx.beginPath(); ctx.arc(x + cell/2, y + cell/2, cell * .34, 0, Math.PI*2); ctx.stroke();
-    ctx.fillStyle = 'rgba(240,198,116,.3)'; ctx.fill();
-  } else if (shape === 'seg') {
-    ctx.fillRect(x + 2, y + 2, cell - 4, cell - 4);
-  } else if (shape === 'crystal') {
-    ctx.beginPath(); ctx.arc(x + cell/2, y + cell/2, cell * .26, 0, Math.PI*2); ctx.fill();
-  } else {
-    ctx.beginPath(); ctx.arc(x + cell/2, y + cell/2, cell * .36, 0, Math.PI*2); ctx.fill();
-    ctx.fillStyle = '#e8fff0';
-    ctx.beginPath(); ctx.arc(x + cell*.4, y + cell*.4, cell*.11, 0, Math.PI*2); ctx.fill();
+  // pixel sprite — draw the 8x8 grid scaled to the cell
+  const px = PX[ch] || PX.hero;
+  const colors = ch === 'hunter' || ch === 'enemy' ? PX_HUNTER_COLORS
+    : (ch === 'coin' || ch === 'goal' || ch === 'exit' || ch === 'portal' ? PX_GOLD_COLORS : PX_COLORS);
+  const sz = cell / 8;
+  ctx.shadowColor = glow; ctx.shadowBlur = 8;
+  for (let r = 0; r < 8; r++) {
+    for (let c = 0; c < 8; c++) {
+      const p = px[r][c];
+      if (p === '.') continue;
+      ctx.fillStyle = colors[p] || fill;
+      ctx.fillRect(x + c * sz, y + r * sz, sz + .5, sz + .5);
+    }
   }
   ctx.restore();
 }
@@ -128,7 +151,14 @@ function paint(frame) {
   for (let r = 0; r < h; r++) for (let c = 0; c < w; c++) {
     if ((r + c) % 2 === 0) { ctx.fillStyle = '#0a110d'; ctx.fillRect(c * cell, r * cell, cell, cell); }
   }
-  // terrain — the map's solid cells paint as beveled stone under the actors
+  // terrain — the map's cells paint per-char (a terrain tilesheet):
+  // '#' brick, '~' water, '=' platform, ',' floor, else beveled stone.
+  const TERRAIN = {
+    '#': ['#3a2e26', '#5a4a3a'],  // brick — dark brown + lighter mortar
+    '~': ['#16324a', '#2e5a7a'],  // water
+    '=': ['#5a4632', '#8a6a4a'],  // platform/wood
+    ',': ['#152318', '#223626'],  // rough floor
+  };
   const map = f.map;
   if (Array.isArray(map)) {
     for (let r = 0; r < map.length && r < h; r++) {
@@ -137,8 +167,15 @@ function paint(frame) {
         const ch = row[c];
         if (ch !== ' ' && ch !== '.') {
           const x = c * cell, y = r * cell;
-          ctx.fillStyle = '#1f3027'; ctx.fillRect(x, y, cell, cell);
-          ctx.fillStyle = '#2e4639'; ctx.fillRect(x + 1, y + 1, cell - 2, 3);
+          const [base, hi] = TERRAIN[ch] || ['#1f3027', '#2e4639'];
+          ctx.fillStyle = base; ctx.fillRect(x, y, cell, cell);
+          ctx.fillStyle = hi; ctx.fillRect(x + 1, y + 1, cell - 2, 3);
+          // brick courses — a faint vertical seam every other row on '#'
+          if (ch === '#') {
+            ctx.fillStyle = 'rgba(0,0,0,.18)';
+            if (r % 2 === 0) ctx.fillRect(x + cell/2, y, 1, cell);
+            ctx.fillRect(x, y + cell - 1, cell, 1);
+          }
         }
       }
     }
@@ -182,6 +219,29 @@ function paint(frame) {
       ctx.fillText(String(prompt), cv.width / 2, cv.height / 2);
     }
     ctx.textAlign = 'left';
+  }
+  // transient effects — emit()/particle() events fade a flash at (x, y)
+  const fx = f.fx || [];
+  for (const e of fx) {
+    const ex = (e.x - (f.camera_x || 0)) * cell, ey = (e.y - (f.camera_y || 0)) * cell;
+    ctx.save();
+    ctx.globalAlpha = .8;
+    if (e.kind === 'coin' || e.kind === 'collect') {
+      ctx.strokeStyle = '#ffd98f'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(ex + cell/2, ey + cell/2, cell * .5, 0, Math.PI*2); ctx.stroke();
+      ctx.fillStyle = 'rgba(255,217,143,.4)';
+      ctx.beginPath(); ctx.arc(ex + cell/2, ey + cell/2, cell * .4, 0, Math.PI*2); ctx.fill();
+    } else if (e.kind === 'hit' || e.kind === 'death') {
+      ctx.fillStyle = 'rgba(224,90,84,.7)';
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2, r = cell * .5;
+        ctx.fillRect(ex + cell/2 + Math.cos(a) * r - 2, ey + cell/2 + Math.sin(a) * r - 2, 4, 4);
+      }
+    } else {
+      ctx.fillStyle = 'rgba(142,197,160,.6)';
+      ctx.fillRect(ex + 2, ey + 2, cell - 4, cell - 4);
+    }
+    ctx.restore();
   }
   // sound events — a named tone per sfx() the program emitted this frame
   for (const s of (f.sfx || [])) playSfx(s);

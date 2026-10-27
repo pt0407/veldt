@@ -112,6 +112,8 @@ pub struct Interpreter {
     // (/api/game/start), this is the shared input queue + frame buffer.
     // None = CLI mode — game_frame prints a JSON frame line instead.
     pub game_io: Option<std::sync::Arc<GameIo>>,
+    /// ent_def registry — registered entity types for the `spawn` DSL
+    pub ent_defs: HashMap<String, im::HashMap<String, Value>>,
 }
 
 /// Shared state for a live game session: browser key events in,
@@ -123,6 +125,9 @@ pub struct GameIo {
     pub frame: std::sync::Mutex<Option<String>>,
     /// pending sound events — sfx() pushes, game_frame drains into the scene
     pub sfx: std::sync::Mutex<Vec<String>>,
+    /// pending visual events — emit()/particle() push, game_frame drains into
+    /// the scene's `fx` so the browser can render transient effects
+    pub fx: std::sync::Mutex<Vec<serde_json::Value>>,
     /// session alive — game_running() polls this; /api/game/stop clears it
     pub running: std::sync::atomic::AtomicBool,
     /// headless render — `veldt play` sets this so game_frame paints the
@@ -139,6 +144,7 @@ impl GameIo {
             keys: std::sync::Mutex::new(Vec::new()),
             frame: std::sync::Mutex::new(None),
             sfx: std::sync::Mutex::new(Vec::new()),
+            fx: std::sync::Mutex::new(Vec::new()),
             running: std::sync::atomic::AtomicBool::new(true),
             cli_render: std::sync::atomic::AtomicBool::new(false),
             frames: std::sync::atomic::AtomicU64::new(0),
@@ -229,6 +235,7 @@ impl Interpreter {
             importing: Vec::new(),
             caps: Caps::allow_all(),
             game_io: None,
+            ent_defs: HashMap::new(),
         }
     }
 
@@ -1136,6 +1143,22 @@ impl Interpreter {
         cands.map(|c| (c, lev(name, c)))
             .filter(|(_, d)| *d <= thresh && *d > 0)
             .min_by_key(|(_, d)| *d).map(|(c, _)| c)
+    }
+
+    /// ents_overlap — two entity dicts overlap within ~1 tile (AABB-ish).
+    fn ents_overlap(a: &im::HashMap<String, Value>, b: &im::HashMap<String, Value>) -> bool {
+        let ax = a.get("x").map(|v| Self::num_f(v).unwrap_or(0.0)).unwrap_or(0.0);
+        let ay = a.get("y").map(|v| Self::num_f(v).unwrap_or(0.0)).unwrap_or(0.0);
+        let bx = b.get("x").map(|v| Self::num_f(v).unwrap_or(0.0)).unwrap_or(0.0);
+        let by = b.get("y").map(|v| Self::num_f(v).unwrap_or(0.0)).unwrap_or(0.0);
+        (ax - bx).abs() < 1.0 && (ay - by).abs() < 1.0
+    }
+
+    /// ent_tile_collide — is the entity's (x,y) inside a solid map cell?
+    fn ent_tile_collide(e: &im::HashMap<String, Value>, map: &im::HashMap<String, Value>) -> bool {
+        let ex = e.get("x").map(|v| Self::num_f(v).unwrap_or(0.0)).unwrap_or(0.0) as i64;
+        let ey = e.get("y").map(|v| Self::num_f(v).unwrap_or(0.0)).unwrap_or(0.0) as i64;
+        Self::cell_solid(map, ex, ey)
     }
 
     fn cell_solid(d: &im::HashMap<String, Value>, x: i64, y: i64) -> bool {
@@ -2881,6 +2904,104 @@ impl Interpreter {
                 let ey = Self::num_f(e.get("y").unwrap_or(&Value::Int(0)))? as i64;
                 Ok(Some(Value::Bool(Self::cell_solid(d, ex, ey + 1))))
             }
+            "collide_any" => {
+                // collide_any(e, scene) → the first scene entity overlapping e
+                // (a real "what did I hit" query — bullets, pickups, hazards).
+                // Returns the hit entity dict or null.
+                let (e, scene) = match (args.get(0), args.get(1)) {
+                    (Some(Value::Dict(e)), Some(Value::Dict(s))) => (e.clone(), s.clone()),
+                    _ => return Err("collide_any(e, scene) expects dict + dict".into()),
+                };
+                let my_name = e.get("name").and_then(|v| match v {
+                    Value::Str(n) => Some(n.to_string()), _ => None }).unwrap_or_default();
+                let hit = match scene.get("entities") {
+                    Some(Value::Dict(ents)) => ents.iter().find_map(|(k, v)| {
+                        if *k == my_name { return None; }
+                        if let Value::Dict(o) = v {
+                            if Self::ents_overlap(&e, o) { Some(Value::Dict(o.clone())) } else { None }
+                        } else { None }
+                    }),
+                    _ => None,
+                };
+                Ok(Some(hit.unwrap_or(Value::Null)))
+            }
+            "ent_def" => {
+                // ent_def(name, fields) — register an entity type. A real
+                // entity-builder DSL: games declare a type once with its
+                // component fields, then spawn(scene, "type", x, y) clones it.
+                let (name, fields) = match (args.get(0), args.get(1)) {
+                    (Some(Value::Str(n)), Some(Value::Dict(f))) => (n.to_string(), f.clone()),
+                    _ => return Err("ent_def(name, fields_dict) expects str + dict".into()),
+                };
+                // store the type in the interpreter registry — spawn reads it
+                self.ent_defs.insert(name.clone(), fields);
+                Ok(Some(Value::Str(format!("defined entity type '{}'", name).into())))
+            }
+            "spawn" => {
+                // spawn(scene, type_name, x, y) — instantiate a registered
+                // entity type: clone the ent_def fields, set position, tag =
+                // type name, merge into the scene. The clean build path.
+                let (scene, tname, x, y) = match (args.get(0), args.get(1), args.get(2), args.get(3)) {
+                    (Some(Value::Dict(s)), Some(Value::Str(t)), Some(x), Some(y)) =>
+                        (s.clone(), t.to_string(), Self::num_f(x)?, Self::num_f(y)?),
+                    _ => return Err("spawn(scene, type, x, y) expects dict + str + 2 nums".into()),
+                };
+                let tpl = match self.ent_defs.get(&tname) {
+                    Some(f) => f.clone(),
+                    None => return Err(format!("spawn: no entity type '{}' — ent_def it first", tname)),
+                };
+                let mut e = tpl.clone();
+                e.insert("name".into(), Value::Str(tname.clone().into()));
+                e.insert("x".into(), Value::Float(x));
+                e.insert("y".into(), Value::Float(y));
+                if !e.contains_key("sprite") {
+                    e.insert("sprite".into(), Value::Str(tname.clone().into()));
+                }
+                if !e.contains_key("tag") {
+                    e.insert("tag".into(), Value::Str(tname.clone().into()));
+                }
+                if !e.contains_key("vx") { e.insert("vx".into(), Value::Float(0.0)); }
+                if !e.contains_key("vy") { e.insert("vy".into(), Value::Float(0.0)); }
+                // spawn(scene, type, x, y) — unique name = type + count so
+                // multiple same-type spawns don't collide in the entity map
+                let mut s2 = scene.clone();
+                let mut ents = match s2.get("entities") {
+                    Some(Value::Dict(m)) => m.clone(), _ => im::HashMap::new() };
+                let mut uname = tname.clone();
+                let mut n = 1u32;
+                while ents.contains_key(uname.as_str()) { uname = format!("{}{}", tname, n); n += 1; }
+                e.insert("name".into(), Value::Str(uname.clone().into()));
+                ents.insert(uname, Value::Dict(e));
+                s2.insert("entities".into(), Value::Dict(ents));
+                Ok(Some(Value::Dict(s2)))
+            }
+            "integrate" => {
+                // integrate(e, map, dt) — velocity physics: apply vx/vy to the
+                // position scaled by dt, then resolve tile collisions on both
+                // axes. The real movement step — entities carry vx/vy, this
+                // moves them. Returns the integrated entity dict.
+                let (e, d, dt) = match (args.get(0), args.get(1), args.get(2)) {
+                    (Some(Value::Dict(e)), Some(Value::Dict(d)), Some(dt)) =>
+                        (e.clone(), d.clone(), Self::num_f(dt)?),
+                    _ => return Err("integrate(e, map, dt) expects dict + dict + num".into()),
+                };
+                let vx = e.get("vx").map(|v| Self::num_f(v).unwrap_or(0.0)).unwrap_or(0.0);
+                let vy = e.get("vy").map(|v| Self::num_f(v).unwrap_or(0.0)).unwrap_or(0.0);
+                let mut x = e.get("x").map(|v| Self::num_f(v).unwrap_or(0.0)).unwrap_or(0.0);
+                let mut y = e.get("y").map(|v| Self::num_f(v).unwrap_or(0.0)).unwrap_or(0.0);
+                // sweep the x-step then the y-step so collision stays axis-resolved
+                let nx = x + vx * dt;
+                let mut probe = e.clone();
+                probe.insert("x".into(), Value::Float(nx));
+                if !Self::ent_tile_collide(&probe, &d) { x = nx; }
+                let ny = y + vy * dt;
+                probe.insert("y".into(), Value::Float(ny));
+                if !Self::ent_tile_collide(&probe, &d) { y = ny; }
+                let mut out = e.clone();
+                out.insert("x".into(), Value::Float(x));
+                out.insert("y".into(), Value::Float(y));
+                Ok(Some(Value::Dict(out)))
+            }
             "physics_tick" => {
                 // physics_tick(e, map, grav) — apply gravity to e.vy, move e.y,
                 // resolve tile collision (land = zero vy + clamp above the cell).
@@ -3000,6 +3121,21 @@ impl Interpreter {
                 }
                 Ok(Some(Value::Null))
             }
+            "emit" | "particle" => {
+                // emit(name, x, y) — a transient visual effect event queued
+                // into the frame's `fx` (coin sparkle, hit flash, death burst).
+                // The browser renders each; in a headless run it's a marker.
+                let (name, x, y) = match (args.get(0), args.get(1), args.get(2)) {
+                    (Some(Value::Str(n)), Some(x), Some(y)) =>
+                        (n.to_string(), Self::num_f(x)?, Self::num_f(y)?),
+                    _ => return Err("emit(name, x, y) expects str + 2 nums".into()),
+                };
+                if let Some(io) = &self.game_io {
+                    io.fx.lock().unwrap().push(
+                        serde_json::json!({"kind": name, "x": x, "y": y}));
+                }
+                Ok(Some(Value::Null))
+            }
             "beep" => {
                 // beep(freq, ms) → a terminal bell / tone for CLI games
                 let (freq, ms) = match (args.get(0), args.get(1)) {
@@ -3104,9 +3240,12 @@ impl Interpreter {
                     },
                     _ => serde_json::Value::Null,
                 };
-                // drain any queued sfx into this frame — the browser plays them
+                // drain queued sfx + fx into this frame — sounds & visuals
                 let sfx_events: Vec<String> = self.game_io.as_ref()
                     .map(|io| std::mem::take(&mut *io.sfx.lock().unwrap()))
+                    .unwrap_or_default();
+                let fx_events: Vec<serde_json::Value> = self.game_io.as_ref()
+                    .map(|io| std::mem::take(&mut *io.fx.lock().unwrap()))
                     .unwrap_or_default();
                 let scene = serde_json::json!({
                     "w": state.get("w").map(Self::json_num).unwrap_or(0.0),
@@ -3116,6 +3255,7 @@ impl Interpreter {
                     "entities": entities.iter().map(Self::entity_json).collect::<Vec<_>>(),
                     "map": map_rows,
                     "sfx": sfx_events,
+                    "fx": fx_events,
                     "hud": match hud { Value::Dict(hd) => hd.iter()
                         .map(|(k,v)| (k.clone(), Self::json_val(v)))
                         .collect::<serde_json::Map<_,_>>().into(),
@@ -3129,21 +3269,25 @@ impl Interpreter {
                         io.frames.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         // render the scene as text: map rows + entity sprite overlay
                         let mut text = String::from("\n");
-                        if let serde_json::Value::Array(rows) = &scene["map"] {
-                            let mut grid: Vec<Vec<char>> = rows.iter().map(|r|
-                                r.as_str().unwrap_or("").chars().collect()).collect();
-                            for e in scene["entities"].as_array().map(|a| a.as_slice()).unwrap_or(&[]) {
-                                let ex = e["x"].as_i64().unwrap_or(0) as usize;
-                                let ey = e["y"].as_i64().unwrap_or(0) as usize;
-                                let ch = e["sprite"].as_str().unwrap_or("?").chars().next().unwrap_or('?');
-                                if let Some(row) = grid.get_mut(ey) {
-                                    if ex < row.len() { row[ex] = ch; }
-                                }
+                        // grid = the map rows, or a blank world grid when the
+                        // game has no tilemap (open-field topdown)
+                        let mut grid: Vec<Vec<char>> = match &scene["map"] {
+                            serde_json::Value::Array(rows) => rows.iter().map(|r|
+                                r.as_str().unwrap_or("").chars().collect()).collect(),
+                            _ => vec![vec![' '; scene["w"].as_i64().unwrap_or(20) as usize];
+                                      scene["h"].as_i64().unwrap_or(10) as usize],
+                        };
+                        for e in scene["entities"].as_array().map(|a| a.as_slice()).unwrap_or(&[]) {
+                            let ex = e["x"].as_i64().unwrap_or(0) as usize;
+                            let ey = e["y"].as_i64().unwrap_or(0) as usize;
+                            let ch = e["sprite"].as_str().unwrap_or("?").chars().next().unwrap_or('?');
+                            if let Some(row) = grid.get_mut(ey) {
+                                if ex < row.len() { row[ex] = ch; }
                             }
-                            for row in &grid {
-                                text.push_str(&row.iter().collect::<String>());
-                                text.push('\n');
-                            }
+                        }
+                        for row in &grid {
+                            text.push_str(&row.iter().collect::<String>());
+                            text.push('\n');
                         }
                         if let Some(hd) = scene["hud"].as_object() {
                             text.push_str(&format!("[{}] ",
@@ -3191,6 +3335,31 @@ impl Interpreter {
                 let mut d2 = d.clone();
                 d2.insert("camera_x".into(), Value::Float(x));
                 d2.insert("camera_y".into(), Value::Float(y));
+                Ok(Some(Value::Dict(d2)))
+            }
+            "camera_follow" => {
+                // camera_follow(state, e, deadzone) — the camera tracks the
+                // entity's position, keeping it inside a dead-zone box before
+                // scrolling (so it doesn't jitter per-pixel). Real scrolling.
+                let (d, e, dz) = match (args.get(0), args.get(1), args.get(2)) {
+                    (Some(Value::Dict(d)), Some(Value::Dict(e)), Some(dz)) =>
+                        (d.clone(), e.clone(), Self::num_f(dz)?),
+                    _ => return Err("camera_follow(state, e, deadzone) expects dict + dict + num".into()),
+                };
+                let ex = e.get("x").map(|v| Self::num_f(v).unwrap_or(0.0)).unwrap_or(0.0);
+                let ey = e.get("y").map(|v| Self::num_f(v).unwrap_or(0.0)).unwrap_or(0.0);
+                let w = d.get("w").map(|v| Self::num_f(v).unwrap_or(20.0)).unwrap_or(20.0);
+                let h = d.get("h").map(|v| Self::num_f(v).unwrap_or(12.0)).unwrap_or(12.0);
+                let mut cx = d.get("camera_x").map(|v| Self::num_f(v).unwrap_or(0.0)).unwrap_or(0.0);
+                let mut cy = d.get("camera_y").map(|v| Self::num_f(v).unwrap_or(0.0)).unwrap_or(0.0);
+                // dead-zone: scroll only when the entity passes the edge margin
+                if ex - cx > w - dz { cx = ex - (w - dz); }
+                if ex - cx < dz { cx = ex - dz; }
+                if ey - cy > h - dz { cy = ey - (h - dz); }
+                if ey - cy < dz { cy = ey - dz; }
+                let mut d2 = d.clone();
+                d2.insert("camera_x".into(), Value::Float(cx.max(0.0)));
+                d2.insert("camera_y".into(), Value::Float(cy.max(0.0)));
                 Ok(Some(Value::Dict(d2)))
             }
             "canvas_ellipse" => {
