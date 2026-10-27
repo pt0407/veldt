@@ -104,9 +104,9 @@ Target: within ~10-30x of Python on typical script workloads, not 500x.
       script with args/stdin/files, garden teaser, link to spec
 - [ ] `docs/reference.md` — every builtin, signature, example (generate
       from a table in the binary: `veldt docs <builtin>`)
-- [ ] `veldt help <topic>` — CLI help beyond usage list
+- [x] `veldt help <topic>` — run/repl/agent/evolve/garden/builtins/strings/lists/types/registry/sandbox/filter/lint topics
 - [x] `veldt new myapp` — scaffold `main.veldt` + README
-- [ ] VSCode syntax highlighting — TextMate grammar (~100 lines), no LSP yet
+- [x] VSCode syntax highlighting — `editors/vscode/veldt.tmLanguage.json` (LSP also shipped: `veldt lsp`)
 
 ## Phase 5 — The garden as the reason to stay (post-v1)
 
@@ -114,11 +114,12 @@ This is what nobody else has — keep it load-bearing but opt-in.
 
 - [x] `veldt import <url>` — pull a garden JSON over HTTP (fetch already
       exists in Rust deps) — gardens travel between machines/people (devin)
-- [ ] `veldt stats` — ecosystem dashboard: families, fitness spread,
-      niche coverage, evolution velocity, deaths
-- [ ] Killer demo: seed a naive `sort`/`fib`, evolve N cycles (mechanical
-      + LLM mutation), produce a measurably faster variant on scaled
-      inputs — THE proof of value
+- [x] `veldt stats` — ecosystem dashboard: 43 lineages/301 variants
+      census, trust ladder, probes/deaths counts, fitness trend sparkline
+- [x] Killer demo: `evolve_discovers_and_selects_linear_scan_over_sort_reverse`
+      seeds ONLY `xs.sort().reverse()[0]` (O(n log n)); one evolve cycle
+      births the O(n) linear scan at eff=20x and selects it — then Z3
+      `--exact` proves them equivalent. IdiomRewrite is the mutation.
 - [ ] Registry sketch: `veldt push`/`veldt pull` against a hosted garden
       pool — shared gene pool across users (the real dream)
 

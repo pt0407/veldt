@@ -49,6 +49,12 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] ROADMAP RECONCILE: ticked items verified shipped —
+  veldt help <topic> (13 topics), veldt stats dashboard, VSCode
+  tmLanguage grammar, killer demo (IdiomRewrite test = THE proof).
+  Added docs/_config.yml (jekyll-theme-cayman) — Pages still needs
+  enabling in repo settings (user action). Open + doable next:
+  README 60s rewrite, public pool endpoint (needs hosting).
 - [Devin/main-side] DATE MATH + SMALL CLOSES: `date_add(ts, n[, unit])`
   (secs/mins/hours/days/weeks) and `date_fmt(ts[, fmt])` (epoch ->
   civil via shared `civil_from_secs`; `date`/`date_fmt` now share one
