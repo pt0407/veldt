@@ -57,7 +57,20 @@ pub fn execute_source_opts(source: &str, veldt: &mut Veldt, caps: crate::interpr
 /// Shared run pipeline — `use_vm` routes execution through the
 /// bytecode VM + JIT (`/api/run` `{"vm": true}`); same lex/parse/
 /// capture/events semantics as the interpreter path.
+/// Game-session variant — the program runs with a shared GameIo
+/// (browser keys in, frames out) attached to its interpreter.
+pub fn execute_source_game(source: &str, veldt: &mut Veldt,
+    io: std::sync::Arc<crate::interpreter::GameIo>) -> ExecResult {
+    execute_source_opts_full_io(source, veldt,
+        crate::interpreter::Caps::allow_all(), false, Some(io))
+}
+
 pub fn execute_source_opts_full(source: &str, veldt: &mut Veldt, caps: crate::interpreter::Caps, use_vm: bool) -> ExecResult {
+    execute_source_opts_full_io(source, veldt, caps, use_vm, None)
+}
+
+fn execute_source_opts_full_io(source: &str, veldt: &mut Veldt, caps: crate::interpreter::Caps, use_vm: bool,
+    game_io: Option<std::sync::Arc<crate::interpreter::GameIo>>) -> ExecResult {
     let mut output = String::new();
     let mut events = Vec::new();
 
@@ -92,6 +105,7 @@ pub fn execute_source_opts_full(source: &str, veldt: &mut Veldt, caps: crate::in
     interp.caps = caps;
     interp.call_stack.clear();
     veldt.load_into_interpreter(&mut interp);
+    interp.game_io = game_io;
     interp.print_buffer = Some(String::new());
 
     // fast-engine path — same garden, same capture semantics
@@ -2953,11 +2967,20 @@ fn generate_intent(t: &str, words: &[&str], veldt: &mut Veldt) -> AgentResponse 
     // "make a game" — a whole program, not a function: scaffold a
     // playable game (maze + canvas render + ui HUD + bt AI + turn loop)
     // with an evolve-able `game_step` policy the Gardener can breed.
-    if t.contains("game") {
+    if t.contains("game") || t.contains("platformer") || t.contains("topdown") {
         let name = extract_name(words).unwrap_or_else(|| "quest".to_string());
         let path = format!("examples/{}.veldt", name);
         let existed = std::path::Path::new(&path).exists();
-        let src = crate::game_template(&name);
+        // real-time engine games vs ascii-canvas games — platformer/
+        // topdown/realtime keywords route to the 2D engine template
+        let realtime = t.contains("platformer") || t.contains("topdown")
+            || t.contains("realtime") || t.contains("real-time")
+            || t.contains("real time");
+        let src = if realtime {
+            crate::realtime_game_template(&name)
+        } else {
+            crate::game_template(&name)
+        };
         let mut steps = vec![
             step("plan", format!(
                 "Scaffolding playable game `{}` (maze_gen + canvas + ui HUD + bt_tick AI + grow fn game_step).",
@@ -2980,11 +3003,19 @@ fn generate_intent(t: &str, words: &[&str], veldt: &mut Veldt) -> AgentResponse 
         if exec.success {
             steps.push(step("ok", format!("Game `{}` ran and planted `game_step` in the garden.", name)));
         }
-        let reply = format!(
-            "Built playable game `{}` ({}) — maze procgen, HUD, behavior-tree enemy AI, and an evolve-able `game_step` move policy.\n\
-             Run `improve game_step` or click **Evolve AI** in the Canvas viewport to breed a smarter policy.",
-            name, path
-        );
+        let reply = if realtime {
+            format!(
+                "Built a real-time 2D game `{}` ({}) — WASD/arrows drive @ live, a hunter chases, coins + exit, HP. When no keys are held the grown `hero_move` policy auto-plays — the Gardener breeds it.\n\
+                 Play it at /play/{} (studio) or `veldt play {}`; `improve hero_move` evolves the policy.",
+                name, path, name, name
+            )
+        } else {
+            format!(
+                "Built playable game `{}` ({}) — maze procgen, HUD, behavior-tree enemy AI, and an evolve-able `game_step` move policy.\n\
+                 Run `improve game_step` or click **Evolve AI** in the Canvas viewport to breed a smarter policy.",
+                name, path
+            )
+        };
         return AgentResponse {
             steps,
             reply,

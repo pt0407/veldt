@@ -14,6 +14,10 @@ use std::sync::{Arc, Mutex};
 
 struct AppState {
     veldt: Mutex<Veldt>,
+    /// live game sessions — id -> the shared game-io channel
+    /// (input queue + frame buffer + running flag)
+    games: Mutex<std::collections::HashMap<u64, std::sync::Arc<crate::interpreter::GameIo>>>,
+    next_game: std::sync::atomic::AtomicU64,
 }
 
 pub async fn start_server(port: u16) {
@@ -29,11 +33,14 @@ pub async fn start_server(port: u16) {
 
     let state = Arc::new(AppState {
         veldt: Mutex::new(veldt),
+        games: Mutex::new(std::collections::HashMap::new()),
+        next_game: std::sync::atomic::AtomicU64::new(1),
     });
 
     let app = Router::new()
         .route("/", get(serve_ide))
         .route("/site/:name", get(serve_site))
+        .route("/play/:name", get(serve_play))
         .route("/examples/:name", get(serve_example))
         .route("/api/deploy", post(deploy_project))
         .route("/api/garden", get(get_garden))
@@ -47,6 +54,10 @@ pub async fn start_server(port: u16) {
         .route("/api/swarm", post(swarm))
         .route("/api/play", post(play_demo))
         .route("/api/game", post(game_step))
+        .route("/api/game/start", post(game_start))
+        .route("/api/game/frame", get(game_frame))
+        .route("/api/game/input", post(game_input))
+        .route("/api/game/stop", post(game_stop))
         .route("/api/call", post(call_fn))
         .route("/api/adopt", post(adopt_variant))
         .route("/api/verify", post(verify_family))
@@ -864,6 +875,93 @@ async fn tournament(
     Json(serde_json::json!({ "ok": true, "url": req.url }))
 }
 
+// === 2D game sessions — decoupled server loop + browser viewport ===
+
+#[derive(Deserialize)]
+struct GameStartRequest { source: String, name: Option<String> }
+
+/// /api/game/start — spawn a live game session. The veldt program
+/// runs in its own thread with a GameIo attached; frames land in the
+/// shared buffer, browser input flows back into `keys()`.
+async fn game_start(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<GameStartRequest>,
+) -> Json<serde_json::Value> {
+    let id = state.next_game.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let io = crate::interpreter::GameIo::new();
+    state.games.lock().unwrap().insert(id, io.clone());
+    // snapshot the garden — the session's grown fns resolve without
+    // holding the veldt lock for the session's lifetime
+    let mut veldt = state.veldt.lock().unwrap().clone();
+    let cleanup = Arc::clone(&state);
+    std::thread::spawn(move || {
+        let _ = crate::agent::execute_source_game(&req.source, &mut veldt, io.clone());
+        io.running.store(false, std::sync::atomic::Ordering::Relaxed);
+        // leave the last frame readable; drop the session after a beat
+        std::thread::sleep(std::time::Duration::from_secs(30));
+        cleanup.games.lock().unwrap().remove(&id);
+    });
+    Json(serde_json::json!({ "ok": true, "id": id,
+        "name": req.name.unwrap_or_default() }))
+}
+
+/// /api/game/frame?id=N — latest emitted scene JSON, or running:false
+async fn game_frame(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Json<serde_json::Value> {
+    let id: u64 = q.get("id").and_then(|s| s.parse().ok()).unwrap_or(0);
+    let games = state.games.lock().unwrap();
+    match games.get(&id) {
+        Some(io) => {
+            let frame = io.frame.lock().unwrap().clone();
+            Json(serde_json::json!({
+                "ok": true, "id": id,
+                "running": io.running.load(std::sync::atomic::Ordering::Relaxed),
+                "frame": frame,
+            }))
+        }
+        None => Json(serde_json::json!({ "ok": false, "error": "no such session", "running": false })),
+    }
+}
+
+#[derive(Deserialize)]
+struct GameInputRequest { id: u64, keys: Vec<String> }
+
+/// /api/game/input — replace the session's held-key set (the browser
+/// POSTs the current keydown set each poll).
+async fn game_input(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<GameInputRequest>,
+) -> Json<serde_json::Value> {
+    let games = state.games.lock().unwrap();
+    match games.get(&req.id) {
+        Some(io) => {
+            *io.keys.lock().unwrap() = req.keys;
+            Json(serde_json::json!({ "ok": true }))
+        }
+        None => Json(serde_json::json!({ "ok": false, "error": "no such session" })),
+    }
+}
+
+#[derive(Deserialize)]
+struct GameStopRequest { id: u64 }
+
+/// /api/game/stop — end the session (game_running() → false next tick)
+async fn game_stop(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<GameStopRequest>,
+) -> Json<serde_json::Value> {
+    let games = state.games.lock().unwrap();
+    match games.get(&req.id) {
+        Some(io) => {
+            io.running.store(false, std::sync::atomic::Ordering::Relaxed);
+            Json(serde_json::json!({ "ok": true }))
+        }
+        None => Json(serde_json::json!({ "ok": false, "error": "no such session" })),
+    }
+}
+
 async fn stats(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
     let v = { state.veldt.lock().unwrap().clone() };
     let (mut healthy, mut sick, mut dying) = (0usize, 0usize, 0usize);
@@ -1659,6 +1757,14 @@ async fn serve_ide() -> Html<&'static str> {
 
 const IDE_HTML: &str = include_str!("ide.html");
 const SITE_HTML: &str = include_str!("site.html");
+const PLAY_HTML: &str = include_str!("play.html");
+
+/// /play/<name> — the real-time game viewport. The page fetches the
+/// source, starts a /api/game session, streams input in, and paints
+/// the latest frame at ~20fps.
+async fn serve_play() -> Html<&'static str> {
+    Html(PLAY_HTML)
+}
 
 /// /site/<name> — the deployed-program page. The page reads the
 /// program name from its own URL and runs it via /api/play.
