@@ -199,11 +199,25 @@ fn main() {
             }
         }
         "rewrite" => {
-            // veldt rewrite <name#N> — deterministic algorithmic idiom
-            // rewrite (sort-extremum scans, closed-form accumulation,
-            // linsearch -> index_of); births the optimized variant
+            // veldt rewrite <name#N> | --all — deterministic algorithmic
+            // idiom rewrite (sort-extremum scans, closed-form
+            // accumulation, linsearch -> index_of)
             let target = args.get(2).map(|s| s.as_str()).unwrap_or("");
-            rewrite_variant(target);
+            if target == "--all" {
+                let mut veldt = veldt::Veldt::new();
+                if let Err(e) = veldt.load() { eprintln!("Error: {}", e); process::exit(1); }
+                let targets: Vec<(String, u32)> = veldt.functions.iter()
+                    .flat_map(|(n, vs)| vs.iter().map(|e| (n.clone(), e.id)))
+                    .collect();
+                let mut n = 0;
+                for (name, vid) in targets {
+                    if rewrite_one(&mut veldt, &name, vid, true) { n += 1; }
+                }
+                if let Err(e) = veldt.save() { eprintln!("Save error: {}", e); }
+                println!("rewrite --all: {} optimized variants born", n);
+            } else {
+                rewrite_variant(target);
+            }
         }
         "adopt" => {
             if args.len() < 3 {
@@ -5869,6 +5883,41 @@ fn test_family(name: &str) {
     }
 }
 
+/// Shared rewrite path — returns true if a child was born. `quiet`
+/// suppresses output for --all sweeps.
+fn rewrite_one(veldt: &mut veldt::Veldt, name: &str, vid: u32, quiet: bool) -> bool {
+    let entry = match veldt.functions.get(name)
+        .and_then(|vs| vs.iter().find(|e| e.id == vid)) {
+        Some(e) => e.clone(),
+        None => return false,
+    };
+    let mut evolver = evolve::Evolver::new();
+    let new_body = evolver.rewrite_idioms(&entry.body);
+    if format!("{:?}", new_body) == format!("{:?}", entry.body) { return false; }
+    let source = format!("fn {}(...) {{ [idiom rewrite of {}#{}] }}", name, name, vid);
+    let new_id = veldt.grow_function_full(name, entry.params.clone(), new_body,
+        entry.tests.clone(), &source, vec![entry.id],
+        &format!("idiom rewrite of {}#{}", name, vid));
+    let mut new_entry = veldt.functions[name].iter()
+        .find(|e| e.id == new_id).cloned().unwrap();
+    health::HealthChecker::check_at_birth_with(&mut new_entry, veldt, false);
+    if let Some(vs) = veldt.functions.get_mut(name) {
+        for e in vs.iter_mut() {
+            if e.id == new_id { *e = new_entry.clone(); break; }
+        }
+    }
+    if !quiet {
+        println!("{}#{} -> {}#{} born — health {:?}, fitness {:.2}, eff {:.2}x",
+                 name, vid, name, new_id, new_entry.health,
+                 new_entry.fitness, new_entry.efficiency);
+        if new_entry.efficiency > 1.0 {
+            println!("hint: `veldt verify {} --exact` then `veldt adopt {}#{} --exact`",
+                     name, name, new_id);
+        }
+    }
+    true
+}
+
 fn rewrite_variant(target: &str) {
     let (name, vid) = match target.split_once('#') {
         Some((n, i)) => (n.to_string(), i.parse::<u32>().unwrap_or(0)),
@@ -5881,32 +5930,11 @@ fn rewrite_variant(target: &str) {
         Some(e) => e.clone(),
         None => { eprintln!("{}#{} not found", name, vid); process::exit(1); }
     };
-    let mut evolver = evolve::Evolver::new();
-    let new_body = evolver.rewrite_idioms(&entry.body);
-    if format!("{:?}", new_body) == format!("{:?}", entry.body) {
+    if !rewrite_one(&mut veldt, &name, vid, false) {
         println!("{}#{} — no idiom matched; already optimal shape", name, vid);
         return;
     }
-    let source = format!("fn {}(...) {{ [idiom rewrite of {}#{}] }}", name, name, vid);
-    let new_id = veldt.grow_function_full(&name, entry.params.clone(), new_body,
-        entry.tests.clone(), &source, vec![entry.id],
-        &format!("idiom rewrite of {}#{}", name, vid));
-    let mut new_entry = veldt.functions[&name].iter()
-        .find(|e| e.id == new_id).cloned().unwrap();
-    health::HealthChecker::check_at_birth_with(&mut new_entry, &veldt, false);
-    if let Some(vs) = veldt.functions.get_mut(&name) {
-        for e in vs.iter_mut() {
-            if e.id == new_id { *e = new_entry.clone(); break; }
-        }
-    }
     if let Err(e) = veldt.save() { eprintln!("Save error: {}", e); }
-    println!("{}#{} -> {}#{} born — health {:?}, fitness {:.2}, eff {:.2}x",
-             name, vid, name, new_id, new_entry.health,
-             new_entry.fitness, new_entry.efficiency);
-    if new_entry.efficiency > 1.0 {
-        println!("hint: `veldt verify {} --exact` then `veldt adopt {}#{} --exact`",
-                 name, name, new_id);
-    }
 }
 
 fn adopt_variant(target: &str) {
