@@ -114,6 +114,8 @@ pub struct Interpreter {
     pub game_io: Option<std::sync::Arc<GameIo>>,
     /// ent_def registry — registered entity types for the `spawn` DSL
     pub ent_defs: HashMap<String, im::HashMap<String, Value>>,
+    /// unique-name counter for spawned/projectile entities (bullet1, bullet2…)
+    pub entity_counter: u64,
 }
 
 /// Shared state for a live game session: browser key events in,
@@ -251,6 +253,7 @@ impl Interpreter {
             caps: Caps::allow_all(),
             game_io: None,
             ent_defs: HashMap::new(),
+            entity_counter: 0,
         }
     }
 
@@ -2978,6 +2981,28 @@ impl Interpreter {
                     _ => Vec::new(),
                 };
                 Ok(Some(Value::List(hits.into())))
+            }
+            "bullet" | "projectile" => {
+                // bullet(x, y, vx, vy, sprite) → a moving projectile entity —
+                // the shooter's shot. vx/vy carry it; the game moves it each
+                // tick (integrate) and kills it on collide_any/off-screen.
+                let (x, y, vx, vy, sprite) = match (args.get(0), args.get(1), args.get(2), args.get(3), args.get(4)) {
+                    (Some(x), Some(y), Some(vx), Some(vy), Some(sp)) =>
+                        (Self::num_f(x)?, Self::num_f(y)?, Self::num_f(vx)?, Self::num_f(vy)?,
+                         match sp { Value::Str(s) => s.to_string(), _ => "bullet".into() }),
+                    _ => return Err("bullet(x, y, vx, vy, sprite) expects 4 nums + sprite".into()),
+                };
+                let mut e: im::HashMap<String, Value> = im::HashMap::new();
+                let id = self.entity_counter; self.entity_counter += 1;
+                e.insert("name".into(), Value::Str(format!("bullet{}", id).into()));
+                e.insert("x".into(), Value::Float(x));
+                e.insert("y".into(), Value::Float(y));
+                e.insert("vx".into(), Value::Float(vx));
+                e.insert("vy".into(), Value::Float(vy));
+                e.insert("sprite".into(), Value::Str(sprite.into()));
+                e.insert("tag".into(), Value::Str("projectile".into()));
+                e.insert("kind".into(), Value::Str("bullet".into()));
+                Ok(Some(Value::Dict(e)))
             }
             "move_toward" | "approach" => {
                 // move_toward(e, tx, ty, speed) — step the entity toward a
