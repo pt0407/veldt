@@ -107,7 +107,7 @@ loads the garden. **Only garden-persisted functions can be spawned.**
 `veldt pull <url> --merge` adds immigrants (provenance-tagged);
 `veldt search <url> <name>` query families;
 `veldt evolve N --seed S` deterministic evolution;
-`veldt rewrite <name#N>` deterministic algorithmic idiom rewrite —
+`veldt rewrite <name#N>` / `veldt rewrite --all` (garden-wide sweep) deterministic idiom rewrite —
   sort-extremum -> O(n) scan, accumulate loop -> closed form,
   linsearch -> index_of; births the optimized variant;
 `veldt repl` `:load <file>` runs a file in the session.
