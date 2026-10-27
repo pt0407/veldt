@@ -3280,6 +3280,31 @@ impl Interpreter {
                 d2.insert("camera_y".into(), Value::Float(y));
                 Ok(Some(Value::Dict(d2)))
             }
+            "camera_follow" => {
+                // camera_follow(state, e, deadzone) — the camera tracks the
+                // entity's position, keeping it inside a dead-zone box before
+                // scrolling (so it doesn't jitter per-pixel). Real scrolling.
+                let (d, e, dz) = match (args.get(0), args.get(1), args.get(2)) {
+                    (Some(Value::Dict(d)), Some(Value::Dict(e)), Some(dz)) =>
+                        (d.clone(), e.clone(), Self::num_f(dz)?),
+                    _ => return Err("camera_follow(state, e, deadzone) expects dict + dict + num".into()),
+                };
+                let ex = e.get("x").map(|v| Self::num_f(v).unwrap_or(0.0)).unwrap_or(0.0);
+                let ey = e.get("y").map(|v| Self::num_f(v).unwrap_or(0.0)).unwrap_or(0.0);
+                let w = d.get("w").map(|v| Self::num_f(v).unwrap_or(20.0)).unwrap_or(20.0);
+                let h = d.get("h").map(|v| Self::num_f(v).unwrap_or(12.0)).unwrap_or(12.0);
+                let mut cx = d.get("camera_x").map(|v| Self::num_f(v).unwrap_or(0.0)).unwrap_or(0.0);
+                let mut cy = d.get("camera_y").map(|v| Self::num_f(v).unwrap_or(0.0)).unwrap_or(0.0);
+                // dead-zone: scroll only when the entity passes the edge margin
+                if ex - cx > w - dz { cx = ex - (w - dz); }
+                if ex - cx < dz { cx = ex - dz; }
+                if ey - cy > h - dz { cy = ey - (h - dz); }
+                if ey - cy < dz { cy = ey - dz; }
+                let mut d2 = d.clone();
+                d2.insert("camera_x".into(), Value::Float(cx.max(0.0)));
+                d2.insert("camera_y".into(), Value::Float(cy.max(0.0)));
+                Ok(Some(Value::Dict(d2)))
+            }
             "canvas_ellipse" => {
                 // canvas_ellipse(c, cx, cy, rx, ry, ch) — parametric ellipse
                 let (d, cx, cy, rx, ry, ch) = match (args.get(0), args.get(1), args.get(2), args.get(3), args.get(4), args.get(5)) {
