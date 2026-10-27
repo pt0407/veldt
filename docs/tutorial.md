@@ -67,3 +67,28 @@ veldt tournament http://box:7878     # trial everyone, crown winners
 Tournaments are how strains spread: the pool's champions become the
 canonical "world's fittest" implementations — shared probes, one
 fitness function, no central authority deciding what's good.
+
+## 7. The headline: evolve an O(n log n) program into O(n)
+
+Seed a deliberately slow implementation, let the garden do the rest:
+
+```bash
+cat > slow.veldt <<'V'
+grow fn max_val(xs: list<int>) test max_val([3,1,2]) == 3 {
+    let s = xs.sort()
+    let r = s.reverse()
+    return r[0]
+}
+V
+veldt run slow.veldt
+veldt rewrite max_val#1      # deterministic idiom rewrite — births
+                             # an O(n) linear-scan variant
+veldt verify max_val --exact # Z3 proves the two algorithms equivalent
+veldt adopt max_val#2 --exact  # promote the proven-faster variant
+```
+
+`rewrite` recognizes `xs.sort().reverse()[0]` / `xs.sort()[0]` /
+`[-1]` / `[len-1]` (max/min scans), `total += k` accumulate loops
+(closed form), and hand-rolled linear search (`-> index_of`), plus
+`x.reverse().reverse() -> x` via simplification. Random `evolve`
+cycles reach for the same rewrite automatically.
