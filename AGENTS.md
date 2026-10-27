@@ -1494,3 +1494,12 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   examples/playable.veldt: WASD topdown — verified input moves
   the player through the session. Phase D (game species in
   agent catalog) is next.
+- [Devin/main-side] 2D ENGINE PHASE D — the game library:
+  realtime_game_template(name) + agent "make a platformer /
+  topdown / real-time game" scaffolds a LIVE 2D game on the
+  engine builtins (game_new/entity/keys/game_frame/game_running).
+  WASD drives @, releases to the grown hero_move policy (auto-
+  play) — the Gardener breeds it (improve hero_move). Plain
+  "make a game" still scaffolds ascii. Fixed abs() for Float.
+  The engine is done: input + real-time + frames + sprites +
+  collisions all real. Playable: /play/<name> in studio.
