@@ -786,9 +786,27 @@ fn expr_to_smt_raw(
                     let n = f.apply(&[&Dynamic::from(arr.clone())]);
                     Some(SymVal::Scalar(n.as_int().or_else(|| { state.note("dict_len non-int"); None })?.eq(Int::from_i64(0)).into()))
                 }
-                (SymVal::Dict(_), "keys", 0) | (SymVal::Dict(_), "values", 0) => {
-                    state.note("dict.keys/values — heterogeneous list unencodable");
-                    return None;
+                // keys()/values() over the store-spine — construct-time
+                // dicts have static keys; symbolic param dicts bail
+                (SymVal::Dict(arr), "keys", 0) => {
+                    let ks = dict_keys(&arr);
+                    if ks.is_empty() {
+                        state.note("dict.keys on symbolic dict");
+                        return None;
+                    }
+                    Some(SymVal::List(
+                        ks.into_iter().map(SymVal::Scalar).collect()))
+                }
+                (SymVal::Dict(arr), "values", 0) => {
+                    let ks = dict_keys(&arr);
+                    if ks.is_empty() {
+                        state.note("dict.values on symbolic dict");
+                        return None;
+                    }
+                    Some(SymVal::List(
+                        ks.into_iter()
+                            .map(|k| SymVal::Scalar(arr.select(&k)))
+                            .collect()))
                 }
                 // expr-level put/set — dict().put(k,v).put(k2,v2) chains
                 (SymVal::Dict(arr), "put", 2) | (SymVal::Dict(arr), "set", 2) => {
