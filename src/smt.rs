@@ -395,7 +395,7 @@ fn exec_one(
                 if let Some(eb) = else_stmts {
                     run_sub!(else_st, eb);
                 }
-                *state = merge_states(&c, then_st, else_st)?;
+                *state = match merge_states(&c, then_st, else_st) { Some(x) => x, None => { state.note("if-arm merge sort-mismatch"); return None; } };
             }
             Stmt::Match(scrutinee, arms, else_arm) => {
                 let sv = expr_to_smt(scrutinee, state, veldt, fuel)?;
@@ -413,8 +413,8 @@ fn exec_one(
                         }
                     };
                     run_sub!(arm_st, body);
-                    let c = sv.eq_val(&pv)?;
-                    cur = merge_states(&c, arm_st, cur)?;
+                    let c = match sv.eq_val(&pv) { Some(x) => x, None => { state.note("match arm sort-mismatch"); return None; } };
+                    cur = match merge_states(&c, arm_st, cur) { Some(x) => x, None => { state.note("match-arm merge sort-mismatch"); return None; } };
                 }
                 *state = cur;
             }
@@ -428,7 +428,7 @@ fn exec_one(
                     try_st.err = outer_err;
                     let mut catch_st = state.clone();
                     run_sub!(catch_st, catch_stmts);
-                    *state = merge_states(&err_c, catch_st, try_st)?;
+                    *state = match merge_states(&err_c, catch_st, try_st) { Some(x) => x, None => { state.note("try/catch merge sort-mismatch"); return None; } };
                 } else {
                     try_st.err = outer_err;
                     *state = try_st;
@@ -443,7 +443,7 @@ fn exec_one(
                     let mut body_st = state.clone();
                     body_st.env.insert(var.clone(), item);
                     run_sub!(body_st, body);
-                    *state = merge_states(&go, body_st, state.clone())?;
+                    *state = match merge_states(&go, body_st, state.clone()) { Some(x) => x, None => { state.note("loop merge sort-mismatch"); return None; } };
                 }
             }
             Stmt::While(cond, body) => {
@@ -457,7 +457,7 @@ fn exec_one(
                     }
                     let mut body_st = state.clone();
                     run_sub!(body_st, body);
-                    *state = merge_states(&go, body_st, state.clone())?;
+                    *state = match merge_states(&go, body_st, state.clone()) { Some(x) => x, None => { state.note("loop merge sort-mismatch"); return None; } };
                 }
                 let c_after = expr_to_smt(cond, state, veldt, fuel)?
                     .into_scalar().or_else(|| { state.note("aggregate where scalar expected"); None })?
