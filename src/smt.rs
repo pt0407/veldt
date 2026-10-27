@@ -430,7 +430,7 @@ fn exec_one(
                                     rebound = true;
                                 }
                             }
-                            ("remove", 1) => {
+                            ("remove", 1) | ("delete", 1) => {
                                 if let Some(SymVal::Dict(arr)) =
                                     state.env.get(n).cloned()
                                 {
@@ -871,7 +871,7 @@ fn expr_to_smt_raw(
                     };
                     Some(SymVal::Dict(arr.store(&k, &vw)))
                 }
-                (SymVal::Dict(arr), "remove", 1) => {
+                (SymVal::Dict(arr), "remove", 1) | (SymVal::Dict(arr), "delete", 1) => {
                     let k = expr_to_smt(&args[0], state, veldt, fuel)?
                         .into_scalar().or_else(|| { state.note("dict key non-scalar"); None })?;
                     let va = vany();
