@@ -3076,7 +3076,8 @@ fn generate_intent(t: &str, words: &[&str], veldt: &mut Veldt) -> AgentResponse 
     if t.contains("game") || t.contains("platformer") || t.contains("topdown")
         || t.contains("shooter") || t.contains("shmup") || t.contains("shoot-'em-up")
         || t.contains("snake") || t.contains("worm") || t.contains("slither")
-        || t.contains("breakout") || t.contains("pong") || t.contains("brick") {
+        || t.contains("breakout") || t.contains("pong") || t.contains("brick")
+        || t.contains("racer") || t.contains("racing") || t.contains("drive") {
         let name = extract_name(words).unwrap_or_else(|| "quest".to_string());
         let path = format!("examples/{}.veldt", name);
         let existed = std::path::Path::new(&path).exists();
@@ -3093,6 +3094,8 @@ fn generate_intent(t: &str, words: &[&str], veldt: &mut Veldt) -> AgentResponse 
         let snake = t.contains("snake") || t.contains("worm") || t.contains("slither");
         let breakout = t.contains("breakout") || t.contains("pong")
             || t.contains("brick") || t.contains("paddle");
+        let racer = t.contains("racer") || t.contains("racing")
+            || t.contains("race") || t.contains("drive");
         let src = if platformer {
             crate::platformer_template(&name)
         } else if shooter {
@@ -3101,6 +3104,8 @@ fn generate_intent(t: &str, words: &[&str], veldt: &mut Veldt) -> AgentResponse 
             crate::snake_template(&name)
         } else if breakout {
             crate::breakout_template(&name)
+        } else if racer {
+            crate::racer_template(&name)
         } else if realtime {
             crate::realtime_game_template(&name)
         } else {
