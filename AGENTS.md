@@ -1369,3 +1369,11 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   (honest trials made births stochastic), vm_all_examples_run
   seeds hello.veldt first + writes the pipeline fixture —
   parity 10/10.
+- [Devin/main-side] GAME GENERATION: `veldt game new <name>` and
+  `agent "make a game [called NAME]"` both scaffold a complete
+  playable game (maze_gen + canvas + ui HUD + bt AI + 30-turn
+  loop) with a `grow fn game_step` evolve-able policy — the
+  missing "can it make games" piece. The seed policy is greedy
+  toward the exit; evolution breeds it (game_step#3 hit 1.60 in
+  the demo). Games were hand-authored + evolved before; now
+  they're generated with the AI policy as the breedable core.
