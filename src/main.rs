@@ -506,6 +506,36 @@ fn main() {
             run_program(&path, args.iter().any(|a| a == "--trace"),
                 args.iter().any(|a| a == "--evolve"));
         }
+        "sim" => {
+            // veldt sim <game> — a headless playthrough that reports the
+            // REAL outcome (won? score? turns?) — the sim-fitness primitive
+            // evolution needs to breed policies that win, not proxy-fit.
+            if args.len() < 3 {
+                eprintln!("Usage: veldt sim <game>  (examples/<game>.veldt)");
+                process::exit(1);
+            }
+            let path = format!("examples/{}.veldt", args[2]);
+            if !std::path::Path::new(&path).exists() {
+                eprintln!("No game '{}' — try: climb, hunt, rogue, snek, blaster", args[2]);
+                process::exit(1);
+            }
+            let out = run_program_capture(&path);
+            // surface the game's verdict line — won/lost, score, hp, turns
+            let verdict = out.lines().rev()
+                .find(|l| l.contains("escaped") || l.contains("devoured")
+                    || l.contains("finished") || l.contains("score")
+                    || l.contains("won") || l.contains("cleared")
+                    || l.contains("shot down") || l.contains("bit itself"));
+            let won = out.contains("escaped") || out.contains("cleared")
+                || (out.contains("won=true") && !out.contains("won=false"));
+            let score = out.lines().rev()
+                .find_map(|l| l.split("score ").nth(1)
+                    .or_else(|| l.split("score=").nth(1))
+                    .and_then(|s| s.trim_end_matches(']').split(' ').next().map(String::from)))
+                .unwrap_or_else(|| "0".into());
+            println!("{{\"game\":\"{}\",\"won\":{},\"score\":\"{}\",\"verdict\":\"{}\"}}",
+                     args[2], won, score, verdict.unwrap_or("no verdict"));
+        }
         "tournament" => {
             if args.len() < 3 {
                 eprintln!("Usage: veldt tournament <url> [name]  (pull, trial, crown winners, push back)");
