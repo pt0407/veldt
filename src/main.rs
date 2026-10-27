@@ -502,8 +502,20 @@ fn main() {
             // maze_gen + canvas render + ui HUD + bt AI + a turn loop,
             // with a grow fn `game_step` the Gardener can breed/improve.
             if args.len() < 4 || args[2] != "new" {
-                eprintln!("Usage: veldt game new <name>");
+                eprintln!("Usage: veldt game new <name> [--topdown|--platformer|--shooter|--snake]");
                 process::exit(1);
+            }
+            // --list/--genres — the available game-genre templates + their
+            // evolve-able policy fn (what the Gardener breeds)
+            if args.iter().any(|a| a == "--list" || a == "--genres") {
+                println!("veldt game genres — `veldt game new <name> --<genre>`:");
+                println!("  (default)   ascii turn-based — grow fn game_step");
+                println!("  --topdown   real-time topdown (chase/flee) — hero_move");
+                println!("  --platformer side-scroller (gravity+jump) — plat_move");
+                println!("  --shooter   shoot-'em-up (bullets+cooldown) — shoot_policy");
+                println!("  --snake     growing tail (self-collision) — snake_dir");
+                println!("\neach grows a policy the Gardener breeds — `veldt evolve --sim <game>`");
+                return;
             }
             let name = &args[2 + 1];
             let path = format!("examples/{}.veldt", name);
