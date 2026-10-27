@@ -1,0 +1,26 @@
+# webhook.veldt — Veldt as a general language: a tiny web service.
+# A request router that classifies incoming JSON events and grows
+# the handler policy — the evolved part is the routing decision.
+
+grow fn route_event(kind: str, payload: dict)
+        test route_event("ping", dict()) == "pong" {
+    # seed policy: match the kind, call the right handler
+    if kind == "ping" { return "pong" }
+    if kind == "alert" { return "alerting ops" }
+    if kind == "metric" { return "metric logged" }
+    return "dropped"
+}
+
+# --- the service ---
+let events = [
+    ["ping", dict()], ["alert", dict()], ["metric", dict()],
+    ["spam", dict()], ["ping", dict()],
+]
+let i = 0
+while i < events.len() {
+    let e = events[i]
+    let kind = e[0]
+    let resp = route_event(kind, e[1])
+    print(kind + " -> " + resp)
+    i = i + 1
+}

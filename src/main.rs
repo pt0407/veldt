@@ -2777,6 +2777,20 @@ fn scaffold(dir: &str) {
 
 main()
 "#).unwrap();
+    // veldt.toml — a project manifest (name, entry, version) so a
+    // project is a real thing, not just a loose file
+    let proj = std::path::Path::new(dir).file_name()
+        .and_then(|s| s.to_str()).unwrap_or("project");
+    std::fs::write(path.join("veldt.toml"), &format!(r#"# veldt project
+[project]
+name = "{}"
+version = "0.1.0"
+entry = "main.veldt"
+
+[deploy]
+# `veldt deploy` -> live at <host>/site/<name>
+name = "{}"
+"#, proj, proj)).unwrap_or_else(|e| eprintln!("manifest: {}", e));
     std::fs::write(path.join("README.md"),
         format!("# {}\n\nveldt app — `veldt run main.veldt` to start\n", dir)).unwrap();
     println!("Created {} — run: veldt run {}/main.veldt", dir, dir);
@@ -2845,6 +2859,18 @@ fn print_help(topic: Option<&str>) {
         "evolve" => "veldt evolve [N] [--llm] [--seed N] [--until F|--until-fam name:F]\n  live call traces auto-absorb into probes first — evidence feeds selection",
         "garden" => "veldt garden [--sick|--obituaries|--json|--filter <expr>] — census\n  --family <name> — one lineage's census (+ --detail for the full dashboard)\n  --filter <expr> — composable query: fields fitness age usage size args\n    lifespan last_used niches health trust origin calls; ops > < >= <= == != ~\n    `&&` for AND, `||` for OR. e.g. --filter \"fitness > 1.5 && age < 100\"\n  veldt lineage <name> · veldt stats [--json] [--brief] [--top|--detail] [--family <n>] [--filter <expr>] [--sort <field>] · veldt test <name>|--all\n  veldt adopt <name#N> · veldt fuzz <name>|--all · veldt find <substr>\n  veldt diff <a#n> <b#n> · veldt absorb · veldt tournament <url>",
         "builtins" => "len type str int float print eprint input read_stdin args exit\n  abs max min round floor ceil sqrt pow rand date now sleep env\n  fetch post serve match_path read_file write_file ls exists\n  dict get put has keys values items merge delete get_or\n  re_match re_find re_replace re_split re_captures format\n  canvas_* grid_* ui_* bt_* balance_* astar* bfs los fov turn fsm_next\n  rand* roll dice choice weighted_choice noise2 fbm perlin poisson_disc\n  voronoi delaunay wfc maze_gen flood_fill neighbors lerp clamp dist aabb\n  smoothstep bezier point_in_poly convex_hull ease_* bounce line_points",
+        "game" | "engine" => "veldt's 2D game engine — real-time playable games\n  \
+  game_new(w,h) scene state · entity(name,x,y,sprite) objects ·\n  \
+  ent_move/ent_vel move+velocity · collide(a,b) AABB · collide_tile(e,map) ·\n  \
+  tile_at/tile_solid terrain read · on_ground grounded check ·\n  \
+  physics_tick(e,map,grav) gravity+jump+land · camera_xy scrolling ·\n  \
+  keys() held-key poll · game_frame(state,entities,hud,map?) emit scene ·\n  \
+  game_running() session-alive · sleep(ms) pacing ·\n  \
+  scene_new/spawn/despawn/entities/find entity management ·\n  \
+  anim(e,frames)+anim_tick sprite animation · sfx(name)/beep audio ·\n  \
+  game_over/ui_menu/ui_prompt overlays\n\
+  play: `veldt studio` -> /play/<name> (WASD real-time) · /site/<name> (watch)\n\
+  templates: `agent \"make a game/topdown/platformer\"` · improve hero_move/plat_move",
         "strings" => "s.len() s.trim() s.ltrim() s.rtrim() s.to_lower() s.to_upper()\n  s.split(sep) s.replace(a,b) s.contains(x) s.starts_with(p) s.ends_with(p)\n  s.chars() s.repeat(n) s.pad(n[,ch]) s.split_at(i) s[a:b]",
         "lists" => "xs.len() xs.push(v) xs.pop() xs.contains(v) xs.join(sep)\n  xs.enumerate() xs.zip(ys) xs.flatten() xs.take(n) xs.skip(n)\n  xs.sort() xs.sort_by(f) xs.group_by(f) xs.min_by(f) xs.max_by(f)\n  xs.reverse() xs.index_of(v) xs[a:b] xs[-1]",
         "types" => "int float str bool list dict set null fn — types are advisory docs\n  `x in xs` membership · `??` null-coalesce · `?.` safe access · `|>` pipe",
@@ -2852,7 +2878,7 @@ fn print_help(topic: Option<&str>) {
         "sandbox" => "veldt run --sandbox <file> · veldt watch <file> --sandbox — Stage-0 caps (fs/net/proc denied)\n  sandbox_run(\"fn\", args) builtin · shadow_call(\"fn\", args) — all variants run sandboxed\n  Trials/probes/fuzz already run sandboxed — untrusted code can't touch the host",
         "filter" => "--filter <expr> — the variant query DSL (usable in garden/evolve/stats/test/fuzz/find/lineage/adopt/diff/verify/bench/tournament/absorb + /api/filter)\n  fields: fitness age usage size args lifespan last_used niches born trial_score\n          efficiency parents healing health trust origin calls family niche:<name>\n  ops: > < >= <= == != ~ (contains) | connectors: && (AND) || (OR) | prefix ! or 'not ' (NOT)\n  e.g. --filter \"family == fib && fitness > 1.5\" · \"niche:int:big > 0.5\" · \"!health == sick\"\n  --sort <field> — sort variants (garden/stats/lineage/find/evolve + /api/filter?sort=)\n  fields: fitness age usage size args lifespan last_used niches fit_rate usage_rate\n          size_rate efficiency niche_score id origin health trust born trial_score\n          efficiency parents healing niche:<name> | e.g. --sort fit_rate",
         "lint" | "check" => "veldt check <file> [--strict] [--json|--watch|--fail] — parse + ~91-check lint\n  veldt check - --strict — read the program from stdin\n  veldt check --suppress <s> — drop warnings containing <s> (repeatable)\n  veldt check --garden [family] — lint every variant body\n  veldt check --garden --bugs — defect-class warnings only\n  veldt check --garden --fix [--verify] — repair dead code (+ re-trial)\n  veldt check --garden --watch — re-lint on garden saves\n  veldt fix <file> [--check] — same repairs on a source file (in-place + fmt)\n  veldt stats --lint — garden census (defect split + top warning kinds)\n  veldt adopt <name#N> --lint — refuse to promote defect-carrying variants\n  veldt tend [family] — heal sick variants on demand\n  veldt evolve --tend — self-maintaining cycles (heal + clean per cycle)\n  veldt bench --lint — strict-lint timing per file + garden census\n  evolve rejects mutants introducing defect warnings ([LINT] events)",
-        _ => "veldt help <topic> — run, repl, agent, evolve, garden, builtins, strings, lists, types, registry, sandbox, filter, lint",
+        _ => "veldt help <topic> — run, repl, agent, evolve, garden, builtins, strings, lists, types, registry, sandbox, filter, lint, game",
     };
     println!("{}", text);
 }
@@ -6062,6 +6088,7 @@ fn verify_family(name: &str, args: &[String]) {
     }
     let mut checked = 0;
     let mut results: Vec<serde_json::Value> = Vec::new();
+    let mut demoted_ids: Vec<u32> = Vec::new();
     for v in &variants {
         if v.id == fittest.id { continue; }
         let mut diverge: Option<String> = None;
@@ -6112,6 +6139,7 @@ fn verify_family(name: &str, args: &[String]) {
                 } else {
                     println!("  {}#{}: DIVERGES {}", name, v.id, d);
                 }
+                demoted_ids.push(v.id);
             }
             None => {
                 if json {
@@ -6122,6 +6150,31 @@ fn verify_family(name: &str, args: &[String]) {
                     println!("  {}#{}: bounded-verified ({} checks)",
                              name, v.id, n_combos);
                 }
+            }
+        }
+    }
+    // --quarantine — a divergent variant can't be trusted for the family's
+    // real signature; demote it to Dying so call_best stops dispatching to it.
+    let quarantine = args.iter().any(|a| a == "--quarantine");
+    if quarantine {
+        if demoted_ids.is_empty() {
+            println!("nothing divergent to quarantine");
+        } else {
+            let mut veldt = veldt::Veldt::new();
+            match veldt.load() {
+                Ok(()) => {
+                    if let Some(vs) = veldt.functions.get_mut(name) {
+                        for v in vs.iter_mut() {
+                            if demoted_ids.contains(&v.id) {
+                                v.health = veldt::Health::Dying;
+                            }
+                        }
+                    }
+                    let _ = veldt.save();
+                    println!("quarantined (Dying): {:?}",
+                             demoted_ids.iter().map(|i| format!("{}#{}", name, i)).collect::<Vec<_>>());
+                }
+                Err(e) => eprintln!("quarantine skipped — garden load: {}", e),
             }
         }
     }
@@ -6444,6 +6497,10 @@ fn run_program(path: &str, trace: bool, evolve_after: bool) {
         interp.argv = all_args[pos+1..].to_vec();
     }
     veldt.load_into_interpreter(&mut interp);
+    // attach a GameIo so `veldt play <game>` actually runs the session —
+    // game_running() true, keys() empty (auto-policy drives), game_frame
+    // writes the scene buffer we can surface.
+    interp.game_io = Some(interpreter::GameIo::headless());
 
     // Run the program
     let run_res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(

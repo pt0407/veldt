@@ -624,6 +624,7 @@
     <button class="btn" id="lintBtn" title="strict-lint census across the garden">Lint</button>
     <button class="btn" id="fixBtn" title="mechanically repair dead code in the buffer">Fix</button>
     <button class="btn" id="gameBtn" title="run the editor as a game program">Game</button>
+    <button class="btn" id="deployBtn" title="publish the open file — live at /site/<name> + /play/<name>">Deploy</button>
     <button class="btn danger" id="clearBtn">Clear Garden</button>
     <button class="btn primary" id="runBtn">▶ Run</button>
     <label style="font-size:11px;opacity:.7;margin-left:6px"><input type="checkbox" id="sandboxChk"> sandbox</label>
@@ -1798,6 +1799,23 @@ document.getElementById('agentInput').addEventListener('keydown', e => {
   if (e.key === 'Enter') sendAgentTask();
 });
 document.getElementById('runBtn').addEventListener('click', runProgram);
+
+// Deploy — publish the open file to the server; live at /site/<name>
+// (watch) and /play/<name> (real-time). The button prints the URL.
+document.getElementById('deployBtn').addEventListener('click', async () => {
+  const name = (document.getElementById('fileSelector').value || 'scratch')
+    .replace(/\.veldt$/, '');
+  const source = editor.getValue();
+  const out = document.getElementById('outputLines');
+  out.innerHTML = `<div class="output-line info">deploying ${name}…</div>`;
+  const res = await fetch('/api/deploy', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, source }) });
+  const d = await res.json();
+  out.innerHTML += d.ok
+    ? `<div class="output-line">deployed — <a href="${d.site}" target="_blank">${d.site}</a> · <a href="/play/${name}" target="_blank">/play/${name}</a> (real-time)</div>`
+    : `<div class="output-line err">deploy failed — ${d.error || 'unknown'}</div>`;
+});
 document.getElementById('evolveBtn').addEventListener('click', evolve);
 document.getElementById('fuzzBtn').addEventListener('click', async () => {
   const name = prompt('Fuzz which family?', lastFamily || 'fib');

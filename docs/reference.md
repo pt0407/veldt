@@ -265,6 +265,38 @@ isolation; its functions+vars are exposed as a dict of closures.
 Search: relative to file, then `VELDTPATH`, then shipped `stdlib/`.
 
 
+## 2D game engine
+
+Veldt has a real-time 2D game engine — a program runs its own loop server-side while a browser viewport (`/play/<name>`) paints frames and streams keyboard input back. Decoupled architecture: the program free-runs writing frames to a shared buffer, the browser samples the latest frame at ~20fps.
+
+| Builtin | Signature | Purpose |
+|---|---|---|
+| `game_new` | `game_new(w, h)` | World/scene state dict (dims + camera) |
+| `entity` | `entity(name, x, y, sprite)` | An actor `{name,x,y,sprite,vx,vy,tag}` |
+| `ent_move` / `ent_vel` | `ent_move(e, dx, dy)` / `ent_vel(e, vx, vy)` | Move / set velocity |
+| `collide` | `collide(a, b)` | Entity AABB overlap |
+| `collide_tile` | `collide_tile(e, map)` | Entity inside a solid map cell |
+| `tile_at` / `tile_solid` | `tile_at(map, x, y)` / `tile_solid(map, x, y)` | Read / test a terrain cell |
+| `on_ground` | `on_ground(e, map)` | The cell below is solid — grounds jump |
+| `physics_tick` | `physics_tick(e, map, grav)` | Gravity + land (scan-traversed rows, no tunneling) |
+| `camera_xy` | `camera_xy(state, x, y)` | Viewport scroll offset |
+| `keys` | `keys()` | Held key list from the browser input queue |
+| `game_frame` | `game_frame(state, entities, hud, map?)` | Emit the scene JSON |
+| `game_running` | `game_running()` | The session is alive |
+| `sleep` | `sleep(ms)` | Frame pacing |
+| `scene_new`/`scene_spawn`/`scene_despawn`/`scene_entities`/`scene_find` | managed entity set | A scene dict rather than hand-built dicts |
+| `anim` / `anim_tick` | `anim(e, frames)` / `anim_tick(e)` | Sprite frame animation |
+| `sfx` / `beep` | `sfx(name)` / `beep(freq, ms)` | Named tone events (WebAudio in browser, bell in CLI) |
+| `game_over` / `ui_menu` / `ui_prompt` | hud-markers | Win/lose overlay, menus, prompts |
+
+**Sessions**: `POST /api/game/start {source, name}` spawns a session → `GET /api/game/frame?id=` reads the latest scene → `POST /api/game/input {id, keys}` streams keys → `POST /api/game/stop {id}` ends it. The program's `keys()`/`game_frame`/`game_running` builtins bind to that session.
+
+**Templates**: `agent "make a game"` (ascii) · `agent "make a topdown"` / `"make a platformer"` (real-time engine) — the grown `hero_move`/`plat_move` policy auto-plays when no keys are held and is a `veldt improve`/`evolve` target.
+
+**Deploy**: `veldt deploy <file> [--to URL]` puts a program on a running server — live at `/site/<name>` (watch) or `/play/<name>` (real-time). `veldt pack <file>`/`veldt install <file|url>` bundle source + garden for sharing.
+
+---
+
 ## Equivalence verification & honesty boundary (`--verify` vs `--exact`)
 
 Veldt provides two verification tiers for checking whether variants in a family compute the same function as the fittest variant before promoting them to `Canonical` trust:

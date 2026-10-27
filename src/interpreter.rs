@@ -125,6 +125,12 @@ pub struct GameIo {
     pub sfx: std::sync::Mutex<Vec<String>>,
     /// session alive — game_running() polls this; /api/game/stop clears it
     pub running: std::sync::atomic::AtomicBool,
+    /// headless render — `veldt play` sets this so game_frame paints the
+    /// scene to the terminal instead of buffering it for a browser
+    pub cli_render: std::sync::atomic::AtomicBool,
+    /// headless frame counter — after a cap, the session ends so a
+    /// non-winnable game doesn't flood the terminal forever
+    pub frames: std::sync::atomic::AtomicU64,
 }
 
 impl GameIo {
@@ -134,7 +140,15 @@ impl GameIo {
             frame: std::sync::Mutex::new(None),
             sfx: std::sync::Mutex::new(Vec::new()),
             running: std::sync::atomic::AtomicBool::new(true),
+            cli_render: std::sync::atomic::AtomicBool::new(false),
+            frames: std::sync::atomic::AtomicU64::new(0),
         })
+    }
+    /// `veldt play` — headless session: the loop runs, frames render to stdout
+    pub fn headless() -> std::sync::Arc<Self> {
+        let g = Self::new();
+        g.cli_render.store(true, std::sync::atomic::Ordering::SeqCst);
+        g
     }
 }
 
@@ -1100,6 +1114,30 @@ impl Interpreter {
 
     /// is the cell at (x,y) of a canvas/map dict solid? Solid = any
     /// non-floor char — walls/platforms/terrain; out-of-bounds is solid.
+    /// closest_name — the "did you mean" suggestion for an undefined fn.
+    /// A plain Levenshtein over candidate names; closest within a small
+    /// threshold (2 edits short names, 3 for longer).
+    fn closest_name<'a>(name: &str, cands: impl Iterator<Item = &'a str>) -> Option<&'a str> {
+        let lev = |a: &str, b: &str| -> usize {
+            let (a, b) = (a.as_bytes(), b.as_bytes());
+            let mut row: Vec<usize> = (0..=b.len()).collect();
+            for (i, &ca) in a.iter().enumerate() {
+                let mut prev = row[0];
+                row[0] = i + 1;
+                for (j, &cb) in b.iter().enumerate() {
+                    let old = row[j + 1];
+                    row[j + 1] = (prev + usize::from(ca != cb)).min(row[j] + 1).min(row[j + 1] + 1);
+                    prev = old;
+                }
+            }
+            row[b.len()]
+        };
+        let thresh = if name.len() <= 6 { 2 } else { 3 };
+        cands.map(|c| (c, lev(name, c)))
+            .filter(|(_, d)| *d <= thresh && *d > 0)
+            .min_by_key(|(_, d)| *d).map(|(c, _)| c)
+    }
+
     fn cell_solid(d: &im::HashMap<String, Value>, x: i64, y: i64) -> bool {
         let Some(Value::List(rows)) = d.get("cells") else { return true };
         if y < 0 || y as usize >= rows.len() { return true }
@@ -1139,14 +1177,28 @@ impl Interpreter {
         // Look up user function — clone the def to avoid borrow issues
         let (chosen_id, params, body) = {
             let variants = self.functions.get(name)
-                .ok_or_else(|| format!("Undefined function: {}", name))?;
+                .ok_or_else(|| {
+                    // did-you-mean — suggest close function/builtin names so a
+                    // typo isn't just "Undefined function" with no help
+                    let cands = self.functions.keys().cloned().collect::<Vec<_>>();
+                    let close = Self::closest_name(name, cands.iter().map(|s| s.as_str()));
+                    match close {
+                        Some(s) => format!("Undefined function: {} — did you mean {}?", name, s),
+                        None => format!("Undefined function: {}", name),
+                    }
+                })?;
             let chosen = match variant {
                 Some(id) => variants.iter().find(|v| v.id == id)
                     .ok_or_else(|| format!("Variant {}#{} not found", name, id))?,
                 None => {
-                    // dispatch to the fittest loaded variant
+                    // dispatch to the fittest variant that can take this call —
+                    // skip arity mismatches so a variant born at a different
+                    // signature doesn't break the family's real calls
                     variants.iter()
+                        .filter(|v| v.def.params.len() == args.len())
                         .max_by(|a, b| a.fitness.partial_cmp(&b.fitness).unwrap_or(std::cmp::Ordering::Equal))
+                        .or_else(|| variants.iter()
+                            .max_by(|a, b| a.fitness.partial_cmp(&b.fitness).unwrap_or(std::cmp::Ordering::Equal)))
                         .unwrap()
                 }
             };
@@ -1628,8 +1680,9 @@ impl Interpreter {
                             .map_err(|_| format!("Cannot convert '{}' to int", s))
                     }
                     Value::Int(n) => Ok(Some(Value::Int(*n))),
+                    Value::Float(f) => Ok(Some(Value::Int(f.trunc() as i64))),
                     Value::Bool(b) => Ok(Some(Value::Int(if *b { 1 } else { 0 }))),
-                    _ => Err("int() expects a string or int".into()),
+                    _ => Err("int() expects a string or number".into()),
                 }
             }
             "rand" => {
@@ -1812,15 +1865,25 @@ impl Interpreter {
                 Ok(Some(Value::Float((x % 1_000_000) as f64 / 1_000_000.0)))
             }
             "rand_range" => {
-                let (lo, hi) = match (args.get(0), args.get(1)) {
-                    (Some(Value::Int(lo)), Some(Value::Int(hi))) => (*lo, *hi),
-                    _ => return Err("rand_range(lo, hi) expects two ints".into()),
+                // rand_range(lo, hi) — int or float range (float args → float out)
+                let (lo, hi, is_float) = match (args.get(0), args.get(1)) {
+                    (Some(Value::Int(lo)), Some(Value::Int(hi))) => (*lo as f64, *hi as f64, false),
+                    (Some(l), Some(h)) if matches!(l, Value::Int(_)|Value::Float(_))
+                        && matches!(h, Value::Int(_)|Value::Float(_)) =>
+                        (Self::num_f(l)?, Self::num_f(h)?, true),
+                    _ => return Err("rand_range(lo, hi) expects two numbers".into()),
                 };
-                if hi <= lo { return Ok(Some(Value::Int(lo))); }
                 let mut x = self.rng_state;
                 x ^= x << 13; x ^= x >> 7; x ^= x << 17;
                 self.rng_state = x;
-                Ok(Some(Value::Int(lo + (x % ((hi - lo + 1) as u64)) as i64)))
+                if is_float {
+                    if hi <= lo { return Ok(Some(Value::Float(lo))); }
+                    let f = (x % 1_000_000) as f64 / 1_000_000.0;
+                    return Ok(Some(Value::Float(lo + f * (hi - lo))));
+                }
+                let (li, hi2) = (lo as i64, hi as i64);
+                if hi2 <= li { return Ok(Some(Value::Int(li))); }
+                Ok(Some(Value::Int(li + (x % ((hi2 - li + 1) as u64)) as i64)))
             }
             "dice" => {
                 let (n, sides) = match (args.get(0), args.get(1)) {
@@ -3060,6 +3123,36 @@ impl Interpreter {
                 });
                 let line = scene.to_string();
                 match &self.game_io {
+                    Some(io) if io.cli_render.load(std::sync::atomic::Ordering::SeqCst) => {
+                        // headless `veldt play` — count the frame (game_running
+                        // caps at the bound so the auto-policy can't loop forever)
+                        io.frames.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        // render the scene as text: map rows + entity sprite overlay
+                        let mut text = String::from("\n");
+                        if let serde_json::Value::Array(rows) = &scene["map"] {
+                            let mut grid: Vec<Vec<char>> = rows.iter().map(|r|
+                                r.as_str().unwrap_or("").chars().collect()).collect();
+                            for e in scene["entities"].as_array().map(|a| a.as_slice()).unwrap_or(&[]) {
+                                let ex = e["x"].as_i64().unwrap_or(0) as usize;
+                                let ey = e["y"].as_i64().unwrap_or(0) as usize;
+                                let ch = e["sprite"].as_str().unwrap_or("?").chars().next().unwrap_or('?');
+                                if let Some(row) = grid.get_mut(ey) {
+                                    if ex < row.len() { row[ex] = ch; }
+                                }
+                            }
+                            for row in &grid {
+                                text.push_str(&row.iter().collect::<String>());
+                                text.push('\n');
+                            }
+                        }
+                        if let Some(hd) = scene["hud"].as_object() {
+                            text.push_str(&format!("[{}] ",
+                                hd.iter().map(|(k,v)| format!("{}={}", k, v)).collect::<Vec<_>>().join(" ")));
+                            text.push('\n');
+                        }
+                        print!("{}", text);
+                        Ok(Some(Value::Null))
+                    }
                     Some(io) => {
                         *io.frame.lock().unwrap() = Some(line);
                         Ok(Some(Value::Null))
@@ -3075,9 +3168,16 @@ impl Interpreter {
                 }
             }
             "game_running" => {
-                // game_running() → bool — the session is alive
+                // game_running() → bool — the session is alive. In headless
+                // `veldt play` mode, cap the frames so a game that can't win
+                // still ends (the auto-policy may loop forever otherwise).
                 let r = self.game_io.as_ref()
-                    .map(|io| io.running.load(std::sync::atomic::Ordering::Relaxed))
+                    .map(|io| {
+                        let alive = io.running.load(std::sync::atomic::Ordering::Relaxed);
+                        if io.cli_render.load(std::sync::atomic::Ordering::Relaxed) {
+                            alive && io.frames.load(std::sync::atomic::Ordering::Relaxed) < 400
+                        } else { alive }
+                    })
                     .unwrap_or(true);
                 Ok(Some(Value::Bool(r)))
             }

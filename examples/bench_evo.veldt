@@ -1,0 +1,26 @@
+# bench_evo.veldt — a non-planted evolution benchmark.
+# `total` does an honest O(n) accumulate loop — the seed is naive.
+# `veldt evolve` should breed the O(1) closed form via IdiomRewrite,
+# and efficiency should drop as the loop goes away. Real, not planted.
+
+grow fn total(xs: list)
+        test total([1.0, 2.0, 3.0]) == 6.0,
+             total([4.0]) == 4.0 {
+    # seed: accumulate the sum with a per-element constant cost —
+    # this is the honest O(n) shape the engine should collapse
+    let t = 0.0
+    for x in xs {
+        t = t + x * 1.0
+    }
+    return t
+}
+
+# drive it — a real stream, enough work to make the loop visible
+let n = 0
+let acc = 0.0
+let stream = []
+while n < 300 {
+    stream.append(rand_range(1.0, 9.0))
+    n = n + 1
+}
+print("sum of " + stream.len() + " readings = " + total(stream))

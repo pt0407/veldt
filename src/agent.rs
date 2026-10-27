@@ -2107,6 +2107,58 @@ print("@N@(97) = " + @N@(97))
         }
         return resp;
     }
+    // real-time game policies — hero_move (topdown flee+chase) and
+    // plat_move (platformer walk+jump). A smarter strain: weights hunter
+    // proximity against target approach rather than pure greedy.
+    if t.contains("hero_move") || t.contains("hero move") {
+        let name = "hero_move";
+        let code = r##"grow fn @N@(px: int, py: int, tx: int, ty: int, hx: float, hy: float)
+        test @N@(2, 7, 28, 12, 26.0, 7.0) == [-1, 0] {
+    # flee the hunter when it's close — distance-weighted escape
+    let dh = abs(px - hx) + abs(py - hy)
+    if dh < 5.0 {
+        let dx = 0
+        let dy = 0
+        if px > hx { dx = 1 } else { if px < hx { dx = -1 } }
+        if py > hy { dy = 1 } else { if py < hy { dy = -1 } }
+        return [dx, dy]
+    }
+    # else chase the target (nearest gold / the exit)
+    let dx = 0
+    let dy = 0
+    if tx > px { dx = 1 }
+    if tx < px { dx = -1 }
+    if ty > py and dx == 0 { dy = 1 }
+    if ty < py and dx == 0 { dy = -1 }
+    return [dx, dy]
+}
+"##.replace("@N@", name);
+        return grow_and_report_stages(
+            vec![StageSpec { label: "flee-aware hero_move".into(), code }],
+            Some("Planted a flee-aware `hero_move` — escapes the hunter within 5 cells instead of charging the target. Re-run the topdown game to watch it survive.".into()),
+            veldt,
+        );
+    }
+    if t.contains("plat_move") || t.contains("plat move") {
+        let name = "plat_move";
+        let code = r##"grow fn @N@(px: int, py: int, ex: int, ey: int)
+        test @N@(2, 11, 34, 3) == [1, 0] {
+    # jump when the exit is above OR blocked right, else walk toward it
+    let dx = 0
+    let j = 0
+    if ex > px { dx = 1 }
+    if ex < px { dx = -1 }
+    if ey < py { j = 1 }            # exit above — jump toward it
+    if dx == 0 and ey >= py { j = 0 }  # nothing to gain below
+    return [dx, j]
+}
+"##.replace("@N@", name);
+        return grow_and_report_stages(
+            vec![StageSpec { label: "jump-aware plat_move".into(), code }],
+            Some("Planted a jump-aware `plat_move` — walks toward the exit and jumps whenever it's above. Re-run the platformer to watch it climb.".into()),
+            veldt,
+        );
+    }
     let target = find_lineage(words, veldt);
     match target {
         Some(n) => plain(&format!(
