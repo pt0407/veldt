@@ -1628,8 +1628,9 @@ impl Interpreter {
                             .map_err(|_| format!("Cannot convert '{}' to int", s))
                     }
                     Value::Int(n) => Ok(Some(Value::Int(*n))),
+                    Value::Float(f) => Ok(Some(Value::Int(f.trunc() as i64))),
                     Value::Bool(b) => Ok(Some(Value::Int(if *b { 1 } else { 0 }))),
-                    _ => Err("int() expects a string or int".into()),
+                    _ => Err("int() expects a string or number".into()),
                 }
             }
             "rand" => {

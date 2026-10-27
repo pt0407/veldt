@@ -1,0 +1,145 @@
+# rogue.veldt — a roguelite on the 2D engine's scene system.
+# WASD/arrows move @ through a maze; hunters chase on line-of-sight
+# and wander in the dark; gold scores; reach the exit alive. The
+# grown rogue_move policy auto-plays when no keys are held.
+
+grow fn rogue_move(px: int, py: int, tx: int, ty: int, hx: float, hy: float)
+        test rogue_move(1, 1, 19, 9, 18.0, 2.0) == [1, 0] {
+    # seed: flee when a hunter is near, else chase the target
+    let dx = 0
+    let dy = 0
+    let dd = abs(px - hx) + abs(py - hy)
+    if dd < 4.0 {
+        if px > hx { dx = 1 } else { if px < hx { dx = -1 } }
+        if py > hy { dy = 1 } else { if py < hy { dy = -1 } }
+        return [dx, dy]
+    }
+    if tx > px { dx = 1 }
+    if tx < px { dx = -1 }
+    if ty > py and dx == 0 { dy = 1 }
+    if ty < py and dx == 0 { dy = -1 }
+    return [dx, dy]
+}
+
+# --- the dungeon + scene ---
+let lvl = maze_gen(21, 11, "#")
+let g = scene_new(21, 11)
+
+let player = entity("player", 1, 1, "hero")
+player["tag"] = "player"
+g = scene_spawn(g, player)
+g = scene_spawn(g, entity("exit", 19, 9, "exit"))
+# hunters spawn on open floor
+g = scene_spawn(g, entity("h1", 15, 5, "hunter"))
+g = scene_spawn(g, entity("h2", 5, 7, "hunter"))
+g = scene_spawn(g, entity("h3", 17, 1, "hunter"))
+# gold
+let gold = [entity("g1", 6, 3, "coin"), entity("g2", 12, 7, "coin"),
+            entity("g3", 17, 5, "coin"), entity("g4", 4, 9, "coin")]
+let gi = 0
+while gi < gold.len() {
+    g = scene_spawn(g, gold[gi])
+    gi = gi + 1
+}
+
+let hp = 100
+let score = 0
+let turns = 0
+let won = false
+
+# --- the run ---
+while game_running() and not won and hp > 0 {
+    let k = keys()
+    let dx = 0
+    let dy = 0
+    if k.contains("left") { dx = -1 }
+    if k.contains("right") { dx = 1 }
+    if k.contains("up") { dy = -1 }
+    if k.contains("down") { dy = 1 }
+
+    let p = scene_find(g, "player")[0]
+    if dx == 0 and dy == 0 {
+        # auto-play — the grown policy moves toward the exit, fleeing hunters
+        let m = rogue_move(p["x"], p["y"], 19, 9, 15.0, 5.0)
+        dx = m[0]
+        dy = m[1]
+    }
+    # move if the target tile is open
+    let np = ent_move(p, dx, dy)
+    if not tile_solid(lvl, np["x"], np["y"]) {
+        g = scene_despawn(g, "player")
+        g = scene_spawn(g, np)
+        p = np
+    }
+
+    # hunters chase on sight, wander in the dark
+    let hunters = scene_find(g, "hunter")
+    let hi = 0
+    while hi < hunters.len() {
+        let h = hunters[hi]
+        let hx2 = h["x"]
+        let hy2 = h["y"]
+        if los(lvl, int(hx2), int(hy2), int(p["x"]), int(p["y"]), "#") {
+            let path = astar(lvl, int(hx2), int(hy2), int(p["x"]), int(p["y"]), " ")
+            if path != null and path.len() > 1 {
+                hx2 = path[1][0]
+                hy2 = path[1][1]
+            }
+        } else {
+            let dir = rand_range(1, 4)
+            if dir == 1 { hx2 = hx2 + 1 }
+            if dir == 2 { hx2 = hx2 - 1 }
+            if dir == 3 { hy2 = hy2 + 1 }
+            if dir == 4 { hy2 = hy2 - 1 }
+            if tile_solid(lvl, hx2, hy2) {
+                hx2 = h["x"]
+                hy2 = h["y"]
+            }
+        }
+        let h2 = entity(h["name"], hx2, hy2, "hunter")
+        g = scene_despawn(g, h["name"])
+        h2["tag"] = "hunter"
+        g = scene_spawn(g, h2)
+        if collide(p, h2) {
+            hp = hp - rand_range(5, 12)
+            sfx("hit")
+        }
+        hi = hi + 1
+    }
+
+    # grab gold — +score, +hp
+    let coins = scene_find(g, "coin")
+    gi = 0
+    while gi < coins.len() {
+        let c = coins[gi]
+        if collide(p, c) {
+            score = score + 100
+            hp = min(100, hp + 12)
+            g = scene_despawn(g, c["name"])
+            sfx("coin")
+        }
+        gi = gi + 1
+    }
+
+    if collide(p, scene_find(g, "exit")[0]) {
+        won = true
+        sfx("win")
+    }
+
+    let hud = dict()
+    hud["hp"] = hp
+    hud["score"] = score
+    hud["turns"] = turns
+    game_frame(g, scene_entities(g), hud, lvl)
+    turns = turns + 1
+    sleep(80)
+}
+
+let out = dict()
+out["hp"] = hp
+out["score"] = score
+out["turns"] = turns
+if won { out["result"] = "escaped" } else { out["result"] = "dead" }
+game_frame(g, scene_entities(g), out, lvl)
+if won { print("escaped the dungeon — " + score + " gold in " + turns + " turns") }
+else { print("devoured — score " + score) }
