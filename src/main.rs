@@ -2921,7 +2921,8 @@ fn main() {
             if until_win && sim_won {
                 eprintln!("[SIM] a variant won the game — {} is a genuine winner. Stopping.",
                           fam_scope.map(|s| s.as_str()).unwrap_or("the policy"));
-                break;
+                veldt.save().unwrap_or_else(|e| eprintln!("Save error: {}", e));
+                return;
             }
             if dry {
                 eprintln!("[EVOLVE] dry run complete — garden unchanged");
@@ -6870,12 +6871,10 @@ fn run_program(path: &str, trace: bool, evolve_after: bool) {
     // (sim-fitness: run the game with that variant driving, not the fittest)
     if let Some(pin_arg) = std::env::args().nth(
         std::env::args().position(|a| a == "--pin").map(|p| p + 1).unwrap_or(usize::MAX)) {
-        if let Some((n, id)) = pin_arg.split('=').collect::<Vec<_>>().split_first() {
-            if let Some(idstr) = pin_arg.split('=').nth(1) {
-                if let Ok(vid) = idstr.parse::<u32>() {
-                    interp.pin = Some((n.to_string(), vid));
-                    eprintln!("[PIN] {} -> variant #{}", n, vid);
-                }
+        if let Some((n, idstr)) = pin_arg.split_once('=') {
+            if let Ok(vid) = idstr.parse::<u32>() {
+                interp.pin = Some((n.to_string(), vid));
+                eprintln!("[PIN] {} -> variant #{}", n, vid);
             }
         }
     }

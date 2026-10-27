@@ -5705,7 +5705,7 @@ impl Interpreter {
                 let mut has_float = false;
                 for v in items {
                     match v {
-                        Value::Int(i) => { total += i; ftotal += *i as f64; }
+                        Value::Int(i) => { total = total.wrapping_add(*i); ftotal += *i as f64; }
                         Value::Float(f) => { has_float = true; ftotal += f; }
                         _ => return Err("sum() expects numeric items".into()),
                     }
@@ -5719,7 +5719,7 @@ impl Interpreter {
                 let mut has_float = false;
                 for v in items {
                     match v {
-                        Value::Int(i) => { total *= i; ftotal *= *i as f64; }
+                        Value::Int(i) => { total = total.wrapping_mul(*i); ftotal *= *i as f64; }
                         Value::Float(f) => { has_float = true; ftotal *= f; }
                         _ => return Err("product() expects numeric items".into()),
                     }
