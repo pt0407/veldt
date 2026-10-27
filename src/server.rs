@@ -41,6 +41,7 @@ pub async fn start_server(port: u16) {
         .route("/", get(serve_ide))
         .route("/site/:name", get(serve_site))
         .route("/play/:name", get(serve_play))
+        .route("/browse", get(serve_browse))
         .route("/examples/:name", get(serve_example))
         .route("/api/deploy", post(deploy_project))
         .route("/api/garden", get(get_garden))
@@ -1764,6 +1765,39 @@ const PLAY_HTML: &str = include_str!("play.html");
 /// the latest frame at ~20fps.
 async fn serve_play() -> Html<&'static str> {
     Html(PLAY_HTML)
+}
+
+/// /browse — index of deployed programs: every examples/*.veldt with
+/// links to its /site (watch) and /play (real-time) view.
+async fn serve_browse() -> Html<String> {
+    let mut names: Vec<String> = std::fs::read_dir("examples")
+        .map(|rd| rd.flatten()
+            .filter_map(|e| e.file_name().to_str().map(|s| s.to_string()))
+            .filter(|n| n.ends_with(".veldt"))
+            .map(|n| n.trim_end_matches(".veldt").to_string())
+            .collect())
+        .unwrap_or_default();
+    names.sort();
+    names.dedup();
+    let items = names.iter().map(|n| format!(
+        "<li><a href='/play/{n}'>{n}</a><span class='links'><a href='/site/{n}'>site</a><a href='/examples/{n}.veldt'>src</a></span></li>",
+        n = n)).collect::<Vec<_>>().join("\n");
+    Html(format!(r#"<!DOCTYPE html><html><head><meta charset="utf-8"><title>veldt — deployed</title>
+<style>
+body{{background:#050807;color:#b8c8be;font-family:'JetBrains Mono',monospace;padding:40px;max-width:600px;margin:auto}}
+h1{{font-family:'Cormorant Garamond',serif;color:#8ec5a0;font-size:32px}}
+em{{color:#c9a96e}}
+ul{{list-style:none;padding:0}}
+li{{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid #1a2721}}
+li a{{color:#6fae7f;text-decoration:none;font-size:15px}}
+li a:hover{{color:#8ec5a0}}
+.links a{{font-size:11px;color:#5a6b62;margin-left:14px;border:1px solid #1a2721;padding:2px 8px;border-radius:3px}}
+.links a:hover{{color:#c9a96e;border-color:#2a3d33}}
+.count{{color:#5a6b62;font-size:12px;margin-bottom:20px}}
+</style></head><body>
+<h1>Veldt <em>Deployed</em></h1>
+<div class="count">{count} programs · click to play live</div>
+<ul>{items}</ul></body></html>"#, count = names.len(), items = items))
 }
 
 /// /site/<name> — the deployed-program page. The page reads the
