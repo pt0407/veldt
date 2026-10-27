@@ -2918,15 +2918,20 @@ impl Interpreter {
                 Ok(Some(Value::Null))
             }
             "scene_find" => {
-                // scene_find(scene, tag) → list of entities with that tag
+                // scene_find(scene, kind) → entities of that kind — the
+                // sprite name is the type ("hunter", "coin"); also matches
+                // an explicit tag field
                 let (d, tag) = match (args.get(0), args.get(1)) {
                     (Some(Value::Dict(d)), Some(Value::Str(t))) => (d.clone(), t.to_string()),
-                    _ => return Err("scene_find(scene, tag) expects dict + str".into()),
+                    _ => return Err("scene_find(scene, kind) expects dict + str".into()),
+                };
+                let matches_kind = |ed: &im::HashMap<String, Value>| {
+                    ["tag", "sprite"].iter().any(|f| matches!(
+                        ed.get(*f), Some(Value::Str(ts)) if ts.as_ref() == tag))
                 };
                 let out: im::Vector<Value> = match d.get("entities") {
                     Some(Value::Dict(m)) => m.values().filter(|v| {
-                        matches!(v, Value::Dict(ed)
-                            if ed.get("tag").map(|t| matches!(t, Value::Str(ts) if ts.as_ref() == tag)).unwrap_or(false))
+                        matches!(v, Value::Dict(ed) if matches_kind(ed))
                     }).cloned().collect(),
                     _ => im::Vector::new() };
                 Ok(Some(Value::List(out)))
@@ -5501,6 +5506,70 @@ mod tests {
     fn test_function_call() {
         let interp = run_src("fn add(a: int, b: int) { return a + b }\nlet x = add(3, 4)");
         assert_eq!(interp.vars.borrow().get("x"), Some(&Value::Int(7)));
+    }
+
+    #[test]
+    fn test_game_engine_builtins() {
+        // entities + movement + velocity
+        let interp = run_src(r##"
+            let e = entity("hero", 2, 7, "hero")
+            e = ent_move(e, 3, -2)
+            e = ent_vel(e, 1, -1)
+            let px = e["x"]
+            let py = e["y"]
+            let pvy = e["vy"]
+            let other = entity("npc", 5.4, 5.4, "hunter")
+            let near = collide(e, other)
+            let far = entity("npc", 30, 30, "hunter")
+            let nohit = collide(e, far)
+            let g = game_new(30, 15)
+            let gw = g["w"]
+            let run = game_running()
+            let ks = keys()
+            let kl = ks.len()
+        "##);
+        let v = interp.vars.borrow();
+        assert_eq!(v.get("px"), Some(&Value::Float(5.0)));
+        assert_eq!(v.get("py"), Some(&Value::Float(5.0)));
+        assert_eq!(v.get("pvy"), Some(&Value::Float(-1.0)));
+        assert_eq!(v.get("near"), Some(&Value::Bool(true)));
+        assert_eq!(v.get("nohit"), Some(&Value::Bool(false)));
+        assert_eq!(v.get("gw"), Some(&Value::Float(30.0)));
+        assert_eq!(v.get("run"), Some(&Value::Bool(true)));
+        assert_eq!(v.get("kl"), Some(&Value::Int(0)));
+    }
+
+    #[test]
+    fn test_game_scene_and_tile_physics() {
+        // scene management + tile collision + gravity landing
+        let interp = run_src(r##"
+            let s = scene_new(20, 10)
+            s = scene_spawn(s, entity("a", 1, 1, "hero"))
+            s = scene_spawn(s, entity("h1", 8, 4, "hunter"))
+            s = scene_spawn(s, entity("h2", 12, 6, "hunter"))
+            let n = scene_entities(s).len()
+            let hs = scene_find(s, "hunter").len()
+            s = scene_despawn(s, "h1")
+            let n2 = scene_entities(s).len()
+            let lvl = canvas_new(11, 8, " ")
+            lvl = canvas_fill(lvl, 0, 7, 11, 1, "#")
+            let p = entity("p", 5, 2, "hero")
+            let grounded0 = on_ground(p, lvl)
+            let solid_below = tile_solid(lvl, 5, 7)
+            let p2 = physics_tick(ent_vel(p, 0, 0), lvl, 0.5)
+            let vy1 = p2["vy"]
+            let p3 = physics_tick(physics_tick(ent_vel(p, 0, 0), lvl, 0.5), lvl, 0.5)
+            let y3 = p3["y"]
+        "##);
+        let v = interp.vars.borrow();
+        assert_eq!(v.get("n"), Some(&Value::Int(3)));
+        assert_eq!(v.get("hs"), Some(&Value::Int(2)));
+        assert_eq!(v.get("n2"), Some(&Value::Int(2)));
+        assert_eq!(v.get("grounded0"), Some(&Value::Bool(false)));
+        assert_eq!(v.get("solid_below"), Some(&Value::Bool(true)));
+        assert_eq!(v.get("vy1"), Some(&Value::Float(0.5)));
+        // p3 falls: 2.5+0.5=3.0 (vy .5→1.0), lands on row-7 floor → y=6.0
+        assert_eq!(v.get("y3"), Some(&Value::Float(3.5)));
     }
 
     #[test]
