@@ -388,6 +388,29 @@ fn expr_to_smt(
         Expr::Bool(b) => Some(SymVal::Scalar(Bool::from_bool(*b).into())),
         Expr::Str(v) => Some(SymVal::Scalar(vstr_const(&format!("lit_{}", v)))),
         Expr::Var(name) => state.env.get(name).cloned(),
+        Expr::Slice(o, lo, hi) => {
+            let lst = expr_to_smt(o, state, veldt, fuel)?;
+            if let SymVal::List(items) = lst {
+                let lo_n = match lo {
+                    Some(e) => match expr_to_smt(e, state, veldt, fuel)?.into_scalar()?.as_int()?.as_i64() {
+                        Some(n) if n >= 0 => n as usize,
+                        _ => return None,
+                    },
+                    None => 0,
+                };
+                let hi_n = match hi {
+                    Some(e) => match expr_to_smt(e, state, veldt, fuel)?.into_scalar()?.as_int()?.as_i64() {
+                        Some(n) if n >= 0 => n as usize,
+                        _ => return None,
+                    },
+                    None => items.len(),
+                };
+                let out: Vec<SymVal> = items.into_iter()
+                    .skip(lo_n).take(hi_n.saturating_sub(lo_n)).collect();
+                return Some(SymVal::List(out));
+            }
+            return None; // string slice bails
+        }
         Expr::Interp(parts) => {
             // "a{e}b" folds into vstr_cat(vstr_cat(lit_a, vstr_of(e)), lit_b)
             let mut acc: Option<Dynamic> = None;
@@ -508,6 +531,20 @@ fn expr_to_smt(
                     items.first().cloned(),
                 (SymVal::List(items), "last", 0) =>
                     items.last().cloned(),
+                (SymVal::List(items), m @ ("take" | "skip"), 1) => {
+                    // concrete count only: xs.take(3) / xs.skip(3) on a
+                    // fixed symbolic vector is exact; symbolic n bails
+                    let n = match &args[0] {
+                        Expr::Int(n) if *n >= 0 => *n as usize,
+                        _ => return None,
+                    };
+                    let out: Vec<SymVal> = if m == "take" {
+                        items.into_iter().take(n).collect()
+                    } else {
+                        items.into_iter().skip(n).collect()
+                    };
+                    Some(SymVal::List(out))
+                }
                 (SymVal::List(mut items), "push", 1) => {
                     items.push(expr_to_smt(&args[0], state, veldt, fuel)?);
                     Some(SymVal::List(items))
