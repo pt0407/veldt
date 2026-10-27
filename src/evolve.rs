@@ -2255,6 +2255,34 @@ impl Evolver {
                 };
                 if let Some(ne) = new_e { *e = ne; return true; }
             }
+            // xs.len() == 0 / != 0 / > 0 -> xs.is_empty() / !is_empty()
+            let len_call = |e: &Expr| -> Option<Expr> {
+                if let Expr::MethodCall(o, m, a) = e {
+                    if m == "len" && a.is_empty() { return Some((**o).clone()); }
+                }
+                None
+            };
+            if let Some(xs) = len_call(l) {
+                let is_empty = Expr::MethodCall(
+                    Box::new(xs.clone()), "is_empty".into(), vec![]);
+                let new_e: Option<Expr> = match (&*op, r.as_ref()) {
+                    (BinOp::Eq, Expr::Int(0)) => Some(is_empty.clone()),
+                    (BinOp::Neq, Expr::Int(0)) | (BinOp::Gt, Expr::Int(0)) =>
+                        Some(Expr::UnaryOp(UnaryOp::Not, Box::new(is_empty.clone()))),
+                    _ => None,
+                };
+                if let Some(ne) = new_e { *e = ne; return true; }
+            } else if let Some(xs) = len_call(r) {
+                let is_empty = Expr::MethodCall(
+                    Box::new(xs.clone()), "is_empty".into(), vec![]);
+                let new_e: Option<Expr> = match (&*op, l.as_ref()) {
+                    (BinOp::Eq, Expr::Int(0)) => Some(is_empty.clone()),
+                    (BinOp::Neq, Expr::Int(0)) | (BinOp::Lt, Expr::Int(0)) =>
+                        Some(Expr::UnaryOp(UnaryOp::Not, Box::new(is_empty.clone()))),
+                    _ => None,
+                };
+                if let Some(ne) = new_e { *e = ne; return true; }
+            }
             match (op, l.as_ref(), r.as_ref()) {
                 // literal folding: Int op Int -> Int/Bool (cross-statement
                 // constant folding lands via ConstProp on the stmt level)
@@ -3530,6 +3558,23 @@ mod asymptotic_proof {
                 Err(why) => panic!("rewrite not provable: {} -> {:?}\n{}",
                     src, crate::fmt::format_program(&after), why),
             }
+        }
+    }
+
+    #[test]
+    fn simplify_len_zero_to_is_empty() {
+        for (src, want) in [
+            ("return xs.len() == 0", "is_empty"),
+            ("return xs.len() != 0", "not"),
+            ("return xs.len() > 0", "not"),
+            ("return 0 == xs.len()", "is_empty"),
+            ("return 0 != xs.len()", "not"),
+        ] {
+            let body = parse_fn_body(src);
+            let mut evolver = Evolver::new();
+            let out = evolver.mutate_body(&body, Mutation::Simplify);
+            let src2 = crate::fmt::format_program(&out);
+            assert!(src2.contains(want), "{} -> {}", src, src2);
         }
     }
 
