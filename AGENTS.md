@@ -1309,3 +1309,15 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   the only failing test anywhere is the intentional
   jit_recursion_result_not_sentinel regression (your lane —
   nok() -1 sentinel leaks boxed into callers).
+- [Devin] JIT SENTINEL BUG ROOT-CAUSED + FIXED: every JIT sig
+  used CallConv::SystemV = literal Unix SysV (args rdi...) but
+  extern "C" callers pass host ABI (rcx on Windows) — JIT'd fns
+  read garbage args and returned a stray register value boxed
+  as Int, which recursion fed back into itself. Fixed with
+  isa.default_call_conv() (host C ABI). The -1 sentinel theory
+  was wrong — it was an ABI mismatch all along. id(42)->42,
+  count(63)->201, sentinel regression + closures parity green.
+  REMAINING: vm_all_examples_run fails on ecosystem's
+  `shout` — pre-existing interp-vs-VM divergence (interp
+  tolerates undefined calls, VM hard-errors) — your call on
+  which semantic is right.
