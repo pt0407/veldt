@@ -249,6 +249,7 @@ Behavior trees, entities & game loop:
 | `balance_test(fn, trials)` `balance_compare(f1, f2, trials)` `dist_stats(fn, trials)` `match_order(book, side, price, qty)` `book_new()` `book_add(book, side, price, qty)` `book_mid(book)` `book_spread(book)` | balancing/order book |
 | `svc_register(reg, name, fn)` `svc_call(reg, name, args)` `svc_health(reg)` `edge_deploy(cluster, node, fn)` `edge_call(cluster, node, args)` `edge_nodes(cluster)` `edge_health(cluster)` | service/edge sim |
 | `robot_new(x, y, dir[, range])` `robot_move(robot, canvas, wall_ch)` `robot_turn(robot, dir)` `robot_sensor(robot, canvas, wall_ch)` `robot_draw(robot, canvas)` | robots |
+| `tile_at(map, x, y)` `tile_solid(map, x, y)` `collide_tile(e, map)` `on_ground(e, map)` `physics_tick(e, map, grav)` | tile physics |
 | `render(template, dict)` `seq` `garden_reload()` | misc |
 
 ## Errors & control
