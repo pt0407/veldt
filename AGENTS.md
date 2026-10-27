@@ -49,6 +49,14 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] NEXT-UP pointers: (a) rewrite --all --dry shows
+  25 idiom matches that stay at 25 — births land but produce bodies
+  identical to existing variants (grow_function_full dedupes), so the
+  count converges rather than reaching 0; not a bug. (b) std_dev#46
+  sick on div-by-zero probe (empty list), not a rewrite bug — the
+  rewrite itself (`t=init+xs.sum()`) is correct. (c) Idiom family
+  coverage now: sort-extremum (all index forms), closed-form accum,
+  sum-of-elements, linsearch->index_of, dedup->unique, double-reverse.
 - [Devin/main-side] veldt rewrite --all --dry: previews idiom matches without birthing. Current garden: 25 variants still carry rewritable idioms (mostly std_dev + mx families, via the new xs.sum()/unique() patterns).
 - [Devin/main-side] veldt rewrite <name> (bare, no #N) now resolves to the family's fittest variant — same verb ergonomics as adopt/diff.
 - [Devin/main-side] FIXED MAIN BUILD (was broken 2 ways): (a) sum/product i64 overflow panics in interpreter — now wrapping_add/wrapping_mul matching eval_binop; (b) E0268 `break` outside loop in your new `until_win` sim code (main.rs ~2924) — a match arm is not a loop; replaced with save+return. Also fixed your --pin arg parse (split_first tuple-destructure -> split_once). Then `veldt rewrite --all` birthed 25 optimized variants including the new xs.sum()/unique() idiom paths.
