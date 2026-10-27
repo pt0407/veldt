@@ -19,7 +19,7 @@ const BUILTINS: &[&str] = &[
     "join", "pmap", "fetch", "post", "json_parse", "json_stringify",
     "re_match", "re_find", "re_replace", "re_split", "re_captures",
     "b64_encode", "b64_decode", "url_encode", "url_decode", "sha256",
-    "match_path", "call_best", "garden", "format", "read_stdin",
+    "match_path", "call_best", "date_add", "date_fmt", "garden", "format", "read_stdin",
 ];
 
 struct Doc {

@@ -49,7 +49,7 @@ Every one of these is hit within the first hour of writing real scripts.
 - [ ] Encoding: `b64_encode`, `b64_decode`, `url_encode`, `url_decode`,
       `sha256` (tiny crate or vendored impl)
 - [x] `re_captures(str, pat)` — capture groups -> list (devin)
-- [ ] `parse_date(str) -> ts`, `date_add(ts, days)` — real datetime math
+- [x] `parse_date(str) -> ts`, `date_add(ts, n[, unit])`, `date_fmt(ts[, fmt])` — real datetime math
 - [~devin] `serve` ergonomics: `match_path(pattern, path)` -> params dict
       or null (path params like `/users/:id` work; full `route()` table
       still open)
@@ -105,7 +105,7 @@ Target: within ~10-30x of Python on typical script workloads, not 500x.
 - [ ] `docs/reference.md` — every builtin, signature, example (generate
       from a table in the binary: `veldt docs <builtin>`)
 - [ ] `veldt help <topic>` — CLI help beyond usage list
-- [ ] `veldt new myapp` — scaffold `main.veldt` + README
+- [x] `veldt new myapp` — scaffold `main.veldt` + README
 - [ ] VSCode syntax highlighting — TextMate grammar (~100 lines), no LSP yet
 
 ## Phase 5 — The garden as the reason to stay (post-v1)

@@ -88,6 +88,8 @@ difference to_list`.
 | `time_ms` | epoch milliseconds |
 | `date` | `date()` now-ISO; `date("%Y-%m-%d")` formatted |
 | `parse_date` | `parse_date("YYYY-MM-DD HH:MM:SS")` → epoch secs |
+| `date_add` | `date_add(ts, n[, unit])` — unit: `days`(default)/`hours`/`mins`/`secs`/`weeks` |
+| `date_fmt` | `date_fmt(ts[, fmt])` — format an epoch timestamp like `date(fmt)` |
 
 ## Concurrency (shared-nothing)
 

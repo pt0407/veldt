@@ -1122,6 +1122,24 @@ impl Interpreter {
     }
 
     /// Minimal SHA-256 (no dependency) returning hex string.
+    fn civil_from_secs(secs: i64) -> (i64, i64, i64, i64, i64, i64) {
+        // civil-from-days (Howard Hinnant) — (y, m, d, h, min, s) in UTC
+        let days = secs.div_euclid(86400);
+        let tod = secs.rem_euclid(86400);
+        let (h, mi, sc) = (tod / 3600, (tod % 3600) / 60, tod % 60);
+        let z = days + 719468;
+        let era = z.div_euclid(146097);
+        let doe = z.rem_euclid(146097);
+        let yoe = (doe - doe/1460 + doe/36524 - doe/146096) / 365;
+        let y = yoe + era * 400;
+        let doy = doe - (365*yoe + yoe/4 - yoe/100);
+        let mp = (5*doy + 2)/153;
+        let d = doy - (153*mp + 2)/5 + 1;
+        let m = if mp < 10 { mp + 3 } else { mp - 9 };
+        let y = if m <= 2 { y + 1 } else { y };
+        (y, m, d, h, mi, sc)
+    }
+
     fn sha256_hex(msg: &[u8]) -> String {
         const K: [u32; 64] = [
             0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
@@ -4122,27 +4140,20 @@ impl Interpreter {
                     _ => unreachable!(),
                 }
             }
-            "date" => {
-                // date() -> "YYYY-MM-DD HH:MM:SS" or date(fmt) with %Y %m %d %H %M %S tokens
-                let ms = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as i64;
-                let secs = ms / 1000;
-                let days = secs.div_euclid(86400);
-                let tod = secs.rem_euclid(86400);
-                let (h, mi, sc) = (tod / 3600, (tod % 3600) / 60, tod % 60);
-                // civil-from-days (Howard Hinnant)
-                let z = days + 719468;
-                let era = z.div_euclid(146097);
-                let doe = z.rem_euclid(146097);
-                let yoe = (doe - doe/1460 + doe/36524 - doe/146096) / 365;
-                let y = yoe + era * 400;
-                let doy = doe - (365*yoe + yoe/4 - yoe/100);
-                let mp = (5*doy + 2)/153;
-                let d = doy - (153*mp + 2)/5 + 1;
-                let m = if mp < 10 { mp + 3 } else { mp - 9 };
-                let y = if m <= 2 { y + 1 } else { y };
+            "date" | "date_fmt" => {
+                // date() -> "YYYY-MM-DD HH:MM:SS" (now, UTC); date(fmt) formats now.
+                // date_fmt(ts[, fmt]) formats an epoch-seconds timestamp.
+                let (secs, fmt_arg) = if name == "date_fmt" {
+                    let ts = match args.get(0) { Some(Value::Int(t)) => *t, _ => return Err("date_fmt(ts[, fmt])".into()) };
+                    (ts, args.get(1))
+                } else {
+                    (std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64,
+                     args.get(0))
+                };
+                let (y, m, d, h, mi, sc) = Self::civil_from_secs(secs);
                 let base = format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}", y, m, d, h, mi, sc);
-                let out = match args.get(0) {
+                let out = match fmt_arg {
                     Some(Value::Str(f)) => f
                         .replace("%Y", &format!("{:04}", y))
                         .replace("%m", &format!("{:02}", m))
@@ -4153,6 +4164,25 @@ impl Interpreter {
                     _ => base,
                 };
                 Ok(Some(Value::Str(out.into())))
+            }
+            "date_add" => {
+                // date_add(ts, n[, unit]) -> ts shifted by n units
+                //   unit: "days" (default) | "hours" | "mins" | "secs" | "weeks"
+                let ts = match args.get(0) { Some(Value::Int(t)) => *t, _ => return Err("date_add(ts, n[, unit])".into()) };
+                let n = match args.get(1) { Some(Value::Int(v)) => *v, _ => return Err("date_add(ts, n[, unit])".into()) };
+                let mult = match args.get(2) {
+                    Some(Value::Str(u)) => match &**u {
+                        "secs" | "sec" | "s" => 1,
+                        "mins" | "min" | "m" => 60,
+                        "hours" | "hour" | "h" => 3600,
+                        "days" | "day" | "d" => 86400,
+                        "weeks" | "week" | "w" => 604800,
+                        _ => return Err("date_add unit: secs|mins|hours|days|weeks".into()),
+                    },
+                    None => 86400,
+                    _ => return Err("date_add(ts, n[, unit])".into()),
+                };
+                Ok(Some(Value::Int(ts + n * mult)))
             }
             "render" => {
                 if args.len() != 2 { return Err("render() expects (template, data)".into()); }

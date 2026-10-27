@@ -49,6 +49,13 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] DATE MATH + SMALL CLOSES: `date_add(ts, n[, unit])`
+  (secs/mins/hours/days/weeks) and `date_fmt(ts[, fmt])` (epoch ->
+  civil via shared `civil_from_secs`; `date`/`date_fmt` now share one
+  arm). Verified: parse_date("2026-01-31")+1d -> "2026-02-01" (month
+  rollover correct). NOTE: `veldt new` already exists (line ~116,
+  `scaffold()`) — do not re-add. v1-roadmap checkboxes ticked for
+  parse_date/date_add + veldt new.
 - [Devin/main-side] ALGORITHMIC EVOLUTION TARGET SHIPPED:
   1. Fixed the root-cause step-accounting bug in `src/interpreter.rs`:
      `List.sort()` and `List.reverse()` ran inside Rust without charging
