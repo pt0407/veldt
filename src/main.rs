@@ -294,6 +294,19 @@ fn main() {
             }
             verify_family(&args[2], &args);
         }
+        "pack" => {
+            let file = args.get(2).cloned().unwrap_or_default();
+            if file.is_empty() { eprintln!("Usage: veldt pack <file.veldt> [-o out.veldtpkg]"); process::exit(1); }
+            let out = args.iter().position(|a| a == "-o")
+                .and_then(|i| args.get(i + 1)).cloned()
+                .unwrap_or_else(|| file.trim_end_matches(".veldt").to_string() + ".veldtpkg");
+            pack_project(&file, &out);
+        }
+        "install" => {
+            let file = args.get(2).cloned().unwrap_or_default();
+            if file.is_empty() { eprintln!("Usage: veldt install <file.veldtpkg|url>"); process::exit(1); }
+            install_project(&file);
+        }
         "export" => {
             let target = args.get(2).map(|s| s.as_str()).unwrap_or("veldt-export.json");
             export_garden(target);
@@ -2830,7 +2843,7 @@ fn print_help(topic: Option<&str>) {
         "strings" => "s.len() s.trim() s.ltrim() s.rtrim() s.to_lower() s.to_upper()\n  s.split(sep) s.replace(a,b) s.contains(x) s.starts_with(p) s.ends_with(p)\n  s.chars() s.repeat(n) s.pad(n[,ch]) s.split_at(i) s[a:b]",
         "lists" => "xs.len() xs.push(v) xs.pop() xs.contains(v) xs.join(sep)\n  xs.enumerate() xs.zip(ys) xs.flatten() xs.take(n) xs.skip(n)\n  xs.sort() xs.sort_by(f) xs.group_by(f) xs.min_by(f) xs.max_by(f)\n  xs.reverse() xs.index_of(v) xs[a:b] xs[-1]",
         "types" => "int float str bool list dict set null fn — types are advisory docs\n  `x in xs` membership · `??` null-coalesce · `?.` safe access · `|>` pipe",
-        "registry" => "veldt registry [port] — host a garden pool · veldt push <url> · veldt pull <url> [--merge]\n  veldt search <url> <name> · veldt tournament <url> — pull, trial, push winners back\n  veldt import <file|url> [--merge] · veldt export [file] — garden JSON\n  veldt deploy <file> [--name N] [--to URL] — live at <host>/site/<name>",
+        "registry" => "veldt registry [port] — host a garden pool · veldt push <url> · veldt pull <url> [--merge]\n  veldt search <url> <name> · veldt tournament <url> — pull, trial, push winners back\n  veldt import <file|url> [--merge] · veldt export [file] — garden JSON\n  veldt deploy <file> [--name N] [--to URL] — live at <host>/site/<name>\n  veldt pack <file> [-o out.veldtpkg] · veldt install <file|url> — project bundles",
         "sandbox" => "veldt run --sandbox <file> · veldt watch <file> --sandbox — Stage-0 caps (fs/net/proc denied)\n  sandbox_run(\"fn\", args) builtin · shadow_call(\"fn\", args) — all variants run sandboxed\n  Trials/probes/fuzz already run sandboxed — untrusted code can't touch the host",
         "filter" => "--filter <expr> — the variant query DSL (usable in garden/evolve/stats/test/fuzz/find/lineage/adopt/diff/verify/bench/tournament/absorb + /api/filter)\n  fields: fitness age usage size args lifespan last_used niches born trial_score\n          efficiency parents healing health trust origin calls family niche:<name>\n  ops: > < >= <= == != ~ (contains) | connectors: && (AND) || (OR) | prefix ! or 'not ' (NOT)\n  e.g. --filter \"family == fib && fitness > 1.5\" · \"niche:int:big > 0.5\" · \"!health == sick\"\n  --sort <field> — sort variants (garden/stats/lineage/find/evolve + /api/filter?sort=)\n  fields: fitness age usage size args lifespan last_used niches fit_rate usage_rate\n          size_rate efficiency niche_score id origin health trust born trial_score\n          efficiency parents healing niche:<name> | e.g. --sort fit_rate",
         "lint" | "check" => "veldt check <file> [--strict] [--json|--watch|--fail] — parse + ~91-check lint\n  veldt check - --strict — read the program from stdin\n  veldt check --suppress <s> — drop warnings containing <s> (repeatable)\n  veldt check --garden [family] — lint every variant body\n  veldt check --garden --bugs — defect-class warnings only\n  veldt check --garden --fix [--verify] — repair dead code (+ re-trial)\n  veldt check --garden --watch — re-lint on garden saves\n  veldt fix <file> [--check] — same repairs on a source file (in-place + fmt)\n  veldt stats --lint — garden census (defect split + top warning kinds)\n  veldt adopt <name#N> --lint — refuse to promote defect-carrying variants\n  veldt tend [family] — heal sick variants on demand\n  veldt evolve --tend — self-maintaining cycles (heal + clean per cycle)\n  veldt bench --lint — strict-lint timing per file + garden census\n  evolve rejects mutants introducing defect warnings ([LINT] events)",
@@ -6201,6 +6214,57 @@ fn export_garden(path: &str) {
         Ok(_) => println!("Garden exported to {}", path),
         Err(e) => eprintln!("Export failed: {}", e),
     }
+}
+
+/// `veldt pack <file>` — bundle a project: the .veldt source + the
+/// garden JSON into one self-contained .veldtpkg. Anyone can
+/// `veldt install` it — the program runs with its evolved organisms.
+fn pack_project(file: &str, out: &str) {
+    let source = std::fs::read_to_string(file).unwrap_or_else(|e| {
+        eprintln!("pack: can't read {} — {}", file, e); process::exit(1);
+    });
+    let name = std::path::Path::new(file).file_stem()
+        .and_then(|s| s.to_str()).unwrap_or("pack").to_string();
+    let garden = std::fs::read_to_string(
+        veldt::Veldt::new().garden_path.join("veldt.json"))
+        .unwrap_or_else(|_| "{}".into());
+    let pkg = serde_json::json!({ "name": name, "source": source, "garden": garden });
+    std::fs::write(out, serde_json::to_string_pretty(&pkg).unwrap_or_default())
+        .unwrap_or_else(|e| { eprintln!("pack write failed: {}", e); process::exit(1); });
+    println!("packed '{}' + garden → {}", name, out);
+}
+
+/// `veldt install <file|url>` — install a packed project: write the
+/// source to the local name.veldt and import its bundled garden.
+fn install_project(path: &str) {
+    let body = if path.starts_with("http://") || path.starts_with("https://") {
+        let client = reqwest::blocking::Client::builder()
+            .user_agent("Veldt/0.3").timeout(std::time::Duration::from_secs(30)).build();
+        match client.ok().and_then(|c| c.get(path).send().ok())
+            .and_then(|r| r.text().ok()) {
+            Some(t) => t,
+            None => { eprintln!("install: can't fetch {}", path); process::exit(1); }
+        }
+    } else {
+        std::fs::read_to_string(path).unwrap_or_else(|e| {
+            eprintln!("install: can't read {} — {}", path, e); process::exit(1);
+        })
+    };
+    let pkg: serde_json::Value = match serde_json::from_str(&body) {
+        Ok(p) => p,
+        Err(e) => { eprintln!("install: bad package — {}", e); process::exit(1); }
+    };
+    let name = pkg.get("name").and_then(|n| n.as_str()).unwrap_or("pack");
+    if let Some(src) = pkg.get("source").and_then(|s| s.as_str()) {
+        std::fs::write(format!("{}.veldt", name), src).unwrap_or_else(|e| {
+            eprintln!("install write failed: {}", e); process::exit(1); });
+    }
+    if let Some(g) = pkg.get("garden").and_then(|g| g.as_str()) {
+        let dest = veldt::Veldt::new().garden_path.join("veldt.json");
+        if let Some(parent) = dest.parent() { let _ = std::fs::create_dir_all(parent); }
+        let _ = std::fs::write(&dest, g);
+    }
+    println!("installed '{}': {}.veldt + garden — run `veldt run {}`", name, name, name);
 }
 
 fn import_garden(path: &str) {
