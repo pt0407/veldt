@@ -2954,17 +2954,21 @@ fn print_help(topic: Option<&str>) {
         "garden" => "veldt garden [--sick|--obituaries|--json|--filter <expr>] — census\n  --family <name> — one lineage's census (+ --detail for the full dashboard)\n  --filter <expr> — composable query: fields fitness age usage size args\n    lifespan last_used niches health trust origin calls; ops > < >= <= == != ~\n    `&&` for AND, `||` for OR. e.g. --filter \"fitness > 1.5 && age < 100\"\n  veldt lineage <name> · veldt stats [--json] [--brief] [--top|--detail] [--family <n>] [--filter <expr>] [--sort <field>] · veldt test <name>|--all\n  veldt adopt <name#N> · veldt fuzz <name>|--all · veldt find <substr>\n  veldt diff <a#n> <b#n> · veldt absorb · veldt tournament <url>",
         "builtins" => "len type str int float print eprint input read_stdin args exit\n  abs max min round floor ceil sqrt pow rand date now sleep env\n  fetch post serve match_path read_file write_file ls exists\n  dict get put has keys values items merge delete get_or\n  re_match re_find re_replace re_split re_captures format\n  canvas_* grid_* ui_* bt_* balance_* astar* bfs los fov turn fsm_next\n  rand* roll dice choice weighted_choice noise2 fbm perlin poisson_disc\n  voronoi delaunay wfc maze_gen flood_fill neighbors lerp clamp dist aabb\n  smoothstep bezier point_in_poly convex_hull ease_* bounce line_points",
         "game" | "engine" => "veldt's 2D game engine — real-time playable games\n  \
-  game_new(w,h) scene state · entity(name,x,y,sprite) objects ·\n  \
-  ent_move/ent_vel move+velocity · collide(a,b) AABB · collide_tile(e,map) ·\n  \
-  tile_at/tile_solid terrain read · on_ground grounded check ·\n  \
-  physics_tick(e,map,grav) gravity+jump+land · camera_xy scrolling ·\n  \
-  keys() held-key poll · game_frame(state,entities,hud,map?) emit scene ·\n  \
-  game_running() session-alive · sleep(ms) pacing ·\n  \
-  scene_new/spawn/despawn/entities/find entity management ·\n  \
-  anim(e,frames)+anim_tick sprite animation · sfx(name)/beep audio ·\n  \
-  game_over/ui_menu/ui_prompt overlays\n\
-  play: `veldt studio` -> /play/<name> (WASD real-time) · /site/<name> (watch)\n\
-  templates: `agent \"make a game/topdown/platformer\"` · improve hero_move/plat_move",
+  WORLD: game_new(w,h) · camera_xy / camera_follow(state,e,dz) scrolling ·\n  \
+    tile_at/tile_solid map read · game_frame(state,entities,hud,map?) emit\n  \
+  ENTITIES: entity(name,x,y,sprite) · ent_def(name,fields)+spawn(type,x,y) DSL ·\n  \
+    scene_new/spawn/despawn/entities/find management · scene_each(s,fn) iterate\n  \
+  MOTION: ent_move/ent_vel · integrate(e,map,dt) velocity physics ·\n  \
+    physics_tick(e,map,grav) gravity+jump+land · move_toward(e,tx,ty,spd) chase\n  \
+  QUERIES: collide(a,b) AABB · collide_any/collide_all(e,scene) hits ·\n  \
+    collide_tile(e,map) · in_radius(e,scene,r) area · dist(a,b) · on_ground\n  \
+  INPUT: keys() held · key_pressed(k) edge-triggered (jump on press) ·\n  \
+    game_running() session · sleep(ms) pacing\n  \
+  EFFECTS: sfx(name)/beep audio · emit/particle(name,x,y) visual fx ·\n  \
+    anim(e,frames)+anim_tick sprites · cooldown(key,n)/every fire-rate ·\n  \
+    bullet(x,y,vx,vy,sprite) projectiles · game_over/ui_menu/ui_prompt overlays\n\
+  play: `veldt studio` -> /play/<name> · `veldt play <name>` headless\n\
+  genres: `agent \"make a game/topdown/platformer/shooter/snake\"`",
         "strings" => "s.len() s.trim() s.ltrim() s.rtrim() s.to_lower() s.to_upper()\n  s.split(sep) s.replace(a,b) s.contains(x) s.starts_with(p) s.ends_with(p)\n  s.chars() s.repeat(n) s.pad(n[,ch]) s.split_at(i) s[a:b]",
         "lists" => "xs.len() xs.push(v) xs.pop() xs.contains(v) xs.join(sep)\n  xs.enumerate() xs.zip(ys) xs.flatten() xs.take(n) xs.skip(n)\n  xs.sort() xs.sort_by(f) xs.group_by(f) xs.min_by(f) xs.max_by(f)\n  xs.reverse() xs.index_of(v) xs[a:b] xs[-1]",
         "types" => "int float str bool list dict set null fn — types are advisory docs\n  `x in xs` membership · `??` null-coalesce · `?.` safe access · `|>` pipe",
