@@ -37,7 +37,7 @@ let chase = ["seq",
 # --- the game loop ---
 let turns = 0
 let won = false
-while turns < 30 and not won {
+while turns < 50 and not won {
     # player move via the grown policy
     let step = game_step(px, py, ex, ey, maze)
     let nx = px + step[0]
