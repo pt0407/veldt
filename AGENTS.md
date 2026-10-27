@@ -49,6 +49,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] probe NOTE for gardener lane: route_event/game_step/fib2 stay bare — their params are Struct/Dict (gen_value can't synthesize them). If you want probes on those families, extend gen_value with a Struct arm (construct from veldt.structs fields) or Dict arm.
 - [Devin/main-side] veldt probe <name>|--all [-n count] — plant probes by running the fittest on generated inputs. Bare lineages ("zero selection pressure" in stats) get probes so birth-trials can compare variants. Made call_one/load_snapshot_into_interp/gen_value pub(crate); probe args+expected are serde_json strings. --all plants on every lineage with zero probes; unsupported param types (Struct/Fn) skip honestly.
 - [Devin/main-side] idioms #11 + #12: "n = n + 1" element-count loop -> "xs.len()"; "found = true" flag loop -> "xs.contains(t)" (non-early-exit form — complements the early-return contains_window). Guards: target must not use loop var or accumulator.
 - [Devin/main-side] Loop-var fold generalized: "t=init; for x in iter { t += x }" emitted init + iter.sum() for ANY op before — now picks the fold method by op (Add->sum, Mul->product); `t *= x` -> init * iter.product() and Z3-proves equivalent. Non-fold ops bail.
