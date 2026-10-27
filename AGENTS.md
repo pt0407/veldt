@@ -49,6 +49,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] scan form upgraded: extremum rewrites now emit `for __v in xs { if __v > m { m = __v } }` (element iteration, no index var, lint-quiet, still exact in SMT via list unroll). Replaces the while+index form which tripped two lint warnings. 21/21 evolve tests; live rewrite max_val#N -> for-scan born healthy.
 - [Devin/main-side] lint: sort-to-extremum warning — `veldt check --strict` now flags inline `xs.sort().reverse()[0]`/`xs.sort()[0]`/index forms AND staged `let s=xs.sort(); return s[...]` patterns, inline or nested. Message points at `veldt rewrite`. xs.min()/xs.max() shipped this batch too (docs promised, missing).
 - [Devin/main-side] xs.min()/xs.max() builtins added — docs promised them, methods were missing (same class as index_of/unique). cmp_values ordering, n steps, Null on empty.
 - [Devin/main-side] xs.unique() builtin EXISTS NOW (docs promised it, method was missing — same class of bug as index_of) + dedup idiom: `let out=[]; for x in xs { if not x in out { out=out.push(x) } }` -> `let out = xs.unique()` (also matches `!out.contains(x)`). Guarded: push must target same var. Test: idiom_rewrite_dedup_loop_to_unique. 21/21 evolve tests.

@@ -1184,87 +1184,37 @@ impl Evolver {
     /// O(n) scan binding `tgt` to the extremum of `xs` (arbitrary expr —
     /// non-Var receivers hoist into a `let __xs` first).
     fn scan_binding(xs: &Expr, tgt: &str, is_max: bool) -> Vec<Stmt> {
-        let (mut pre, xs_name) = match xs {
-            Expr::Var(n) => (Vec::new(), n.clone()),
-            other => (vec![Stmt::Let("__xs".into(), other.clone())], "__xs".to_string()),
+        let (mut pre, xs_expr) = match xs {
+            Expr::Var(n) => (Vec::new(), Expr::Var(n.clone())),
+            other => (vec![Stmt::Let("__xs".into(), other.clone())],
+                      Expr::Var("__xs".into())),
         };
-        let cmp = if is_max { BinOp::Gt } else { BinOp::Lt };
-        pre.extend(vec![
-            Stmt::Let(tgt.into(), Expr::Index(
-                Box::new(Expr::Var(xs_name.clone())), Box::new(Expr::Int(0)))),
-            Stmt::Let("i".into(), Expr::Int(1)),
-            Stmt::While(
-                Expr::BinOp(
-                    Box::new(Expr::Var("i".into())), BinOp::Lt,
-                    Box::new(Expr::MethodCall(
-                        Box::new(Expr::Var(xs_name.clone())), "len".into(), vec![]))),
-                vec![
-                    Stmt::If(
-                        Expr::BinOp(
-                            Box::new(Expr::Index(
-                                Box::new(Expr::Var(xs_name.clone())),
-                                Box::new(Expr::Var("i".into())))),
-                            cmp, Box::new(Expr::Var(tgt.into()))),
-                        vec![Stmt::Assign(tgt.into(), Expr::Index(
-                            Box::new(Expr::Var(xs_name)),
-                            Box::new(Expr::Var("i".into()))))],
-                        None),
-                    Stmt::Assign("i".into(), Expr::BinOp(
-                        Box::new(Expr::Var("i".into())), BinOp::Add,
-                        Box::new(Expr::Int(1)))),
-                ]),
-        ]);
+        pre.extend(Self::scan_stmts(&xs_expr, tgt, is_max));
         pre
     }
 
+    /// Canonical O(n) extremum scan — a `for` over elements (no index
+    /// var, no while): `let m = xs[0]; for __v in xs { if __v > m { m = __v } }`
     fn make_linear_extremum_scan(xs: &str, is_max: bool) -> Vec<Stmt> {
+        let mut out = Self::scan_stmts(&Expr::Var(xs.into()), "m", is_max);
+        out.push(Stmt::Return(Some(Expr::Var("m".into()))));
+        out
+    }
+
+    /// `let t = xs[0]; for __v in xs { if __v <cmp> t { t = __v } }`
+    fn scan_stmts(xs: &Expr, tgt: &str, is_max: bool) -> Vec<Stmt> {
         let cmp = if is_max { BinOp::Gt } else { BinOp::Lt };
         vec![
-            Stmt::Let(
-                "m".into(),
-                Expr::Index(Box::new(Expr::Var(xs.into())), Box::new(Expr::Int(0))),
-            ),
-            Stmt::Let("i".into(), Expr::Int(1)),
-            Stmt::While(
-                Expr::BinOp(
-                    Box::new(Expr::Var("i".into())),
-                    BinOp::Lt,
-                    Box::new(Expr::MethodCall(
-                        Box::new(Expr::Var(xs.into())),
-                        "len".into(),
-                        vec![],
-                    )),
-                ),
-                vec![
-                    Stmt::If(
-                        Expr::BinOp(
-                            Box::new(Expr::Index(
-                                Box::new(Expr::Var(xs.into())),
-                                Box::new(Expr::Var("i".into())),
-                            )),
-                            cmp,
-                            Box::new(Expr::Var("m".into())),
-                        ),
-                        vec![Stmt::Assign(
-                            "m".into(),
-                            Expr::Index(
-                                Box::new(Expr::Var(xs.into())),
-                                Box::new(Expr::Var("i".into())),
-                            ),
-                        )],
-                        None,
-                    ),
-                    Stmt::Assign(
-                        "i".into(),
-                        Expr::BinOp(
-                            Box::new(Expr::Var("i".into())),
-                            BinOp::Add,
-                            Box::new(Expr::Int(1)),
-                        ),
-                    ),
-                ],
-            ),
-            Stmt::Return(Some(Expr::Var("m".into()))),
+            Stmt::Let(tgt.into(), Expr::Index(
+                Box::new(xs.clone()), Box::new(Expr::Int(0)))),
+            Stmt::For("__v".into(), xs.clone(), vec![
+                Stmt::If(
+                    Expr::BinOp(
+                        Box::new(Expr::Var("__v".into())), cmp,
+                        Box::new(Expr::Var(tgt.into()))),
+                    vec![Stmt::Assign(tgt.into(), Expr::Var("__v".into()))],
+                    None),
+            ]),
         ]
     }
 
@@ -2548,14 +2498,14 @@ mod asymptotic_proof {
             "let n = xs.len()\nlet best = xs.sort().reverse()[0]\nreturn best");
         let out = evolver.mutate_body(&body, Mutation::IdiomRewrite);
         let src = crate::fmt::format_program(&out);
-        assert!(src.contains("while"), "expected a scan loop, got:\n{}", src);
+        assert!(src.contains("for"), "expected a scan loop, got:\n{}", src);
         assert!(!src.contains(".sort()"), "sort survived:\n{}", src);
         // nested inside an if arm
         let body = parse_fn_body(
             "if xs.len() > 0 {\n  return xs.sort()[0]\n}\nreturn 0");
         let out = evolver.mutate_body(&body, Mutation::IdiomRewrite);
         let src = crate::fmt::format_program(&out);
-        assert!(src.contains("while") && !src.contains(".sort()"),
+        assert!(src.contains("for") && !src.contains(".sort()"),
             "nested idiom not rewritten:\n{}", src);
     }
 
@@ -2625,13 +2575,13 @@ mod asymptotic_proof {
         let body = parse_fn_body("let s = xs.sort()\nreturn s[s.len() - 1]");
         let out = evolver.mutate_body(&body, Mutation::IdiomRewrite);
         let src = crate::fmt::format_program(&out);
-        assert!(src.contains("while") && src.contains(">") && !src.contains(".sort()"),
+        assert!(src.contains("for") && src.contains(">") && !src.contains(".sort()"),
             "sort()[len-1] not rewritten to max scan:\n{}", src);
         // sort().reverse()[-1] -> MIN scan (<)
         let body = parse_fn_body("let s = xs.sort()\nlet r = s.reverse()\nreturn r[-1]");
         let out = evolver.mutate_body(&body, Mutation::IdiomRewrite);
         let src = crate::fmt::format_program(&out);
-        assert!(src.contains("while") && src.contains("<") && !src.contains(".sort()"),
+        assert!(src.contains("for") && src.contains("<") && !src.contains(".sort()"),
             "sort().reverse()[-1] not rewritten to min scan:\n{}", src);
     }
 
