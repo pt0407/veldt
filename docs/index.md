@@ -23,6 +23,7 @@ print(call_best("score", 21))   # 42 — the garden chose the fittest
 ```bash
 veldt run demo.veldt     # run a program
 veldt evolve 10          # 10 mutation cycles — new variants compete
+veldt rewrite --all      # deterministic idiom rewrites (sort->scan, loop->closed form)
 veldt garden             # census: who's alive, who's dying, fitness
 veldt test score         # re-trial a whole family
 veldt agent "make a fizzbuzz"   # the Gardener writes it for you
