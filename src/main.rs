@@ -2868,9 +2868,10 @@ fn main() {
                     }
                 }
             }
-            // --sim <game>: a real playthrough-fitness pass — each healthy
-            // variant of the scoped family plays the game (sim --pin) and is
-            // scored by the real outcome (won? score?), not the proxy tests.
+            // --sim <game>: generational playthrough-fitness — every cycle,
+            // the family's healthy variants play the game (sim --pin) and
+            // the winner's fitness reflects the real outcome, so the next
+            // mutation is bred from the variant that actually plays best.
             if let Some(game) = &sim_game {
                 let fam = fam_scope.map(|s| s.to_string())
                     .unwrap_or_else(|| "hero_move".into());
@@ -2894,9 +2895,6 @@ fn main() {
                         scored.push((v.id, score, won));
                         eprintln!("[SIM] {}#{} → {} (won: {})", fam, v.id, score, won);
                     }
-                    // the best playthrough gets a real fitness bump — the
-                    // variant that actually wins the game becomes the
-                    // family's champion, not the one that proxy-scored best
                     if let Some((id, score, won)) = scored.iter()
                         .max_by(|a, b| (a.2 as u8).cmp(&(b.2 as u8)).then(
                             a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)))
