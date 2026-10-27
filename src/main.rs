@@ -4578,6 +4578,35 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
             _ => false,
         }
     }
+    // `not x in y` parses as `(not x) in y` — not binds tighter than
+    // in. Flag BinOp(UnaryOp(Not, _), In, _) — almost certainly a bug.
+    fn contains_not_in(e: &Expr) -> bool {
+        match e {
+            Expr::BinOp(l, BinOp::In, _)
+                if matches!(l.as_ref(), Expr::UnaryOp(UnaryOp::Not, _)) => true,
+            Expr::BinOp(l, _, r) => contains_not_in(l) || contains_not_in(r),
+            Expr::UnaryOp(_, x) => contains_not_in(x),
+            Expr::Call(_, _, a) | Expr::List(a) | Expr::Interp(a) =>
+                a.iter().any(contains_not_in),
+            Expr::MethodCall(o, _, a) =>
+                contains_not_in(o) || a.iter().any(contains_not_in),
+            Expr::Index(o, i) => contains_not_in(o) || contains_not_in(i),
+            _ => false,
+        }
+    }
+    fn stmt_has_not_in(s: &Stmt) -> bool {
+        match s {
+            Stmt::Let(_, e) | Stmt::Assign(_, e) | Stmt::Print(e)
+            | Stmt::ExprStmt(e) => contains_not_in(e),
+            Stmt::Return(Some(e)) => contains_not_in(e),
+            Stmt::If(c, t, b) => contains_not_in(c)
+                || t.iter().any(stmt_has_not_in)
+                || b.as_ref().map(|x| x.iter().any(stmt_has_not_in)).unwrap_or(false),
+            Stmt::While(c, b) | Stmt::For(_, c, b) =>
+                contains_not_in(c) || b.iter().any(stmt_has_not_in),
+            _ => false,
+        }
+    }
     fn stmt_has_extremum(s: &Stmt) -> bool {
         match s {
             Stmt::Let(_, e) | Stmt::Assign(_, e) | Stmt::Print(e)
@@ -4640,6 +4669,9 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
         if !matches!(s, Stmt::Grow(_) | Stmt::FnDef(..))
             && (stmt_has_extremum(s) || staged_extremum(s)) {
             out.push("O(n log n) sort-to-extremum — `veldt rewrite` makes it O(n)".into());
+        }
+        if stmt_has_not_in(s) {
+            out.push("`not x in y` parses as `(not x) in y` — did you mean `not (x in y)`?".into());
         }
         match s {
             Stmt::Grow(GrowItem::Fn(name, params, body, tests)) => {
