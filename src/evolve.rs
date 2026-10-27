@@ -1470,11 +1470,16 @@ impl Evolver {
                 if body.len() == 1 {
                     if let Some((t2, op, k)) = accum_parts(&body[0]) {
                         if t2 == t {
-                            // t = t op x (the loop var itself) -> init op ITER.sum()
+                            // t = t op x (the loop var itself) -> init op ITER.<fold>()
                             if matches!(&k, Expr::Var(v) if v == x) {
-                                let summed = Expr::MethodCall(
-                                    Box::new(iter.clone()), "sum".into(), vec![]);
-                                let closed = Expr::BinOp(Box::new(init), op, Box::new(summed));
+                                let fold = match op {
+                                    BinOp::Add => "sum",
+                                    BinOp::Mul => "product",
+                                    _ => return None,
+                                };
+                                let folded = Expr::MethodCall(
+                                    Box::new(iter.clone()), fold.into(), vec![]);
+                                let closed = Expr::BinOp(Box::new(init), op, Box::new(folded));
                                 return Some((2, vec![Stmt::Let(t, closed)]));
                             }
                             if !uses(&k, &[&t, x]) {
@@ -3094,6 +3099,9 @@ mod asymptotic_proof {
              &[("xs", crate::ast::Type::List(Box::new(crate::ast::Type::Int)))]),
             // +=x -> sum()
             ("let t = 0\nfor x in xs { t += x }\nreturn t",
+             &[("xs", crate::ast::Type::List(Box::new(crate::ast::Type::Int)))]),
+            // *=x -> product()
+            ("let t = 1\nfor x in xs { t *= x }\nreturn t",
              &[("xs", crate::ast::Type::List(Box::new(crate::ast::Type::Int)))]),
             // count -> xs.count(t)
             ("let c = 0\nfor x in xs {\n  if x == t { c += 1 }\n}\nreturn c",
