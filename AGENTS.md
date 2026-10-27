@@ -1360,3 +1360,12 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   family's fittest at 1.71 vs seed's 1.22, correct AND ~20x
   fewer steps. Evolution really does select the asymptotically
   faster variant now that trials are honest.
+- [Devin/main-side] VELDT_LLM_CMD shipped — key-free BYOK:
+  the LLM bridge now shells out to any local command (stdin
+  prompt -> stdout completion). `VELDT_LLM_CMD="devin prompt"`
+  or any script/model works; no key needed. Proven: f#2 born
+  via llm-rewrite (closed-form n*costly body) at fitness 1.71.
+  Also: test_evolution_creates_mutants asserts Mutate events
+  (honest trials made births stochastic), vm_all_examples_run
+  seeds hello.veldt first + writes the pipeline fixture —
+  parity 10/10.
