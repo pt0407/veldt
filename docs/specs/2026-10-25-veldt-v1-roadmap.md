@@ -102,8 +102,8 @@ Target: within ~10-30x of Python on typical script workloads, not 500x.
 - [ ] GitHub release binaries — CI: macOS arm64/x86, linux x64, windows
 - [x] README rewrite: 60-second quickstart — install, hello world,
       args example, garden teaser, SMT gate + spec link
-- [ ] `docs/reference.md` — every builtin, signature, example (generate
-      from a table in the binary: `veldt docs <builtin>`)
+- [x] `docs/reference.md` — every builtin, signature, example (all 186
+      names covered; `veldt docs <builtin>` table exists)
 - [x] `veldt help <topic>` — run/repl/agent/evolve/garden/builtins/strings/lists/types/registry/sandbox/filter/lint topics
 - [x] `veldt new myapp` — scaffold `main.veldt` + README
 - [x] VSCode syntax highlighting — `editors/vscode/veldt.tmLanguage.json` (LSP also shipped: `veldt lsp`)
