@@ -1510,8 +1510,10 @@ function renderGarden() {
         const isFittest = v.id === fittest.id;
         const isChamp = champs.has(v.id);
         const kids = children[v.id] || [];
+        const trustBadge = v.trust === 'verified' ? '<span style="color:var(--moss-bright)" title="bounded-verified">✓</span> '
+          : v.trust === 'divergent' ? '<span style="color:var(--rust)" title="divergent — quarantined">⚠</span> ' : '';
         html += `<div class="tree-node"><div class="variant-item ${v.health}" data-name="${lineage.name}" data-id="${v.id}">
-          ${isFittest ? '<span class="star">◆</span> ' : ''}<span class="vid">#${v.id}</span> ${v.health}
+          ${isFittest ? '<span class="star">◆</span> ' : ''}<span class="vid">#${v.id}</span> ${v.health} ${trustBadge}
           ${isChamp ? '<span class="niche-badge">niche</span>' : ''}
           <span style="float:right;color:var(--text-dim)">${v.fitness}%</span>
           <span class="play" onclick="event.stopPropagation();runVariant('${lineage.name}',${v.id})" title="run this variant">▶</span>
