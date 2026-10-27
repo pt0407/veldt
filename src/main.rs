@@ -2897,8 +2897,20 @@ fn main() {
                 // variant of the scoped family plays the game (sim --pin) and
                 // is scored by the real outcome (won? score?), not the proxy.
                 if let Some(game) = &sim_game {
+                    // auto-detect the game's policy fn — the grow fn the
+                    // template names (hero_move/plat_move/shoot_policy/
+                    // snake_dir) — so '--sim snek' works without --family
                     let fam = fam_scope.map(|s| s.to_string())
-                        .unwrap_or_else(|| "hero_move".into());
+                        .unwrap_or_else(|| {
+                            let path = format!("examples/{}.veldt", game);
+                            std::fs::read_to_string(&path).ok()
+                                .and_then(|src| {
+                                    let m = regex::Regex::new(r"(?m)^grow fn (\w+)")
+                                        .unwrap();
+                                    m.captures(&src).map(|c| c[1].to_string())
+                                })
+                                .unwrap_or_else(|| "hero_move".into())
+                        });
                     if let Some(vs) = veldt.functions.get(&fam) {
                         eprintln!("[SIM] scoring {} {} variants by playthrough of {}",
                                   vs.len(), fam, game);
