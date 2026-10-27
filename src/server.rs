@@ -939,7 +939,13 @@ async fn game_input(
     let games = state.games.lock().unwrap();
     match games.get(&req.id) {
         Some(io) => {
-            *io.keys.lock().unwrap() = req.keys;
+            // a key in the new held-set that wasn't held before is a
+            // press — edge-triggered input (jump on press, not held)
+            let mut held = io.keys.lock().unwrap();
+            for k in req.keys.iter() {
+                if !held.contains(k) { io.note_pressed(k); }
+            }
+            *held = req.keys;
             Json(serde_json::json!({ "ok": true }))
         }
         None => Json(serde_json::json!({ "ok": false, "error": "no such session" })),
