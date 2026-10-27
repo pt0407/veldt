@@ -100,8 +100,8 @@ Target: within ~10-30x of Python on typical script workloads, not 500x.
 - [x] `veldt new myapp` — scaffold `main.veldt` + README — done
 - [ ] `cargo install veldt-lang` to crates.io (name availability check needed)
 - [ ] GitHub release binaries — CI: macOS arm64/x86, linux x64, windows
-- [ ] README rewrite: 60-second quickstart — install, hello world,
-      script with args/stdin/files, garden teaser, link to spec
+- [x] README rewrite: 60-second quickstart — install, hello world,
+      args example, garden teaser, SMT gate + spec link
 - [ ] `docs/reference.md` — every builtin, signature, example (generate
       from a table in the binary: `veldt docs <builtin>`)
 - [x] `veldt help <topic>` — run/repl/agent/evolve/garden/builtins/strings/lists/types/registry/sandbox/filter/lint topics

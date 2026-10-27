@@ -95,6 +95,14 @@ Variants climb a trust ladder: `seedling` → `established` → `canonical`.
 `call_best` prefers trusted variants, so a fresh mutant can't hijack
 your call sites.
 
+Two equivalence gates guard promotion: `veldt adopt name#N --verify`
+(bounded — replays trials/probes) and `--exact` (Z3 SMT — proves the
+variant equivalent to the fittest, or extracts a real counterexample
+and refuses to promote). `veldt verify <name> --exact` runs the check
+standalone; `veldt stats --exact` censuses the whole garden. Honest
+scope: ints/bools/floats + fixed-length lists, bounded loop unrolling
+— not full theorem proving.
+
 ## The Gardener
 
 `veldt agent` — a rule-based coding agent built into the toolchain:
@@ -117,14 +125,19 @@ stdlib/      shipped modules (str, math)
 examples/    runnable programs
 bench/       perf workloads + baselines
 docs/specs/  design docs + the v1.0 roadmap
-tests/       112 tests — cargo test
+tests/       140+ tests — cargo test
 ```
 
 ## Status
 
-Pre-1.0. The language is real and the garden works end-to-end; the
-interpreter is a tree-walk (fast enough for scripts, not for compute),
-and error messages are still growing up. Honest roadmap:
+Pre-1.0. The language is real and the garden works end-to-end.
+Three execution engines ship in one binary: the tree-walker
+(default), the bytecode VM, and a Cranelift JIT covering 100% of
+the instruction set (37/37 garden fns native — `--vm`/`--jit`
+flags throughout). Evolution can already do the headline trick:
+from `xs.sort().reverse()[0]` it autonomously derives an O(n)
+linear scan, scores it 20x more efficient, selects it — and the
+Z3 gate proves the two algorithms equivalent. Honest roadmap:
 `docs/specs/2026-10-25-veldt-v1-roadmap.md`.
 
 MIT licensed.
