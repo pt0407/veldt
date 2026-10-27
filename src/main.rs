@@ -475,7 +475,17 @@ fn main() {
                 eprintln!("'{}' already exists — won't overwrite", path);
                 process::exit(1);
             }
-            let src = game_template(name);
+            let src = if args.iter().any(|a| a == "--platformer") {
+                platformer_template(name)
+            } else if args.iter().any(|a| a == "--topdown" || a == "--realtime") {
+                realtime_game_template(name)
+            } else if args.iter().any(|a| a == "--shooter" || a == "--shmup") {
+                shooter_template(name)
+            } else if args.iter().any(|a| a == "--snake") {
+                snake_template(name)
+            } else {
+                game_template(name)
+            };
             if let Err(e) = std::fs::write(&path, &src) {
                 eprintln!("write failed: {}", e);
                 process::exit(1);
