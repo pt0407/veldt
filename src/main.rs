@@ -233,6 +233,11 @@ fn main() {
         // veldt verify --all [--quarantine] — audit every multi-variant
         // family; --quarantine demotes divergent variants to Dying so
         // call_best stops dispatching to them.
+        "doctor" => {
+            // veldt doctor — does this setup actually work? toolchain,
+            // paths, LLM provider, garden health
+            run_doctor();
+        }
         "verify" if args.iter().any(|a| a == "--all") => {
             let quarantine = args.iter().any(|a| a == "--quarantine");
             let mut veldt = veldt::Veldt::new();
@@ -6263,6 +6268,61 @@ fn install_project(path: &str) {
         let _ = std::fs::write(&dest, g);
     }
     println!("installed '{}': {}.veldt + garden — run `veldt run {}`", name, name, name);
+}
+
+/// `veldt doctor` — environment + toolchain sanity: what works,
+/// what's missing, what's next.
+fn run_doctor() {
+    let check = |label: &str, ok: bool, hint: &str| {
+        println!("  {} {:<26}{}", if ok { "✓" } else { "✗" }, label,
+                 if ok { "".into() } else { format!(" — {}", hint) });
+    };
+
+    println!("veldt doctor");
+    // compiler toolchain (for building veldt itself)
+    check("rustup (gnu toolchain)",
+        which_cmd("cargo") || which_cmd("rustc"),
+        "install rustup — https://rustup.rs");
+    // build CC/AR (llvm-mingw for the JIT / native work)
+    check("CC / AR (llvm-mingw)",
+        which_cmd("gcc") || std::env::var("CC").is_ok(),
+        "set CC/AR — see docs (llvm-mingw)");
+    check("perl (Awake/aiken deps)",
+        which_cmd("perl"),
+        "install Strawberry Perl — some build deps need it");
+
+    // optional providers
+    let llm_key = std::env::var("VELDT_LLM_KEY").is_ok();
+    let llm_cmd = std::env::var("VELDT_LLM_CMD").is_ok();
+    check("LLM provider", llm_key || llm_cmd,
+        "set VELDT_LLM_CMD (local cmd, no key) or VELDT_LLM_KEY");
+    check("`devin` CLI on PATH", which_cmd("devin"),
+        "install Devin CLI to use it as an LLM provider");
+
+    // garden health
+    let mut veldt = veldt::Veldt::new();
+    let loaded = veldt.load().is_ok();
+    check("garden loads", loaded, "no saved garden yet — run a program to seed it");
+    if loaded {
+        let (healthy, sick): (usize, usize) = veldt.functions.values()
+            .flat_map(|vs| vs.iter())
+            .fold((0, 0), |(h, s), e| match &e.health {
+                veldt::Health::Healthy => (h + 1, s),
+                veldt::Health::Sick(_) => (h, s + 1),
+                _ => (h, s),
+            });
+        println!("  garden: {} healthy · {} sick · {} families",
+                 healthy, sick, veldt.functions.len());
+    }
+
+    println!("\n`veldt run examples/hello.veldt` should print a greeting.");
+}
+
+/// is `cmd` on PATH? (where/which)
+fn which_cmd(cmd: &str) -> bool {
+    let probe = if cfg!(windows) { "where" } else { "which" };
+    std::process::Command::new(probe).arg(cmd)
+        .output().map(|o| o.status.success()).unwrap_or(false)
 }
 
 fn import_garden(path: &str) {

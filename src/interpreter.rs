@@ -2730,6 +2730,38 @@ impl Interpreter {
                 d2.insert("vy".into(), Value::Float(vy));
                 Ok(Some(Value::Dict(d2)))
             }
+            "anim" => {
+                // anim(e, frames) → entity with a sprite-frame list +
+                // a cycling `frame` index — animated sprites on /play
+                let (d, frames) = match (args.get(0), args.get(1)) {
+                    (Some(Value::Dict(d)), Some(Value::List(f))) => (d.clone(), f.clone()),
+                    _ => return Err("anim(e, frames) expects dict + list".into()),
+                };
+                let mut d2 = d.clone();
+                d2.insert("anim_frames".into(), Value::List(frames));
+                d2.insert("frame".into(), Value::Int(0));
+                Ok(Some(Value::Dict(d2)))
+            }
+            "anim_tick" => {
+                // anim_tick(e) → advance the frame index (wrap around)
+                let d = match args.get(0) {
+                    Some(Value::Dict(d)) => d.clone(),
+                    _ => return Err("anim_tick(e) expects an entity dict".into()),
+                };
+                let n = match d.get("anim_frames") {
+                    Some(Value::List(f)) => f.len() as i64, _ => 0 };
+                let mut d2 = d.clone();
+                if n > 0 {
+                    let cur = match d.get("frame") { Some(Value::Int(i)) => *i, _ => 0 };
+                    d2.insert("frame".into(), Value::Int((cur + 1) % n));
+                    if let Some(Value::List(f)) = d.get("anim_frames") {
+                        if let Some(sp) = f.get((cur as usize + 1) % f.len()) {
+                            d2.insert("sprite".into(), sp.clone());
+                        }
+                    }
+                }
+                Ok(Some(Value::Dict(d2)))
+            }
             "collide" => {
                 // collide(a, b) → AABB overlap — cells share the same ~1-tile space
                 let (a, b) = match (args.get(0), args.get(1)) {
