@@ -1032,21 +1032,30 @@ impl Evolver {
             if shadowed { continue; }
             if let Some(dx) = earlier {
                 // bail when the dup var is REASSIGNED downstream —
-                // aliasing would smash dx with dy's new value
-                let name_reassigned = win[i+1..].iter().any(|st|
-                    matches!(st, Stmt::Assign(n, _) if *n == name));
-                if name_reassigned { continue; }
+                // aliasing would smash dx with dy's new value. Recursive:
+                // assignments inside If/While/Try bodies count too.
+                fn assigns_to(stmts: &[Stmt], name: &str) -> bool {
+                    stmts.iter().any(|st| match st {
+                        Stmt::Assign(n, _) if n == name => true,
+                        Stmt::If(_, t, b) => assigns_to(t, name)
+                            || b.as_ref().map(|x| assigns_to(x, name)).unwrap_or(false),
+                        Stmt::While(_, b) | Stmt::For(_, _, b) => assigns_to(b, name),
+                        Stmt::Try(t, _, c) => assigns_to(t, name) || assigns_to(c, name),
+                        Stmt::Match(_, arms, els) =>
+                            arms.iter().any(|(_, b)| assigns_to(b, name))
+                            || els.as_ref().map(|x| assigns_to(x, name)).unwrap_or(false),
+                        _ => false,
+                    })
+                }
+                if assigns_to(&win[i+1..], &name) { continue; }
                 // rewrite: keep win[..i], drop the redundant let, rename
                 let mut out: Vec<Stmt> = win[..i].to_vec();
                 for st in &win[i+1..] {
                     out.push(subst_var_stmt(st, &name, &dx));
                 }
-                // dx must not be reassigned later either — if it is,
-                // the rename is still safe (dx's value at use-site may
-                // differ). Check: bail when dx assigned in tail.
-                let reassigns = out.iter().any(|st|
-                    matches!(st, Stmt::Assign(n, _) if *n == dx));
-                if reassigns { continue; }
+                // dx must not be reassigned later either (same hazard,
+                // recursive through nested blocks).
+                if assigns_to(&out, &dx) { continue; }
                 return Some((win.len(), out));
             }
         }
