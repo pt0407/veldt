@@ -204,3 +204,20 @@ live in the editor.
 `import "lib.veldt" as lib` → `lib.f()` / `lib.const` — module runs in
 isolation; its functions+vars are exposed as a dict of closures.
 Search: relative to file, then `VELDTPATH`, then shipped `stdlib/`.
+
+
+## Equivalence verification & honesty boundary (`--verify` vs `--exact`)
+
+Veldt provides two verification tiers for checking whether variants in a family compute the same function as the fittest variant before promoting them to `Canonical` trust:
+
+| Command | Tier | What it checks |
+|---|---|---|
+| `veldt verify <name> [--domain N] [--vm]` | **Bounded check** | Evaluates every healthy variant across `[-N..N]` (default `-10..10`) and reports agreement or divergence |
+| `veldt adopt <name#N> --verify` | **Bounded gate** | Promotes `<name#N>` to `Canonical` only if it agrees with the fittest variant on the bounded domain |
+| `veldt verify <name> --exact` | **SMT proof (`--features smt`)** | Encodes variant bodies into Z3 formulas (`Int`, `Real`, `Bool`, 4-element symbolic `List`) and solves `f(x) != v(x)`. `Unsat` = provably equivalent; `Sat` = real counterexample (auto-planted as a permanent `smt:cex` probe) |
+| `veldt adopt <name#N> --exact` | **SMT gate (`--features smt`)** | Promotes `<name#N>` to `Canonical` only if Z3 proves equivalence (`Unsat`) against the fittest variant |
+| `veldt stats --verified` / `veldt stats --exact` | **Garden census** | Reports how many multi-variant families pass bounded verification vs. Z3 SMT verification |
+
+**Honesty boundary:**
+- **Bounded verification (`--verify`)** checks a finite grid (`-10..10`), not the whole input space — a variant that diverges only at `x = 1_000_000` will pass bounded verification.
+- **SMT verification (`--exact`)** proves mathematical equivalence across all unbounded integers/reals/booleans for straight-line code, `if`/`match`, `try`/`catch` (division-by-zero guards), `for` loops, bounded `while` unrolling (6 iterations with exact loop-exit guards), and 4-element symbolic lists (including `.len()`, `.reverse()`, and sorting-network `.sort()`). It is bounded symbolic model checking for loops/lists (not inductive loop-invariant theorem proving), and bails cleanly to the bounded sweep on string/dict/unbounded-loop functions.

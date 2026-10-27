@@ -5754,6 +5754,34 @@ fn adopt_variant(target: &str) {
         let id: u32 = target[pos+1..].parse().unwrap_or(0);
         let mut veldt = veldt::Veldt::new();
         if let Err(e) = veldt.load() { eprintln!("Error: {}", e); process::exit(1); }
+        // --exact: Z3 SMT equivalence proof against the fittest variant
+        // before promoting to Canonical trust (Phase 12 gate).
+        if std::env::args().any(|a| a == "--exact") {
+            #[cfg(feature = "smt")]
+            {
+                match smt::verify_variant_exact(&veldt, name, id) {
+                    Ok(None) => {
+                        println!("{}#{} SMT-proven equivalent — safe to promote to Canonical",
+                                 name, id);
+                    }
+                    Ok(Some(cex)) => {
+                        println!("{}#{} PROVABLY DIVERGENT at ({}) — NOT promoting",
+                                 name, id, cex.join(", "));
+                        return;
+                    }
+                    Err(why) => {
+                        println!("{}#{} cannot be SMT-proven ({}) — NOT promoting under --exact",
+                                 name, id, why);
+                        return;
+                    }
+                }
+            }
+            #[cfg(not(feature = "smt"))]
+            {
+                eprintln!("[exact] requires the smt feature (cargo build --features smt)");
+                return;
+            }
+        }
         // --verify: bounded equivalence check against the fittest —
         // only promote if this variant agrees on every domain point.
         if verify {

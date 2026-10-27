@@ -735,6 +735,85 @@ pub fn verify_exact_on_veldt(
     })
 }
 
+
+/// Exact-verify a single target variant `vid` against the family's fittest.
+/// `Ok(None)` = provably equivalent; `Ok(Some(cex))` = counterexample found;
+/// `Err(why)` = uses ops outside the SMT fragment.
+pub fn verify_variant_exact(
+    veldt: &veldt::Veldt,
+    name: &str,
+    vid: u32,
+) -> Result<Option<Vec<String>>, String> {
+    let variants = veldt
+        .functions
+        .get(name)
+        .ok_or_else(|| format!("no family '{}'", name))?;
+    let target = variants
+        .iter()
+        .find(|v| v.id == vid)
+        .ok_or_else(|| format!("no variant {}#{}", name, vid))?
+        .clone();
+    let fittest = veldt
+        .get_fittest_variant(name)
+        .ok_or_else(|| format!("no fittest for '{}'", name))?;
+    if fittest.id == vid {
+        return Ok(None);
+    }
+    let params = fittest.params.clone();
+    if params.iter().any(|p| !param_supported(&p.typ)) {
+        return Err("unsupported param type — bail to bounded".into());
+    }
+    let f_body = fittest.body.clone();
+
+    let mut cfg = Config::new();
+    cfg.set_param_value("timeout", "250");
+    z3::with_z3_config(&cfg, move || -> Result<Option<Vec<String>>, String> {
+        let mut flat_syms: Vec<Dynamic> = Vec::new();
+        let mut base_env: HashMap<String, SymVal> = HashMap::new();
+        for p in &params {
+            let sv = make_sym_param(&p.name, &p.typ, &mut flat_syms);
+            base_env.insert(p.name.clone(), sv);
+        }
+        let (f_smt, f_assumptions) = body_to_smt(&f_body, base_env.clone(), veldt, 8)
+            .ok_or_else(|| "fittest uses non-SMT ops".to_string())?;
+        let (v_smt, v_assumptions) = body_to_smt(&target.body, base_env, veldt, 8)
+            .ok_or_else(|| format!("{}#{} uses non-SMT ops", name, vid))?;
+        let eq = f_smt
+            .eq_val(&v_smt)
+            .ok_or_else(|| format!("{}#{} return sort mismatch", name, vid))?;
+        let solver = Solver::new();
+        let mut sp = Params::new();
+        sp.set_u32("timeout", 200);
+        solver.set_params(&sp);
+        for a in &f_assumptions {
+            solver.assert(a);
+        }
+        for a in &v_assumptions {
+            solver.assert(a);
+        }
+        solver.assert(&eq.not());
+        match solver.check() {
+            SatResult::Unsat => Ok(None),
+            SatResult::Sat => {
+                let Some(model) = solver.get_model() else {
+                    return Err("sat but no model".into());
+                };
+                let cex: Vec<String> = flat_syms
+                    .iter()
+                    .map(|s| {
+                        model
+                            .eval(s, true)
+                            .map(|x| x.to_string())
+                            .unwrap_or_else(|| "?".into())
+                    })
+                    .collect();
+                Ok(Some(cex))
+            }
+            SatResult::Unknown => Err(format!("{}#{} — z3 undecided", name, vid)),
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

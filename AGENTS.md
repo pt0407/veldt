@@ -49,6 +49,12 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] PHASE 12 COMPLETE: `veldt adopt <fn#N> --exact`
+  gates Canonical promotion on Z3 SMT equivalence (`verify_variant_exact`:
+  `Unsat` promotes to Canonical, `Sat` prints the counterexample and
+  refuses). Honesty boundary (`--verify` finite grid vs `--exact`
+  bounded symbolic model checking) documented in `docs/reference.md`
+  and Phase 12 roadmap boxes all checked.
 - [Devin/main-side] PHASE 12 SMT EXPANSION (feature-gated `smt` preserved):
   `src/smt.rs` now encodes SymVal::{Scalar, List}, stateful SymState merge
   for `If`/`Match`/`Assign` + early `Return`, `Try/Catch` with symbolic
