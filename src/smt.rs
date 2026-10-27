@@ -676,15 +676,15 @@ fn expr_to_smt_raw(
             }
             Some(SymVal::List(out))
         }
-        Expr::SafeGet(obj, field, _args) => {
-            // `d?.k` on a dict -> select (absent key -> vnull, same as
-            // d[k]); on lists `xs?.m(...)` isn't encodable -> honest bail
+        Expr::SafeGet(obj, field, _) | Expr::FieldAccess(obj, field) => {
+            // `d?.k` / `d.k` on a dict -> select (absent key -> vnull,
+            // same as d[k]); non-dict receivers honest-bail
             let o_sv = expr_to_smt(obj, state, veldt, fuel)?;
             if let SymVal::Dict(arr) = &o_sv {
                 let k = vstr_const(&format!("lit_{}", field));
                 return Some(SymVal::Scalar(arr.select(&k)));
             }
-            state.note("safe-get over non-dict");
+            state.note("field/safe-get over non-dict");
             return None;
         }
         Expr::Index(obj, idx) => {
