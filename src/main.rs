@@ -7369,14 +7369,17 @@ while game_running() and not won and hp > 0 {
             hp = min(100, hp + 12)
             s = scene_despawn(s, hit["name"])
             sfx("coin")
+            emit("coin", hit["x"], hit["y"])
         }
         if hit["tag"] == "hunter" {
             hp = hp - 3
             sfx("hit")
+            emit("hit", hit["x"], hit["y"])
         }
         if hit["tag"] == "exit" {
             won = true
             sfx("win")
+            emit("win", hit["x"], hit["y"])
         }
     }
 
@@ -7488,10 +7491,12 @@ while game_running() and not won {
             score = score + 100
             s = scene_despawn(s, hit["name"])
             sfx("coin")
+            emit("coin", hit["x"], hit["y"])
         }
         if hit["tag"] == "exit" {
             won = true
             sfx("win")
+            emit("win", hit["x"], hit["y"])
         }
     }
 
