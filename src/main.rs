@@ -341,12 +341,33 @@ fn main() {
                 process::exit(1);
             }
             let file = args[2].clone();
+            // veldt.toml aware — a dir or a manifest resolves entry + name
+            let (file, mani_name) = if std::path::Path::new(&file).is_dir()
+                || file.ends_with(".toml")
+            {
+                let mpath = if file.ends_with(".toml") {
+                    file.clone()
+                } else { format!("{}/veldt.toml", file.trim_end_matches('/')) };
+                let msrc = std::fs::read_to_string(&mpath)
+                    .unwrap_or_else(|_| panic!("no veldt.toml in {}", file));
+                let entry = msrc.lines().find_map(|l| l.trim()
+                    .strip_prefix("entry").and_then(|r| r.split('=').nth(1))
+                    .map(|v| v.trim().trim_matches('"').to_string()))
+                    .unwrap_or_else(|| "main.veldt".into());
+                let n = msrc.lines().find_map(|l| l.trim()
+                    .strip_prefix("name").and_then(|r| r.split('=').nth(1))
+                    .map(|v| v.trim().trim_matches('"').to_string()));
+                let dir = std::path::Path::new(&file).parent()
+                    .map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+                (format!("{}/{}", if file.ends_with(".toml") { dir } else { file.clone() }, entry), n)
+            } else { (file, None) };
             let src = match std::fs::read_to_string(&file) {
                 Ok(s) => s,
                 Err(e) => { eprintln!("read {}: {}", file, e); process::exit(1); }
             };
             let name = args.iter().position(|a| a == "--name")
                 .and_then(|i| args.get(i + 1)).cloned()
+                .or(mani_name)
                 .unwrap_or_else(|| std::path::Path::new(&file)
                     .file_stem().unwrap_or_default()
                     .to_string_lossy().to_string());
