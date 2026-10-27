@@ -292,10 +292,22 @@ Veldt has a real-time 2D game engine — a program runs its own loop server-side
 | `anim` / `anim_tick` | `anim(e, frames)` / `anim_tick(e)` | Sprite frame animation |
 | `sfx` / `beep` | `sfx(name)` / `beep(freq, ms)` | Named tone events (WebAudio in browser, bell in CLI) |
 | `game_over` / `ui_menu` / `ui_prompt` | hud-markers | Win/lose overlay, menus, prompts |
+| `ent_def` / `spawn` | `ent_def(type, fields)` / `spawn(scene, type, x, y)` | Entity-type registry — declare a kind once, spawn instances |
+| `integrate` | `integrate(e, map, dt)` | Apply `vx`/`vy` velocity with per-axis tile collision |
+| `camera_follow` | `camera_follow(state, e, deadzone)` | Dead-zone scrolling camera tracking an entity |
+| `collide_any` / `collide_all` | `collide_any(e, scene)` / `collide_all(e, scene)` | First / all entities overlapping e — "what did I hit" |
+| `in_radius` | `in_radius(e, scene, r)` | Entities within r — aggro radius / explosions / magnet |
+| `dist` | `dist(a, b)` | Distance between two entities (or `dist(x1,y1,x2,y2)`) |
+| `move_toward` | `move_toward(e, tx, ty, speed)` | Step an entity toward a target — chase/flee AI |
+| `bullet` / `projectile` | `bullet(x, y, vx, vy, sprite)` | Spawn a moving projectile entity |
+| `cooldown` / `every` | `cooldown(key, n)` | True every n-th call — fire-rate / ability-cooldown gate |
+| `scene_each` / `each_entity` | `scene_each(scene, fn)` | Apply a fn to every entity — batch behaviors |
+| `emit` / `particle` | `emit(name, x, y)` | Transient visual effects — coin sparkle, hit flash |
+| `key_pressed` | `key_pressed(name)` | Edge-triggered input — true only the frame a key goes down |
 
 **Sessions**: `POST /api/game/start {source, name}` spawns a session → `GET /api/game/frame?id=` reads the latest scene → `POST /api/game/input {id, keys}` streams keys → `POST /api/game/stop {id}` ends it. The program's `keys()`/`game_frame`/`game_running` builtins bind to that session.
 
-**Templates**: `agent "make a game"` (ascii) · `agent "make a topdown"` / `"make a platformer"` (real-time engine) — the grown `hero_move`/`plat_move` policy auto-plays when no keys are held and is a `veldt improve`/`evolve` target.
+**Templates**: `agent "make a game"` (ascii) · `agent "make a topdown"` / `"make a platformer"` / `"make a shooter"` / `"make a snake"` (real-time engine) — the grown `hero_move`/`plat_move`/`shoot_policy`/`snake_dir` policy auto-plays when no keys are held and is a `veldt improve`/`evolve` target.
 
 **Deploy**: `veldt deploy <file> [--to URL]` puts a program on a running server — live at `/site/<name>` (watch) or `/play/<name>` (real-time). `veldt pack <file>`/`veldt install <file|url>` bundle source + garden for sharing.
 
