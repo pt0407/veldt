@@ -754,6 +754,8 @@ impl Evolver {
             Mutation::IdiomRewrite => {
                 if let Some((xs, is_max)) = Self::detect_sort_extremum(&new_body) {
                     new_body = Self::make_linear_extremum_scan(&xs, is_max);
+                } else {
+                    Self::apply_idiom_pass(&mut new_body);
                 }
             }
         }
@@ -827,6 +829,141 @@ impl Evolver {
             }
             _ => None,
         }
+    }
+
+    /// Recursive idiom pass: finds sort-extremum windows ANYWHERE in a
+    /// body (nested bodies included), plus `let x = xs.sort()...[0]`
+    /// bindings — not just whole-body shapes.
+    fn apply_idiom_pass(stmts: &mut Vec<Stmt>) -> bool {
+        for s in stmts.iter_mut() {
+            let changed = match s {
+                Stmt::If(_, t, e) =>
+                    Self::apply_idiom_pass(t)
+                        || e.as_mut().map(|b| Self::apply_idiom_pass(b)).unwrap_or(false),
+                Stmt::While(_, b) | Stmt::For(_, _, b) | Stmt::FnDef(_, _, b) =>
+                    Self::apply_idiom_pass(b),
+                Stmt::Try(t, _, c) =>
+                    Self::apply_idiom_pass(t) || Self::apply_idiom_pass(c),
+                Stmt::Match(_, arms, els) =>
+                    arms.iter_mut().any(|(_, b)| Self::apply_idiom_pass(b))
+                        || els.as_mut().map(|b| Self::apply_idiom_pass(b)).unwrap_or(false),
+                _ => false,
+            };
+            if changed { return true; }
+        }
+        for i in 0..stmts.len() {
+            if let Some((span, repl)) = Self::idiom_window(&stmts[i..]) {
+                stmts.splice(i..i + span, repl);
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Match one idiom window at the head of `win`; returns (span, replacement).
+    fn idiom_window(win: &[Stmt]) -> Option<(usize, Vec<Stmt>)> {
+        // is e an `Index(sort/rev chain, 0)`? -> (base expr, is_max)
+        fn extremum(e: &Expr) -> Option<(Expr, bool)> {
+            if let Expr::Index(recv, idx) = e {
+                if matches!(idx.as_ref(), Expr::Int(0)) {
+                    match recv.as_ref() {
+                        Expr::MethodCall(inner, m, a) if m == "reverse" && a.is_empty() => {
+                            if let Expr::MethodCall(base, sm, sa) = inner.as_ref() {
+                                if sm == "sort" && sa.is_empty() {
+                                    return Some(((**base).clone(), true));
+                                }
+                            }
+                        }
+                        Expr::MethodCall(base, sm, sa) if sm == "sort" && sa.is_empty() => {
+                            return Some(((**base).clone(), false));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            None
+        }
+        // 3-stmt staged: let s = xs.sort(); let r = s.reverse(); <tail r[0]>
+        if win.len() >= 3 {
+            if let (Stmt::Let(s, Expr::MethodCall(base, sm, sa)),
+                    Stmt::Let(r, Expr::MethodCall(recv, rm, ra))) = (&win[0], &win[1]) {
+                if sm == "sort" && sa.is_empty() && rm == "reverse" && ra.is_empty()
+                    && matches!(recv.as_ref(), Expr::Var(v) if v == s) {
+                    if let Some((tgt, ret)) = tail_uses(&win[2], r) {
+                        let mut out = Self::scan_binding(base, &tgt, true);
+                        if ret { out.push(Stmt::Return(Some(Expr::Var(tgt)))); }
+                        return Some((3, out));
+                    }
+                }
+            }
+        }
+        // 2-stmt staged: let s = xs.sort(); <tail s[0]>
+        if win.len() >= 2 {
+            if let Stmt::Let(s, Expr::MethodCall(base, sm, sa)) = &win[0] {
+                if sm == "sort" && sa.is_empty() {
+                    if let Some((tgt, ret)) = tail_uses(&win[1], s) {
+                        let mut out = Self::scan_binding(base, &tgt, false);
+                        if ret { out.push(Stmt::Return(Some(Expr::Var(tgt)))); }
+                        return Some((2, out));
+                    }
+                }
+            }
+        }
+        // 1-stmt inline: return <extremum>  /  let x = <extremum>
+        if let Some(stmt) = win.first() {
+            match stmt {
+                Stmt::Return(Some(e)) => {
+                    if let Some((base, is_max)) = extremum(e) {
+                        let mut out = Self::scan_binding(&base, "m", is_max);
+                        out.push(Stmt::Return(Some(Expr::Var("m".into()))));
+                        return Some((1, out));
+                    }
+                }
+                Stmt::Let(name, e) => {
+                    if let Some((base, is_max)) = extremum(e) {
+                        return Some((1, Self::scan_binding(&base, name, is_max)));
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    /// O(n) scan binding `tgt` to the extremum of `xs` (arbitrary expr —
+    /// non-Var receivers hoist into a `let __xs` first).
+    fn scan_binding(xs: &Expr, tgt: &str, is_max: bool) -> Vec<Stmt> {
+        let (mut pre, xs_name) = match xs {
+            Expr::Var(n) => (Vec::new(), n.clone()),
+            other => (vec![Stmt::Let("__xs".into(), other.clone())], "__xs".to_string()),
+        };
+        let cmp = if is_max { BinOp::Gt } else { BinOp::Lt };
+        pre.extend(vec![
+            Stmt::Let(tgt.into(), Expr::Index(
+                Box::new(Expr::Var(xs_name.clone())), Box::new(Expr::Int(0)))),
+            Stmt::Let("i".into(), Expr::Int(1)),
+            Stmt::While(
+                Expr::BinOp(
+                    Box::new(Expr::Var("i".into())), BinOp::Lt,
+                    Box::new(Expr::MethodCall(
+                        Box::new(Expr::Var(xs_name.clone())), "len".into(), vec![]))),
+                vec![
+                    Stmt::If(
+                        Expr::BinOp(
+                            Box::new(Expr::Index(
+                                Box::new(Expr::Var(xs_name.clone())),
+                                Box::new(Expr::Var("i".into())))),
+                            cmp, Box::new(Expr::Var(tgt.into()))),
+                        vec![Stmt::Assign(tgt.into(), Expr::Index(
+                            Box::new(Expr::Var(xs_name)),
+                            Box::new(Expr::Var("i".into()))))],
+                        None),
+                    Stmt::Assign("i".into(), Expr::BinOp(
+                        Box::new(Expr::Var("i".into())), BinOp::Add,
+                        Box::new(Expr::Int(1)))),
+                ]),
+        ]);
+        pre
     }
 
     fn make_linear_extremum_scan(xs: &str, is_max: bool) -> Vec<Stmt> {
@@ -1260,7 +1397,14 @@ impl Evolver {
     /// Apply one algebraic simplification to an expression (self first, then children).
     fn simplify_expr(&mut self, e: &mut Expr) -> bool {
         // check self: e op const patterns
-        let replacement: Option<Expr> = if let Expr::BinOp(l, op, r) = e {
+        let replacement: Option<Expr> = if let Expr::MethodCall(inner, m, a) = e {
+            // x.reverse().reverse() -> x  (O(n) double-reversal elimination)
+            if m == "reverse" && a.is_empty() {
+                if let Expr::MethodCall(x, m2, a2) = inner.as_ref() {
+                    if m2 == "reverse" && a2.is_empty() { Some((**x).clone()) } else { None }
+                } else { None }
+            } else { None }
+        } else if let Expr::BinOp(l, op, r) = e {
             match (op, l.as_ref(), r.as_ref()) {
                 // literal folding: Int op Int -> Int/Bool (cross-statement
                 // constant folding lands via ConstProp on the stmt level)
@@ -1660,6 +1804,20 @@ fn type_str(t: &Type) -> String {
     }
 }
 
+/// `return var[0]` -> ("m", true); `let x = var[0]` -> (x, false).
+fn tail_uses(stmt: &Stmt, var: &str) -> Option<(String, bool)> {
+    let is_var_idx0 = |e: &Expr| -> bool {
+        matches!(e, Expr::Index(recv, idx)
+            if matches!(idx.as_ref(), Expr::Int(0))
+               && matches!(recv.as_ref(), Expr::Var(v) if v == var))
+    };
+    match stmt {
+        Stmt::Return(Some(e)) if is_var_idx0(e) => Some(("m".into(), true)),
+        Stmt::Let(name, e) if is_var_idx0(e) => Some((name.clone(), false)),
+        _ => None,
+    }
+}
+
 fn mutation_name(m: Mutation) -> &'static str {
     match m {
         Mutation::Constant => "constant mutation",
@@ -1670,9 +1828,7 @@ fn mutation_name(m: Mutation) -> &'static str {
         Mutation::DeadBranch => "dead branch elimination",
         Mutation::HoistInvariant => "loop-invariant hoist",
         Mutation::Simplify => "simplification",
-        Mutation::DeadBranch => "dead-branch elimination",
         Mutation::ConstProp => "constant propagation",
-        Mutation::HoistInvariant => "loop-invariant hoisting",
         Mutation::EarlyExit => "early-exit fusion",
         Mutation::IdiomRewrite => "algorithmic idiom rewrite",
     }
@@ -2109,5 +2265,41 @@ mod asymptotic_proof {
         assert!(fittest.efficiency > 2.0,
             "expected evolved O(n) scan efficiency > 2.0x over sort.reverse[0], got {:.2}x",
             fittest.efficiency);
+    }
+
+    fn parse_fn_body(src: &str) -> Vec<Stmt> {
+        use crate::lexer::Lexer;
+        use crate::parser::Parser;
+        let tokens = Lexer::new(src).tokenize().unwrap();
+        Parser::new(tokens).parse_program().unwrap()
+    }
+
+    #[test]
+    fn idiom_rewrite_fires_on_let_binding_and_nested_bodies() {
+        let mut evolver = Evolver::new();
+        // let-binding form + surrounding prefix code — not a whole-body shape
+        let body = parse_fn_body(
+            "let n = xs.len()\nlet best = xs.sort().reverse()[0]\nreturn best");
+        let out = evolver.mutate_body(&body, Mutation::IdiomRewrite);
+        let src = crate::fmt::format_program(&out);
+        assert!(src.contains("while"), "expected a scan loop, got:\n{}", src);
+        assert!(!src.contains(".sort()"), "sort survived:\n{}", src);
+        // nested inside an if arm
+        let body = parse_fn_body(
+            "if xs.len() > 0 {\n  return xs.sort()[0]\n}\nreturn 0");
+        let out = evolver.mutate_body(&body, Mutation::IdiomRewrite);
+        let src = crate::fmt::format_program(&out);
+        assert!(src.contains("while") && !src.contains(".sort()"),
+            "nested idiom not rewritten:\n{}", src);
+    }
+
+    #[test]
+    fn simplify_kills_double_reverse() {
+        let mut evolver = Evolver::new();
+        let body = parse_fn_body("return xs.reverse().reverse()");
+        let out = evolver.mutate_body(&body, Mutation::Simplify);
+        let src = crate::fmt::format_program(&out);
+        assert!(!src.contains(".reverse()"), "double-reverse survived:\n{}", src);
+        assert!(src.contains("xs"), "receiver lost:\n{}", src);
     }
 }

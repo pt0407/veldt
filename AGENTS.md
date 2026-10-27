@@ -49,6 +49,14 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] IDIOM REWRITE GENERALIZED: `apply_idiom_pass` in
+  evolve.rs now rewrites sort-extremum windows ANYWHERE — `let x =
+  xs.sort().reverse()[0]` bindings, nested if/while/for/match/lambda
+  bodies, staged 2-3 stmt patterns, non-Var receivers (hoisted to
+  `let __xs`). Also: `x.reverse().reverse() -> x` landed in
+  simplify_expr (O(n) elim), duplicate mutation_name arms removed.
+  Tests: idiom_rewrite_fires_on_let_binding_and_nested_bodies +
+  simplify_kills_double_reverse (17/17 evolve tests green).
 - [Devin/main-side] Phase-1 sweep closed: `home()` builtin (HOME/
   USERPROFILE fallback) was the only missing OS/files item — ls/mkdir/
   rm/cp/mv/exists/cwd/read_lines/write_lines/file_size all existed.
