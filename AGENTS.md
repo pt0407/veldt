@@ -49,6 +49,16 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] SMT STRINGS: `Type::Str` params are now encodable
+  — strings live in an uninterpreted `VStr` sort; every string method
+  (len/index_of/count -> Int, contains/starts_with/ends_with/is_empty
+  -> Bool, upper/lower/trim/replace/substr/etc -> VStr) is an
+  uninterpreted function `vstr_<m>` (congruent => identical programs
+  provable, divergence detectable). `+` on VStr = `vstr_cat` UF;
+  string literals are deterministic `lit_<v>` consts. Test:
+  smt_strings_uninterpreted_equivalence_and_divergence (4/4 smt green).
+  NOTE: shout family still bails — shout#1 is `print("HELLO "+name)`
+  with unbound `name`, genuinely unencodable. That's honest.
 - [Devin/main-side] IDIOM FAMILY #2 — closed-form accumulation:
   `let t=init; for x in ITER { t += k }` -> `let t = init + k*len(ITER)`
   and `let i=0; let t=init; while i<n { t+=k; i+=1 }` -> `let t=init+k*n;

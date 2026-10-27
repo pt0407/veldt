@@ -386,6 +386,7 @@ fn expr_to_smt(
         Expr::Int(n) => Some(SymVal::Scalar(Int::from_i64(*n).into())),
         Expr::Float(f) => Some(SymVal::Scalar(float_to_real(*f)?.into())),
         Expr::Bool(b) => Some(SymVal::Scalar(Bool::from_bool(*b).into())),
+        Expr::Str(v) => Some(SymVal::Scalar(vstr_const(&format!("lit_{}", v)))),
         Expr::Var(name) => state.env.get(name).cloned(),
         Expr::List(items) => {
             let mut out = Vec::with_capacity(items.len());
@@ -434,6 +435,39 @@ fn expr_to_smt(
                     Some(SymVal::List(items.into_iter().rev().collect()))
                 }
                 (SymVal::List(items), "sort", 0) => Some(SymVal::List(sym_sort(items)?)),
+                (SymVal::Scalar(sv), m, nargs) => {
+                    // String methods as uninterpreted functions over VStr.
+                    // (return sort, expected arg count)
+                    let ret = match m {
+                        "len" | "index_of" | "count" => Sort::int(),
+                        "contains" | "starts_with" | "ends_with" | "is_empty" => Sort::bool(),
+                        "upper" | "lower" | "to_upper" | "to_lower" | "trim"
+                        | "ltrim" | "rtrim" | "replace" | "repeat" | "pad"
+                        | "substr" => vstr_sort(),
+                        _ => return None,
+                    };
+                    let expected = match m {
+                        "replace" | "substr" => 2,
+                        "index_of" | "count" | "contains" | "starts_with"
+                        | "ends_with" | "repeat" => 1,
+                        _ => 0,
+                    };
+                    if nargs != expected { return None; }
+                    let mut sorts: Vec<Sort> = vec![sv.get_sort()];
+                    let mut vals: Vec<Dynamic> = vec![sv];
+                    for a in args {
+                        let av = expr_to_smt(a, state, veldt, fuel)?.into_scalar()?;
+                        sorts.push(av.get_sort());
+                        vals.push(av);
+                    }
+                    let decl = FuncDecl::new(
+                        format!("vstr_{}", m),
+                        &sorts.iter().collect::<Vec<_>>(),
+                        &ret,
+                    );
+                    Some(SymVal::Scalar(decl.apply(
+                        &vals.iter().map(|v| v as &dyn z3::ast::Ast).collect::<Vec<_>>())))
+                }
                 _ => None,
             }
         }
@@ -491,6 +525,15 @@ fn expr_to_smt(
                 Neq => a.eq(&b).not().into(),
                 And => (a.as_bool()? & b.as_bool()?).into(),
                 Or => (a.as_bool()? | b.as_bool()?).into(),
+                // string + string: uninterpreted concat (same-sort VStr pair)
+                Add if a.get_sort() == b.get_sort()
+                    && a.as_int().is_none() && a.as_real().is_none()
+                    && a.as_bool().is_none() =>
+                {
+                    let srt = a.get_sort();
+                    FuncDecl::new("vstr_cat", &[&srt, &srt], &srt)
+                        .apply(&[&a, &b])
+                }
                 _ => return None,
             };
             Some(SymVal::Scalar(d))
@@ -606,9 +649,21 @@ fn calls_itself(stmts: &[Stmt], name: &str) -> bool {
     })
 }
 
+fn vstr_sort() -> Sort {
+    Sort::uninterpreted(z3::Symbol::String("VStr".into()))
+}
+
+/// A symbolic string constant: an element of the uninterpreted VStr
+/// sort. Every string builtin/method is an uninterpreted function
+/// over it — congruence is enough to prove identical computations
+/// equal and extract divergence witnesses.
+fn vstr_const(name: &str) -> Dynamic {
+    FuncDecl::new(name, &[], &vstr_sort()).apply(&[])
+}
+
 fn param_supported(t: &Type) -> bool {
     match t {
-        Type::Int | Type::Float | Type::Bool => true,
+        Type::Int | Type::Float | Type::Bool | Type::Str => true,
         Type::List(inner) => matches!(**inner, Type::Int | Type::Float | Type::Bool),
         _ => false,
     }
@@ -628,6 +683,11 @@ fn make_sym_param(name: &str, t: &Type, flat_syms: &mut Vec<Dynamic>) -> SymVal 
         }
         Type::Bool => {
             let d: Dynamic = Bool::new_const(name).into();
+            flat_syms.push(d.clone());
+            SymVal::Scalar(d)
+        }
+        Type::Str => {
+            let d = vstr_const(name);
             flat_syms.push(d.clone());
             SymVal::Scalar(d)
         }
@@ -861,5 +921,19 @@ mod tests {
         plant(&mut v, "grow fn safe_div(a: int, b: int) { if b == 0 { return 0 } else { return a / b } }");
         let res = verify_exact_on_veldt(&v, "safe_div").unwrap();
         assert!(res.is_none(), "expected try/catch and if b==0 guard to be proven equivalent, got {:?}", res);
+    }
+
+    #[test]
+    fn smt_strings_uninterpreted_equivalence_and_divergence() {
+        let mut v = veldt::Veldt::new();
+        plant(&mut v, "grow fn bang(s: str) { return s + \"!\" }");
+        plant(&mut v, "grow fn bang(s: str) { let e = \"!\" return s + e }");
+        let res = verify_exact_on_veldt(&v, "bang").unwrap();
+        assert!(res.is_none(),
+            "expected identical string programs proven equivalent, got {:?}", res);
+        // divergent: different literal suffix
+        plant(&mut v, "grow fn bang(s: str) { return s + \"?\" }");
+        let res = verify_exact_on_veldt(&v, "bang").unwrap();
+        assert!(res.is_some(), "expected counterexample for different literal");
     }
 }
