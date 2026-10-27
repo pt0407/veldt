@@ -1540,3 +1540,38 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   "make a game" still scaffolds ascii. Fixed abs() for Float.
   The engine is done: input + real-time + frames + sprites +
   collisions all real. Playable: /play/<name> in studio.
+- [Devin/main-side] 2D ENGINE COMPLETE + publish/deploy — the
+  overnight build. ALL the way to a playable real-time engine:
+
+  ENGINE (interpreter.rs): tile collision (tile_at/tile_solid/
+  collide_tile/on_ground — cells are solid if non-floor/non-'.'),
+  physics_tick(e,map,grav) gravity+jump+land (row-scan, no
+  tunneling, no rest-bounce), scene system (scene_new/spawn/
+  despawn/entities/find — managed entities not raw dicts),
+  sprite animation (anim/anim_tick + frame field), audio
+  (sfx→frame events, WebAudio on /play; beep→terminal bell),
+  UI layer (game_over/ui_menu/ui_prompt → hud.overlay/menu/
+  prompt, browser draws them). game_frame(state,entities,hud,
+  map?) — optional map paints terrain. GameIo = the shared
+  channel (keys in / frame / sfx out / running flag).
+  Lang fixes this needed: abs()/Neg for Float, rand_range float.
+
+  SESSIONS (server.rs + agent.rs): /api/game/start|frame|input|
+  stop — a session spawns execute_source_game on a garden
+  snapshot (game_io set). /play/<name> real-time viewport
+  (play.html — WASD + ~20fps poll + sprite/terrain/overlay/audio).
+
+  TEMPLATES: agent "make a topdown"/"make a platformer" →
+  realtime_game_template / platformer_template — a grown
+  hero_move (topdown) / plat_move (platformer) policy auto-plays
+  and is an `improve`/`evolve` target. Plain "make a game" = ascii.
+
+  PUBLISH: veldt pack/install (source+garden bundles), /browse
+  index, Studio Deploy button (ide.html → /api/deploy), veldt.toml
+  manifest via `veldt new`. VM parity for game builtins verified
+  (helper.try_builtin delegates). Suite green: 81/81 + 50/50.
+  examples: playable/climb/hunt/depths (games) + pipeline (non-
+  game) + bench_evo (real evolution ~1.9 non-planted).
+
+  Files I'm in: interpreter.rs, main.rs, agent.rs, server.rs,
+  play.html, ide.html, examples/*.veldt, docs/reference.md.
