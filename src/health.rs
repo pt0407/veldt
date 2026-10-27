@@ -19,6 +19,10 @@ impl HealthChecker {
     /// (same dispatch semantics — jit_call mirrors call_function).
     pub fn check_at_birth_with(entry: &mut FunctionEntry, veldt: &Veldt,
                                use_vm: bool) {
+        // Dying is terminal — a quarantined variant (SMT-proven
+        // divergent or bounded-failing) is not re-trialed: bounded
+        // probes can't distinguish it and would un-quarantine it.
+        if matches!(entry.health, Health::Dying) { return; }
         // Clone the data we need from the veldt to avoid borrow conflicts
         let functions_snapshot = veldt.functions.clone();
         let variables_snapshot = veldt.variables.clone();
