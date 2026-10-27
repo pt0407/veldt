@@ -151,7 +151,14 @@ function paint(frame) {
   for (let r = 0; r < h; r++) for (let c = 0; c < w; c++) {
     if ((r + c) % 2 === 0) { ctx.fillStyle = '#0a110d'; ctx.fillRect(c * cell, r * cell, cell, cell); }
   }
-  // terrain — the map's solid cells paint as beveled stone under the actors
+  // terrain — the map's cells paint per-char (a terrain tilesheet):
+  // '#' brick, '~' water, '=' platform, ',' floor, else beveled stone.
+  const TERRAIN = {
+    '#': ['#3a2e26', '#5a4a3a'],  // brick — dark brown + lighter mortar
+    '~': ['#16324a', '#2e5a7a'],  // water
+    '=': ['#5a4632', '#8a6a4a'],  // platform/wood
+    ',': ['#152318', '#223626'],  // rough floor
+  };
   const map = f.map;
   if (Array.isArray(map)) {
     for (let r = 0; r < map.length && r < h; r++) {
@@ -160,8 +167,15 @@ function paint(frame) {
         const ch = row[c];
         if (ch !== ' ' && ch !== '.') {
           const x = c * cell, y = r * cell;
-          ctx.fillStyle = '#1f3027'; ctx.fillRect(x, y, cell, cell);
-          ctx.fillStyle = '#2e4639'; ctx.fillRect(x + 1, y + 1, cell - 2, 3);
+          const [base, hi] = TERRAIN[ch] || ['#1f3027', '#2e4639'];
+          ctx.fillStyle = base; ctx.fillRect(x, y, cell, cell);
+          ctx.fillStyle = hi; ctx.fillRect(x + 1, y + 1, cell - 2, 3);
+          // brick courses — a faint vertical seam every other row on '#'
+          if (ch === '#') {
+            ctx.fillStyle = 'rgba(0,0,0,.18)';
+            if (r % 2 === 0) ctx.fillRect(x + cell/2, y, 1, cell);
+            ctx.fillRect(x, y + cell - 1, cell, 1);
+          }
         }
       }
     }
