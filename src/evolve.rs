@@ -3014,6 +3014,46 @@ mod asymptotic_proof {
         assert!(src.contains("for"), "unsafe count rewrite:\n{}", src);
     }
 
+    #[cfg(feature = "smt")]
+    #[test]
+    fn idiom_rewrites_are_provably_sound() {
+        // Every idiom rewrite is a FIXED transform — prove semantics
+        // preserved for each family via Z3 (Unsat = provably equivalent).
+        let mut evolver = Evolver::new();
+        let cases: &[(&str, &[(&str, crate::ast::Type)])] = &[
+            // sort-extremum -> for-scan
+            ("return xs.sort().reverse()[0]",
+             &[("xs", crate::ast::Type::List(Box::new(crate::ast::Type::Int)))]),
+            // accum loop -> closed form
+            ("let t = 0\nfor x in xs { t += 1 }\nreturn t",
+             &[("xs", crate::ast::Type::List(Box::new(crate::ast::Type::Int)))]),
+            // +=x -> sum()
+            ("let t = 0\nfor x in xs { t += x }\nreturn t",
+             &[("xs", crate::ast::Type::List(Box::new(crate::ast::Type::Int)))]),
+            // count -> xs.count(t)
+            ("let c = 0\nfor x in xs {\n  if x == t { c += 1 }\n}\nreturn c",
+             &[("xs", crate::ast::Type::List(Box::new(crate::ast::Type::Int))),
+                ("t", crate::ast::Type::Int)]),
+            // contains -> xs.contains(t)
+            ("for x in xs {\n  if x == t { return true }\n}\nreturn false",
+             &[("xs", crate::ast::Type::List(Box::new(crate::ast::Type::Int))),
+                ("t", crate::ast::Type::Int)]),
+        ];
+        for (src, params) in cases {
+            let before = parse_fn_body(src);
+            let after = evolver.mutate_body(&before, Mutation::IdiomRewrite);
+            let params: Vec<(String, crate::ast::Type)> = params.iter()
+                .map(|(n, t)| (n.to_string(), t.clone())).collect();
+            match crate::smt::verify_bodies_exact(&before, &after, &params) {
+                Ok(None) => {}
+                Ok(Some(cex)) => panic!("rewrite changed semantics: {} -> {:?}\ncex: {:?}",
+                    src, crate::fmt::format_program(&after), cex),
+                Err(why) => panic!("rewrite not provable: {} -> {:?}\n{}",
+                    src, crate::fmt::format_program(&after), why),
+            }
+        }
+    }
+
     #[test]
     fn idiom_rewrite_map_filter_loops() {
         let mut evolver = Evolver::new();

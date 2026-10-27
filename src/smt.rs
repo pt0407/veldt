@@ -448,9 +448,9 @@ fn exec_one(
             }
             Stmt::While(cond, body) => {
                 for _ in 0..UNROLL_BOUND {
-                    let c = expr_to_smt(cond, state, veldt, fuel)?
-                        .into_scalar().or_else(|| { state.note("aggregate where scalar expected"); None })?
-                        .as_bool().or_else(|| { state.note("expected bool"); None })?;
+                    let sv = expr_to_smt(cond, state, veldt, fuel)?
+                        .into_scalar().or_else(|| { state.note("aggregate where scalar expected"); None })?;
+                    let c = sv.as_bool().or_else(|| { state.note(format!("expected bool (sort {:?})", sv.get_sort())); None })?;
                     let go = (state.active() & &c).simplify();
                     if go.as_bool() == Some(false) {
                         break;
@@ -663,6 +663,16 @@ fn expr_to_smt_raw(
                     }
                     Some(SymVal::Scalar(acc.into()))
                 }
+                (SymVal::List(items), "count", 1) => {
+                    // occurrences of needle — sum of per-item eq booleans
+                    let needle = expr_to_smt(&args[0], state, veldt, fuel)?.into_scalar().or_else(|| { state.note("aggregate where scalar expected"); None })?;
+                    let mut acc = Int::from_i64(0);
+                    for it in items {
+                        let d = it.into_scalar().or_else(|| { state.note("aggregate where scalar expected"); None })?;
+                        acc = acc + d.eq(&needle).ite(&Int::from_i64(1), &Int::from_i64(0));
+                    }
+                    Some(SymVal::Scalar(acc.into()))
+                }
                 (SymVal::List(items), m @ ("min" | "max"), 0) => {
                     // pairwise ite reduction: min = ite(x1<x0, x1, x0)...
                     let mut it = items.into_iter();
@@ -757,6 +767,36 @@ fn expr_to_smt_raw(
             }
         }
         Expr::BinOp(l, op, r) => {
+            // `x in xs` / `x not in xs` — membership needs the raw
+            // SymVal: list RHS folds `x == it` pairwise, str RHS is a UF.
+            if matches!(op, BinOp::In) {
+                let neg = false;
+                let a_sv = expr_to_smt(l, state, veldt, fuel)?;
+                let b_sv = expr_to_smt(r, state, veldt, fuel)?;
+                let found: Bool = match b_sv {
+                    SymVal::List(items) => {
+                        let needle = a_sv.into_scalar().or_else(|| { state.note("aggregate where scalar expected"); None })?;
+                        let mut acc = Bool::from_bool(false);
+                        for it in items {
+                            let d = it.into_scalar().or_else(|| { state.note("aggregate where scalar expected"); None })?;
+                            acc = acc | d.eq(&needle);
+                        }
+                        acc
+                    }
+                    SymVal::Scalar(hay) => {
+                        let needle = a_sv.into_scalar().or_else(|| { state.note("aggregate where scalar expected"); None })?;
+                        let srt = vstr_sort();
+                        if hay.get_sort() == srt && needle.get_sort() == srt {
+                            let d = FuncDecl::new("vstr_contains", &[&srt, &srt], &Sort::bool());
+                            d.apply(&[&hay, &needle]).as_bool().or_else(|| { state.note("vstr_contains non-bool"); None })?
+                        } else {
+                            state.note("`in` over non-list/non-str");
+                            return None;
+                        }
+                    }
+                };
+                return Some(SymVal::Scalar(if neg { found.not().into() } else { found.into() }));
+            }
             let a_sv = expr_to_smt(l, state, veldt, fuel)?;
             let b_sv = expr_to_smt(r, state, veldt, fuel)?;
             let (a, b) = (a_sv.into_scalar().or_else(|| { state.note("aggregate where scalar expected"); None })?, b_sv.into_scalar().or_else(|| { state.note("aggregate where scalar expected"); None })?);
@@ -808,8 +848,8 @@ fn expr_to_smt_raw(
             let d: Dynamic = match op {
                 Eq => a.eq(&b).into(),
                 Neq => a.eq(&b).not().into(),
-                And => (a.as_bool().or_else(|| { state.note("expected bool"); None })? & b.as_bool().or_else(|| { state.note("expected bool"); None })?).into(),
-                Or => (a.as_bool().or_else(|| { state.note("expected bool"); None })? | b.as_bool().or_else(|| { state.note("expected bool"); None })?).into(),
+                And => (a.as_bool().or_else(|| { state.note(format!("expected bool (sort {:?})", a.get_sort())); None })? & b.as_bool().or_else(|| { state.note(format!("expected bool (sort {:?})", a.get_sort())); None })?).into(),
+                Or => (a.as_bool().or_else(|| { state.note(format!("expected bool (sort {:?})", a.get_sort())); None })? | b.as_bool().or_else(|| { state.note(format!("expected bool (sort {:?})", a.get_sort())); None })?).into(),
                 // string + string: uninterpreted concat (same-sort VStr pair)
                 Add if a.get_sort() == b.get_sort()
                     && a.as_int().is_none() && a.as_real().is_none()
@@ -834,7 +874,7 @@ fn expr_to_smt_raw(
                         a.as_real().or_else(|| { state.note("expected real"); None })?.unary_minus().into()
                     }
                 }
-                Not => a.as_bool().or_else(|| { state.note("expected bool"); None })?.not().into(),
+                Not => a.as_bool().or_else(|| { state.note(format!("expected bool (sort {:?})", a.get_sort())); None })?.not().into(),
             };
             Some(SymVal::Scalar(d))
         }
@@ -1252,6 +1292,56 @@ pub fn verify_pair_exact(
                 Ok(Some(cex))
             }
             SatResult::Unknown => Err(format!("{}#{} vs #{} — z3 undecided", name, a_id, b_id)),
+        }
+    })
+}
+
+/// Prove two raw bodies equivalent over the same symbolic params —
+/// used to certify an idiom rewrite preserved semantics (not just
+/// bounded-tested). Same return contract as verify_variant_exact.
+#[cfg(test)]
+pub fn verify_bodies_exact(
+    before: &[Stmt],
+    after: &[Stmt],
+    params: &[(String, Type)],
+) -> Result<Option<Vec<String>>, String> {
+    let empty = veldt::Veldt::new();
+    let mut cfg = Config::new();
+    cfg.set_param_value("timeout", "250");
+    z3::with_z3_config(&cfg, move || -> Result<Option<Vec<String>>, String> {
+        let mut flat_syms: Vec<Dynamic> = Vec::new();
+        let mut base_env: HashMap<String, SymVal> = HashMap::new();
+        for (n, t) in params {
+            let sv = make_sym_param(n, t, &mut flat_syms);
+            base_env.insert(n.clone(), sv);
+        }
+        let (a_smt, a_asm) = body_to_smt(before, base_env.clone(), &empty, 8)
+            .map_err(|r| format!("before: {}", r))?;
+        let (b_smt, b_asm) = body_to_smt(after, base_env, &empty, 8)
+            .map_err(|r| format!("after: {}", r))?;
+        let eq = a_smt.eq_val(&b_smt)
+            .ok_or_else(|| "return sort mismatch".to_string())?;
+        let solver = Solver::new();
+        let mut sp = Params::new();
+        sp.set_u32("timeout", 200);
+        solver.set_params(&sp);
+        for x in &a_asm { solver.assert(x); }
+        for x in &b_asm { solver.assert(x); }
+        solver.assert(&eq.not());
+        match solver.check() {
+            SatResult::Unsat => Ok(None),
+            SatResult::Sat => {
+                let Some(model) = solver.get_model() else {
+                    return Err("sat but no model".into());
+                };
+                let cex: Vec<String> = flat_syms.iter()
+                    .map(|s| model.eval(s, true)
+                        .map(|x| x.to_string())
+                        .unwrap_or_else(|| "?".into()))
+                    .collect();
+                Ok(Some(cex))
+            }
+            SatResult::Unknown => Err("z3 undecided".into()),
         }
     })
 }
