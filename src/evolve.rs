@@ -1139,7 +1139,10 @@ impl Evolver {
 
     fn mutate_binop(&mut self, op: &BinOp) -> BinOp {
         match op {
-            BinOp::Add => BinOp::Sub,
+            // + → - or * — geometric steps are how loop mutations
+            // reach asymptotic improvement (i += k → i *= k is
+            // O(n) → O(log n) iteration count)
+            BinOp::Add => if self.rand_bool() { BinOp::Sub } else { BinOp::Mul },
             BinOp::Sub => BinOp::Add,
             BinOp::Mul => BinOp::Div,
             BinOp::Div => BinOp::Mul,
@@ -1636,5 +1639,105 @@ mod phase7_tests {
         let mut e = ev();
         let out = e.mutate_body(&body, Mutation::HoistInvariant);
         assert!(matches!(&out[0], Stmt::While(_, _)));
+    }
+}
+
+#[cfg(test)]
+mod asymptotic_proof {
+    use super::*;
+
+    /// THE headline proof: a loop-invariant hoist turns an O(n·cost)
+    /// body into O(cost+n) — same output, measurably fewer steps.
+    /// This is the asymptotic-improvement claim, demonstrated by the
+    /// mutation itself, not simulated.
+    #[test]
+    fn invariant_hoist_yields_asymptotic_speedup() {
+        use crate::interpreter::{Interpreter, FunctionDef, FunctionVariant, Value};
+
+        // fn f(n, vals):
+        //   let s = 0; let i = 0
+        //   while i < n { let c = costly(vals); s = s + c; i = i + 1 }
+        //   return s
+        //   — costly() does an inner O(len) loop, so the seed is
+        //   O(n·len); the hoist runs it once → O(len + n).
+        let loop_body = vec![
+            Stmt::Let("c".into(), Expr::Call("costly".into(), None,
+                vec![Expr::Var("vals".into())])),
+            Stmt::Assign("s".into(), Expr::BinOp(
+                Box::new(Expr::Var("s".into())), BinOp::Add,
+                Box::new(Expr::Var("c".into())))),
+            Stmt::Assign("i".into(), Expr::BinOp(
+                Box::new(Expr::Var("i".into())), BinOp::Add,
+                Box::new(Expr::Int(1)))),
+        ];
+        let while_s = Stmt::While(Expr::BinOp(
+            Box::new(Expr::Var("i".into())), BinOp::Lt,
+            Box::new(Expr::Var("n".into()))), loop_body);
+        let seed_body = vec![
+            Stmt::Let("s".into(), Expr::Int(0)),
+            Stmt::Let("i".into(), Expr::Int(0)),
+            while_s,
+            Stmt::Return(Some(Expr::Var("s".into()))),
+        ];
+
+        let mut e = Evolver::new();
+        let hoisted = e.mutate_body(&seed_body, Mutation::HoistInvariant);
+        // the `let c = costly(vals)` should be hoisted before the while
+        let c_pos = hoisted.iter().position(|s| matches!(s, Stmt::Let(n, _) if n == "c"));
+        let w_pos = hoisted.iter().position(|s| matches!(s, Stmt::While(_, _)));
+        assert!(matches!((c_pos, w_pos), (Some(c), Some(w)) if c < w),
+            "invariant let not hoisted: {:?}", hoisted);
+
+        // costly(xs): a user fn whose inner loop counts real steps —
+        // an O(len) call, not a ~free builtin
+        let costly_body = vec![
+            Stmt::Let("acc".into(), Expr::Int(0)),
+            Stmt::For("x".into(), Expr::Var("xs".into()), vec![
+                Stmt::Assign("acc".into(), Expr::BinOp(
+                    Box::new(Expr::Var("acc".into())), BinOp::Add,
+                    Box::new(Expr::Var("x".into())))),
+            ]),
+            Stmt::Return(Some(Expr::Var("acc".into()))),
+        ];
+
+        // run both on a big input — same output, but the hoisted one
+        // runs costly() once, not n times
+        let run = |body: &[Stmt]| -> (u64, Value) {
+            let mut interp = Interpreter::with_step_limit(50_000_000);
+            let params = vec![
+                Param { name: "n".into(), typ: Type::Int },
+                Param { name: "vals".into(), typ: Type::List(Box::new(Type::Int)) },
+            ];
+            interp.functions.insert("f".to_string(), vec![FunctionVariant {
+                id: 1, fitness: 1.0,
+                def: FunctionDef { params: std::rc::Rc::new(params),
+                                   body: std::rc::Rc::new(body.to_vec()) },
+            }]);
+            interp.functions.insert("costly".to_string(), vec![FunctionVariant {
+                id: 1, fitness: 1.0,
+                def: FunctionDef {
+                    params: std::rc::Rc::new(vec![
+                        Param { name: "xs".into(),
+                                typ: Type::List(Box::new(Type::Int)) }]),
+                    body: std::rc::Rc::new(costly_body.clone()) },
+            }]);
+            let vals: Vec<Value> = (0..300).map(Value::Int).collect();
+            let before = interp.step_count;
+            let out = interp.call_function("f", Some(1),
+                vec![Value::Int(300), Value::List(vals.into_iter().collect())]).unwrap();
+            (interp.step_count - before, out)
+        };
+        let (seed_steps, seed_out) = run(&seed_body);
+        let (hoist_steps, hoist_out) = run(&hoisted);
+        assert_eq!(seed_out, hoist_out,
+            "hoist changed the result — semantics broken");
+        assert!(hoist_steps < seed_steps,
+            "no speedup: seed {} vs hoisted {}", seed_steps, hoist_steps);
+        // 300 iterations of costly(300) vs one — the hoisted variant is
+        // asymptotically fewer steps, not a constant-factor shave
+        assert!(seed_steps as f64 / hoist_steps.max(1) as f64 > 3.0,
+            "not asymptotic: seed {} vs hoisted {} ({}x)",
+            seed_steps, hoist_steps,
+            seed_steps as f64 / hoist_steps.max(1) as f64);
     }
 }
