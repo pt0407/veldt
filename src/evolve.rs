@@ -28,6 +28,51 @@ pub struct Evolver {
     impure_fns: std::collections::HashSet<String>,
 }
 
+/// Plant `count` probes on `name` by running the fittest variant on
+/// generated inputs — gives bare lineages selection pressure.
+/// Shared by `veldt probe` and `agent "probe"`.
+pub(crate) fn plant_probes(veldt: &mut crate::veldt::Veldt,
+                            name: &str, count: usize) -> usize {
+    let Some(entry) = veldt.get_fittest_variant(name).cloned() else { return 0 };
+    let mut ev = Evolver::new();
+    let mut interp = crate::interpreter::Interpreter::with_step_limit(10000);
+    interp.caps = crate::interpreter::Caps::sandboxed();
+    crate::health::HealthChecker::load_snapshot_into_interp(
+        &veldt.functions, &veldt.variables, &veldt.structs, &mut interp);
+    interp.functions.entry(name.to_string()).or_default()
+        .push(crate::interpreter::FunctionVariant {
+            id: entry.id,
+            fitness: entry.fitness,
+            def: crate::interpreter::FunctionDef {
+                params: std::rc::Rc::new(entry.params.clone()),
+                body: entry.body.clone().into(),
+            },
+        });
+    let born_ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs()).unwrap_or(0);
+    let mut vm: Option<crate::vm::Vm> = None;
+    let mut planted = 0usize;
+    for _ in 0..count {
+        let args_v: Vec<crate::interpreter::Value> = entry.params.iter()
+            .filter_map(|p| ev.gen_value_in(&p.typ, &veldt.structs)).collect();
+        if args_v.len() != entry.params.len() { continue; }
+        if let Ok(val) = crate::health::HealthChecker::call_one(
+            &mut interp, &mut vm, name, Some(entry.id), args_v.clone()) {
+            let ser_args: Vec<String> = args_v.iter()
+                .filter_map(|a| serde_json::to_string(a).ok()).collect();
+            let ser_out = serde_json::to_string(&val).unwrap_or_default();
+            let niche = Evolver::niche_signature(&args_v);
+            veldt.probes.entry(name.to_string()).or_default().push(crate::veldt::Probe {
+                args: ser_args, expected: ser_out, niche,
+                born: born_ts, scale: 0,
+            });
+            planted += 1;
+        }
+    }
+    planted
+}
+
 impl Evolver {
     pub fn new() -> Self {
         let seed = SystemTime::now()

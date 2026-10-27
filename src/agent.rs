@@ -250,6 +250,9 @@ pub fn respond(task: &str, editor_source: &str, veldt: &mut Veldt) -> AgentRespo
     if hasw(&["heal", "tend", "mend"]) || has(&["sick", "fix the garden"]) {
         return tend_intent(veldt);
     }
+    if hasw(&["probe"]) {
+        return probe_intent(&words, veldt);
+    }
     if hasw(&["rewrite"]) {
         return rewrite_intent(&words, veldt);
     }
@@ -2174,6 +2177,35 @@ print("@N@(97) = " + @N@(97))
             "I don't know a faster strain for {} — my improvements cover fib (fast-doubling), is_prime (odd-only), and the builtin-stdlib strains (sort, reverse, join). Try \"evolve\" and let mutation try instead.", n)),
         None => plain("Improve what? I know fast strains for fib and is_prime, plus builtin strains for sort/reverse/join — say \"improve sort\". For others, \"evolve\" is the path."),
     }
+}
+
+/// "probe <name>" / "probe all" — plant probes on generated inputs
+/// so bare lineages get selection pressure (same path as `veldt probe`).
+fn probe_intent(words: &[&str], veldt: &mut Veldt) -> AgentResponse {
+    let bare: Vec<String> = if words.iter().any(|w| *w == "all" || *w == "every") {
+        veldt.functions.keys()
+            .filter(|n| !veldt.probes.contains_key(*n) || veldt.probes[*n].is_empty())
+            .cloned().collect()
+    } else {
+        match find_lineage(words, veldt) {
+            Some(n) => vec![n],
+            None => return plain("Probe what? Give me a family — e.g. \"probe max_val\" or \"probe all\"."),
+        }
+    };
+    if bare.is_empty() {
+        return plain("Every lineage already has probes — selection pressure is full.");
+    }
+    let mut total = 0usize;
+    let mut names = Vec::new();
+    for name in &bare {
+        let p = crate::evolve::plant_probes(veldt, name, 8);
+        if p > 0 { names.push(name.clone()); total += p; }
+    }
+    plain(&format!("planted {} probe(s) across {} lineage(s){}",
+                   total, names.len(),
+                   if names.len() <= 6 {
+                       format!(" — {}", names.join(", "))
+                   } else { String::new() }))
 }
 
 /// "rewrite <name#N>" — deterministic idiom rewrite, births the

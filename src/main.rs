@@ -703,42 +703,7 @@ fn main() {
             let Some(entry) = veldt.get_fittest_variant(&name).cloned() else {
                 eprintln!("no fittest variant of '{}'", name); continue;
             };
-            let mut ev = evolve::Evolver::new();
-            let mut interp = interpreter::Interpreter::with_step_limit(10000);
-            interp.caps = crate::interpreter::Caps::sandboxed();
-            health::HealthChecker::load_snapshot_into_interp(
-                &veldt.functions, &veldt.variables, &veldt.structs, &mut interp);
-            interp.functions.entry(name.clone()).or_default()
-                .push(crate::interpreter::FunctionVariant {
-                    id: entry.id,
-                    fitness: entry.fitness,
-                    def: crate::interpreter::FunctionDef {
-                        params: std::rc::Rc::new(entry.params.clone()),
-                        body: entry.body.clone().into(),
-                    },
-                });
-            let born_ts = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs()).unwrap_or(0);
-            let mut vm: Option<crate::vm::Vm> = None;
-            let mut planted = 0usize;
-            for _ in 0..count {
-                let args_v: Vec<crate::interpreter::Value> = entry.params.iter()
-                    .filter_map(|p| ev.gen_value_in(&p.typ, &veldt.structs)).collect();
-                if args_v.len() != entry.params.len() { continue; }
-                if let Ok(v) = health::HealthChecker::call_one(
-                    &mut interp, &mut vm, &name, Some(entry.id), args_v.clone()) {
-                    let ser_args: Vec<String> = args_v.iter()
-                        .filter_map(|a| serde_json::to_string(a).ok()).collect();
-                    let ser_out = serde_json::to_string(&v).unwrap_or_default();
-                    let niche = evolve::Evolver::niche_signature(&args_v);
-                    veldt.probes.entry(name.clone()).or_default().push(veldt::Probe {
-                        args: ser_args, expected: ser_out, niche,
-                        born: born_ts, scale: 0,
-                    });
-                    planted += 1;
-                }
-            }
+            let planted = evolve::plant_probes(&mut veldt, &name, count);
             println!("  {}#{}: {} probe(s) planted", name, entry.id, planted);
             total += planted;
             }
