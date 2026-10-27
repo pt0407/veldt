@@ -7438,16 +7438,24 @@ lvl = canvas_fill(lvl, 29, 10, 5, 1, "#")     # upper walk
 lvl = canvas_fill(lvl, 14, 13, 4, 1, " ")     # a pit in the ground
 
 let g = game_new(36, 14)
-let player = entity("player", 2, 11, "hero")
-let exit = entity("exit", 34, 12, "exit")
-let coins = [entity("coin", 7, 9, "coin"), entity("coin", 16, 6, "coin"),
-             entity("coin", 24, 3, "coin"), entity("coin", 31, 9, "coin")]
+# entity types declared once via the DSL — spawn() instances them
+ent_def("player", dict().put("sprite", "hero").put("tag", "player").put("vx", 0.0).put("vy", 0.0))
+ent_def("exit",   dict().put("sprite", "exit").put("tag", "exit"))
+ent_def("coin",   dict().put("sprite", "coin").put("tag", "coin"))
+let s = scene_new(36, 14)
+let s = spawn(s, "player", 2, 11)
+let s = spawn(s, "exit", 34, 12)
+let s = spawn(s, "coin", 7, 9)
+let s = spawn(s, "coin", 16, 6)
+let s = spawn(s, "coin", 24, 3)
+let s = spawn(s, "coin", 31, 9)
 let hp = 100
 let score = 0
 let won = false
 
 # --- real-time platformer loop ---
 while game_running() and not won {
+    let p = scene_find(s, "player")[0]
     let k = keys()
     let dx = 0
     let jump = 0
@@ -7455,48 +7463,50 @@ while game_running() and not won {
     if k.contains("right") { dx = 1 }
     if k.contains("up") or k.contains("space") { jump = 1 }
     if dx == 0 and jump == 0 {
-        let m = plat_move(player["x"], player["y"], exit["x"], exit["y"])
+        let m = plat_move(p["x"], p["y"], 34, 12)
         dx = m[0]
         jump = m[1]
     }
 
     # horizontal — move if the target tile is open
-    let p2 = ent_move(player, dx, 0)
-    if not tile_solid(lvl, p2["x"], p2["y"]) { player = p2 }
+    let p2 = ent_move(p, dx, 0)
+    if not tile_solid(lvl, p2["x"], p2["y"]) {
+        s = scene_despawn(s, p["name"])
+        s = scene_spawn(s, p2)
+        p = p2
+    }
 
     # jump — launch up only when grounded
-    if jump == 1 and on_ground(player, lvl) {
-        player = ent_vel(player, 0, -1.6)
+    if jump == 1 and on_ground(p, lvl) {
+        s = scene_despawn(s, p["name"])
+        p = ent_vel(p, 0, -1.6)
+        s = scene_spawn(s, p)
     }
     # gravity + land
-    player = physics_tick(player, lvl, 0.35)
+    s = scene_despawn(s, p["name"])
+    p = physics_tick(p, lvl, 0.35)
+    s = scene_spawn(s, p)
 
-    # grab coins
-    let remaining = []
-    let gi = 0
-    while gi < coins.len() {
-        let c = coins[gi]
-        if collide(player, c) {
+    # grab coins + reach the exit — collide_any is the "what did I touch" query
+    let hit = collide_any(p, s)
+    if hit != null {
+        if hit["tag"] == "coin" {
             score = score + 100
-        } else {
-            remaining.append(c)
+            s = scene_despawn(s, hit["name"])
+            sfx("coin")
         }
-        gi = gi + 1
+        if hit["tag"] == "exit" {
+            won = true
+            sfx("win")
+        }
     }
-    coins = remaining
 
-    if collide(player, exit) { won = true }
+    # camera tracks the player (dead-zone scrolling)
+    g = camera_follow(g, p, 4.0)
 
     let hud = dict()
     hud["score"] = score
-    hud["coins"] = coins.len()
-    let scene = [player, exit]
-    gi = 0
-    while gi < coins.len() {
-        scene.append(coins[gi])
-        gi = gi + 1
-    }
-    game_frame(g, scene, hud, lvl)
+    game_frame(g, scene_entities(s), hud, lvl)
     sleep(80)
 }
 print("finished — score " + score)
