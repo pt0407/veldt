@@ -5162,9 +5162,8 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                 if !name.starts_with('_') && bound.iter().any(|(_, b)| *b == name) {
                     out.push(format!("for variable {} shadows an outer let", name));
                 }
-                if !body.iter().any(|s| has_exit(s)) {
-                    out.push("loop body has no break/return/continue — check the exit condition".into());
-                }
+                // for-element loops terminate on their own — no
+                // exit-condition warning (only `while` warrants it)
                 if matches!(body.last(), Some(Stmt::Continue)) {
                     out.push("continue as the last statement of a loop body — redundant".into());
                 }
