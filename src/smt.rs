@@ -388,6 +388,32 @@ fn expr_to_smt(
         Expr::Bool(b) => Some(SymVal::Scalar(Bool::from_bool(*b).into())),
         Expr::Str(v) => Some(SymVal::Scalar(vstr_const(&format!("lit_{}", v)))),
         Expr::Var(name) => state.env.get(name).cloned(),
+        Expr::Interp(parts) => {
+            // "a{e}b" folds into vstr_cat(vstr_cat(lit_a, vstr_of(e)), lit_b)
+            let mut acc: Option<Dynamic> = None;
+            let cat = |a: Dynamic, b: Dynamic| -> Dynamic {
+                let srt = a.get_sort();
+                FuncDecl::new("vstr_cat", &[&srt, &b.get_sort()], &srt)
+                    .apply(&[&a, &b])
+            };
+            for p in parts {
+                let d = match p {
+                    Expr::Str(v) => vstr_const(&format!("lit_{}", v)),
+                    other => {
+                        let sv = expr_to_smt(other, state, veldt, fuel)?.into_scalar()?;
+                        if sv.get_sort() == vstr_sort() {
+                            sv
+                        } else {
+                            // non-str value -> vstr_of_<sort>: uninterpreted to-string
+                            let srt = sv.get_sort();
+                            FuncDecl::new("vstr_of", &[&srt], &vstr_sort()).apply(&[&sv])
+                        }
+                    }
+                };
+                acc = Some(match acc { None => d, Some(a) => cat(a, d) });
+            }
+            Some(SymVal::Scalar(acc.unwrap_or_else(|| vstr_const("lit_"))))
+        }
         Expr::List(items) => {
             let mut out = Vec::with_capacity(items.len());
             for item in items {
@@ -604,6 +630,18 @@ fn expr_to_smt(
             // Builtin math functions
             if vid.is_none() && !veldt.functions.contains_key(name) {
                 match (name.as_str(), args.len()) {
+                    ("range", 1) => {
+                        // concrete trip count only — symbolic lengths bail
+                        let n = expr_to_smt(&args[0], state, veldt, fuel)?
+                            .into_scalar()?
+                            .as_int()?
+                            .as_i64()?;
+                        if !(0..=64).contains(&n) { return None; }
+                        let items: Vec<SymVal> = (0..n)
+                            .map(|i| SymVal::Scalar(Int::from_i64(i).into()))
+                            .collect();
+                        return Some(SymVal::List(items));
+                    }
                     ("abs", 1) => {
                         let x = expr_to_smt(&args[0], state, veldt, fuel)?.into_scalar()?;
                         if let Some(xi) = x.as_int() {

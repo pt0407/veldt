@@ -49,6 +49,12 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] SMT ROUND 2: exact list ops (sum->x0+..+xN,
+  contains->disjunction, index_of->ite-chain, first/last/push) +
+  range(n) with concrete n + Expr::Interp -> vstr_cat/vstr_of chain.
+  Census: 27 proven-equiv / 13 bail. Remaining bails are honest:
+  dict ops, regex, nested lists (game fns), str->list methods
+  (chars/split need symbolic length), shout#1 (unbound var).
 - [Devin/main-side] IDIOM EXTREMUM COMPLETE: last-index forms now
   covered — xs.sort()[-1]/[s.len()-1] -> MAX scan, sort().reverse()
   [-1] -> MIN scan (staged + inline + let-binding). GOTCHA for future
