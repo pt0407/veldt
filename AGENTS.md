@@ -49,6 +49,7 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
 > Phase 0 is 100% complete; Phase 1 is the open frontier.
 
 ## Handoff log (append, newest first)
+- [Devin/main-side] veldt rewrite <name#N> — deterministic idiom rewrite as a first-class CLI verb: applies Mutation::IdiomRewrite to a specific variant, births the optimized child through grow_function_full + check_at_birth (no idiom matched -> prints "already optimal shape", plants nothing). Live demo: rewrite max_val#10 -> max_val#30 born healthy. Also added Evolver::rewrite_idioms pub wrapper.
 - [Devin/main-side] TEST FIX: vm_all_examples_run was hanging — climb.veldt (interactive platformer w/ 500M-step budget) runs forever under --vm CLI. Skipped climb/playable/depths.veldt in the parity loop (they are browser /play targets, not CLI programs). Suite green again (10/10, 113s).
 - [Devin/main-side] list.index_of EXISTS NOW + linsearch idiom: xs.index_of(v) builtin added (position or -1, values_eq, 2n steps) — help/reference promised it but the method was missing. linsearch_window: `let i=0; while i<xs.len() { if xs[i]==t { return i } i+=1 } return -1` -> `return xs.index_of(t)` guarded by t-not-using-i. 20/20 evolve tests.
 - [Devin/main-side] list.index_of EXISTS NOW + linsearch idiom:

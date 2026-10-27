@@ -607,6 +607,12 @@ impl Evolver {
         (out, last)
     }
 
+    /// Deterministic idiom rewrite for the CLI — returns the rewritten
+    /// body (unchanged body = no idiom matched).
+    pub fn rewrite_idioms(&mut self, body: &[Stmt]) -> Vec<Stmt> {
+        self.mutate_body(body, Mutation::IdiomRewrite)
+    }
+
     fn mutate_body(&mut self, body: &[Stmt], mutation: Mutation) -> Vec<Stmt> {
         let mut new_body = body.to_vec();
         if new_body.is_empty() { return new_body; }
