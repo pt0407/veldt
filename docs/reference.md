@@ -323,6 +323,8 @@ Veldt provides two verification tiers for checking whether variants in a family 
 | `veldt adopt <name#N> --verify` | **Bounded gate** | Promotes `<name#N>` to `Canonical` only if it agrees with the fittest variant on the bounded domain |
 | `veldt verify <name> --exact` | **SMT proof (`--features smt`)** | Encodes variant bodies into Z3 formulas (`Int`, `Real`, `Bool`, 4-element symbolic `List`) and solves `f(x) != v(x)`. `Unsat` = provably equivalent; `Sat` = real counterexample (auto-planted as a permanent `smt:cex` probe) |
 | `veldt adopt <name#N> --exact` | **SMT gate (`--features smt`)** | Promotes `<name#N>` to `Canonical` only if Z3 proves equivalence (`Unsat`) against the fittest variant |
+| `veldt verify --all --exact [--quarantine]` | **Garden sweep (`--features smt`)** | Z3-audits every multi-variant family — each non-fittest variant is proven/divergent/bail with a named reason (`str.split`, `step budget`, `expr null`, `list-comp over non-list`, `if-arm merge sort-mismatch`, ...). `--quarantine` demotes provably-divergent variants to `Dying`; `--strict` exits 1 |
+| `veldt diff <a#N> <b#M> --exact` | **Pair-wise SMT (`--features smt`)** | Proves divergence between any two variants in a lineage — prints `PROVABLY EQUIVALENT` or `PROVABLY DIVERGENT at (cex)` before the source diff |
 | `veldt stats --verified` / `veldt stats --exact` | **Garden census** | Reports how many multi-variant families pass bounded verification vs. Z3 SMT verification |
 
 **Honesty boundary:**
