@@ -982,7 +982,51 @@ impl Evolver {
         if let Some(r) = Self::dedup_window(win) { return Some(r); }
         if let Some(r) = Self::contains_window(win) { return Some(r); }
         if let Some(r) = Self::while_contains_window(win) { return Some(r); }
+        if let Some(r) = Self::count_window(win) { return Some(r); }
         Self::cse_window(win)
+    }
+
+    /// Count-occurrences loop -> `xs.count(t)`:
+    ///   `let c = 0; for x in xs { if x == t { c += 1 } } return c`
+    fn count_window(win: &[Stmt]) -> Option<(usize, Vec<Stmt>)> {
+        if win.len() < 3 { return None; }
+        let c_name = match &win[0] {
+            Stmt::Let(n, Expr::Int(0)) | Stmt::Assign(n, Expr::Int(0)) => n.clone(),
+            _ => return None,
+        };
+        let (x, xs, t) = match &win[1] {
+            Stmt::For(x, xs, body) if body.len() == 1 => {
+                match &body[0] {
+                    Stmt::If(
+                        Expr::BinOp(l, BinOp::Eq, r),
+                        then_b, els
+                    ) if els.is_none() && then_b.len() == 1
+                        && matches!(&then_b[0],
+                            Stmt::Assign(t2, Expr::BinOp(l2, BinOp::Add, r2))
+                                if *t2 == c_name
+                                && matches!(l2.as_ref(), Expr::Var(v) if *v == c_name)
+                                && matches!(r2.as_ref(), Expr::Int(1))) =>
+                    {
+                        let (l, r) = (l.as_ref(), r.as_ref());
+                        let t = if matches!(l, Expr::Var(v) if v == x) { r }
+                            else if matches!(r, Expr::Var(v) if v == x) { l }
+                            else { return None; };
+                        if matches!(t, Expr::Var(v) if v == x) { return None; }
+                        (x.clone(), xs.clone(), t.clone())
+                    }
+                    _ => return None,
+                }
+            }
+            _ => return None,
+        };
+        if !matches!(&win[2], Stmt::Return(Some(e)) if matches!(e, Expr::Var(v) if *v == c_name)) {
+            return None;
+        }
+        let set: std::collections::HashSet<String> =
+            [x.clone(), c_name.clone()].into_iter().collect();
+        if expr_uses(&t, &set) { return None; }
+        Some((3, vec![Stmt::Return(Some(Expr::MethodCall(
+            Box::new(xs), "count".into(), vec![t])))]))
     }
 
     /// Membership early-exit loop -> `xs.contains(t)`:
@@ -2901,6 +2945,23 @@ mod asymptotic_proof {
         let out = evolver.mutate_body(&body, Mutation::IdiomRewrite);
         let src = crate::fmt::format_program(&out);
         assert!(!src.contains("contains("), "wrong tail:\n{}", src);
+    }
+
+    #[test]
+    fn idiom_rewrite_count_occurrences() {
+        let mut evolver = Evolver::new();
+        let body = parse_fn_body(
+            "let c = 0\nfor x in xs {\n  if x == t { c += 1 }\n}\nreturn c");
+        let out = evolver.mutate_body(&body, Mutation::IdiomRewrite);
+        let src = crate::fmt::format_program(&out);
+        assert!(src.contains("count") && !src.contains("for"),
+            "count loop not rewritten:\n{}", src);
+        // counting a different var's occurrences vs the loop var itself — bail
+        let body = parse_fn_body(
+            "let c = 0\nfor x in xs {\n  if y == t { c += 1 }\n}\nreturn c");
+        let out = evolver.mutate_body(&body, Mutation::IdiomRewrite);
+        let src = crate::fmt::format_program(&out);
+        assert!(src.contains("for"), "unsafe count rewrite:\n{}", src);
     }
 
     #[test]

@@ -5579,6 +5579,13 @@ impl Interpreter {
                 None => Err("contains(x) needs an argument".into()),
                 }
             },
+            (Value::List(items), "count") => {
+                self.step_count += (items.len() as u64) * 2;
+                let n = items.iter()
+                    .filter(|v| self.values_eq(v, &args[0]))
+                    .count();
+                Ok(Value::Int(n as i64))
+            }
             (Value::List(items), "min") | (Value::List(items), "max") => {
                 self.step_count += items.len() as u64;
                 if items.is_empty() { return Ok(Value::Null); }
