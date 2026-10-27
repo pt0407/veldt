@@ -2940,6 +2940,28 @@ impl Interpreter {
                 };
                 Ok(Some(hit.unwrap_or(Value::Null)))
             }
+            "collide_all" => {
+                // collide_all(e, scene) → list of every scene entity
+                // overlapping e — area effects, multi-hit, pickups-in-radius.
+                let (e, scene) = match (args.get(0), args.get(1)) {
+                    (Some(Value::Dict(e)), Some(Value::Dict(s))) => (e.clone(), s.clone()),
+                    _ => return Err("collide_all(e, scene) expects dict + dict".into()),
+                };
+                let my_name = e.get("name").and_then(|v| match v {
+                    Value::Str(n) => Some(n.to_string()), _ => None }).unwrap_or_default();
+                let hits: Vec<Value> = match scene.get("entities") {
+                    Some(Value::Dict(ents)) => ents.iter().filter_map(|(k, v)| {
+                        if *k == my_name { return None; }
+                        match v {
+                            Value::Dict(o) if Self::ents_overlap(&e, o) =>
+                                Some(Value::Dict(o.clone())),
+                            _ => None,
+                        }
+                    }).collect(),
+                    _ => Vec::new(),
+                };
+                Ok(Some(Value::List(hits.into())))
+            }
             "ent_def" => {
                 // ent_def(name, fields) — register an entity type. A real
                 // entity-builder DSL: games declare a type once with its
