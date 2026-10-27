@@ -488,6 +488,22 @@ fn expr_to_smt(
                     }
                     Some(SymVal::Scalar(acc.into()))
                 }
+                (SymVal::List(items), m @ ("min" | "max"), 0) => {
+                    // pairwise ite reduction: min = ite(x1<x0, x1, x0)...
+                    let mut it = items.into_iter();
+                    let mut acc = it.next()?.into_scalar()?;
+                    for item in it {
+                        let d = item.into_scalar()?;
+                        let c = if let (Some(di), Some(ai)) = (d.as_int(), acc.as_int()) {
+                            if m == "min" { di.lt(&ai) } else { di.gt(&ai) }
+                        } else {
+                            let (dr, ar) = (as_real_coerced(&d)?, as_real_coerced(&acc)?);
+                            if m == "min" { dr.lt(&ar) } else { dr.gt(&ar) }
+                        };
+                        acc = c.ite(&d, &acc).into();
+                    }
+                    Some(SymVal::Scalar(acc))
+                }
                 (SymVal::List(items), "first", 0) =>
                     items.first().cloned(),
                 (SymVal::List(items), "last", 0) =>
