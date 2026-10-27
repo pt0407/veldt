@@ -33,6 +33,9 @@ pub async fn start_server(port: u16) {
 
     let app = Router::new()
         .route("/", get(serve_ide))
+        .route("/site/:name", get(serve_site))
+        .route("/examples/:name", get(serve_example))
+        .route("/api/deploy", post(deploy_project))
         .route("/api/garden", get(get_garden))
         .route("/api/fuzz", post(fuzz_family))
         .route("/api/absorb", post(absorb))
@@ -1655,3 +1658,54 @@ async fn serve_ide() -> Html<&'static str> {
 }
 
 const IDE_HTML: &str = include_str!("ide.html");
+const SITE_HTML: &str = include_str!("site.html");
+
+/// /site/<name> — the deployed-program page. The page reads the
+/// program name from its own URL and runs it via /api/play.
+async fn serve_site() -> Html<&'static str> {
+    Html(SITE_HTML)
+}
+
+/// /examples/<file> — raw program source (View Source + IDE openFile).
+async fn serve_example(
+    axum::extract::Path(name): axum::extract::Path<String>,
+) -> axum::response::Response {
+    use axum::http::StatusCode;
+    use axum::response::IntoResponse;
+    // path hygiene — no traversal
+    if !name.chars().all(|c| c.is_alphanumeric() || c == '.' || c == '_' || c == '-') {
+        return (StatusCode::BAD_REQUEST, "bad name").into_response();
+    }
+    let path = format!("examples/{}", name);
+    match std::fs::read_to_string(&path) {
+        Ok(src) => ([("content-type", "text/plain; charset=utf-8")], src).into_response(),
+        Err(_) => (StatusCode::NOT_FOUND, "no such file").into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+struct DeployRequest { name: String, source: String }
+
+/// /api/deploy — "vercel for veldt": POST a program, it's live at
+/// /site/<name> on this server. The garden is shared, so organisms
+/// the program uses resolve against the server's veldt.
+async fn deploy_project(
+    Json(req): Json<DeployRequest>,
+) -> Json<serde_json::Value> {
+    // name hygiene — file-path safe
+    let clean: String = req.name.trim_end_matches(".veldt")
+        .chars().filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-')
+        .collect();
+    if clean.is_empty() {
+        return Json(serde_json::json!({ "ok": false, "error": "need a name (a-z 0-9 _ -)" }));
+    }
+    let path = format!("examples/{}.veldt", clean);
+    if let Err(e) = std::fs::write(&path, &req.source) {
+        return Json(serde_json::json!({ "ok": false, "error": format!("write: {}", e) }));
+    }
+    Json(serde_json::json!({
+        "ok": true,
+        "site": format!("/site/{}", clean),
+        "file": path,
+    }))
+}

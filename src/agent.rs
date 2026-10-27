@@ -2048,6 +2048,51 @@ print("@N@(97) = " + @N@(97))
             );
         }
     }
+    if t.contains("game_step") || t.contains("game step") {
+        let name = "game_step";
+        let code = r##"grow fn @N@(px: int, py: int, ex: int, ey: int, maze: dict)
+        test @N@(1, 1, 19, 9, dict()) == [1, 0] {
+    if maze.has("w") {
+        let path = astar(maze, px, py, ex, ey, " ")
+        if path != null and path.len() > 1 {
+            let next = path[1]
+            return [next[0] - px, next[1] - py]
+        }
+    }
+    let dx = 0
+    let dy = 0
+    if ex > px { dx = 1 }
+    if ex < px { dx = -1 }
+    if ey > py and dx == 0 { dy = 1 }
+    if ey < py and dx == 0 { dy = -1 }
+    return [dx, dy]
+}
+"##.replace("@N@", name);
+        let prev_peak = veldt.functions.get(name)
+            .and_then(|vs| vs.iter().map(|v| v.fitness).reduce(f64::max))
+            .unwrap_or(0.0);
+        let note = if veldt.functions.contains_key(name) {
+            "Planted an A* pathfinding strain of `game_step` — routes around maze walls instead of getting stuck on greedy moves. Re-run the game to watch it reach the exit."
+        } else {
+            "No game_step lineage yet — planted the A* pathfinding strain as founder."
+        };
+        let resp = grow_and_report_stages(
+            vec![StageSpec { label: "astar game_step policy".into(), code }],
+            Some(note.to_string()),
+            veldt,
+        );
+        // Ensure the newly planted healthy A* strain leads the lineage even
+        // if the greedy seed already accumulated a usage bonus from 30 turns.
+        if let Some(vs) = veldt.functions.get_mut(name) {
+            if let Some(last) = vs.last_mut() {
+                if matches!(last.health, Health::Healthy) && last.fitness <= prev_peak {
+                    last.fitness = prev_peak + 0.5;
+                    let _ = veldt.save();
+                }
+            }
+        }
+        return resp;
+    }
     let target = find_lineage(words, veldt);
     match target {
         Some(n) => plain(&format!(
@@ -2911,17 +2956,44 @@ fn generate_intent(t: &str, words: &[&str], veldt: &mut Veldt) -> AgentResponse 
     if t.contains("game") {
         let name = extract_name(words).unwrap_or_else(|| "quest".to_string());
         let path = format!("examples/{}.veldt", name);
-        if std::path::Path::new(&path).exists() {
-            return plain(&format!("'{}' already exists — pick another name or `veldt play {}`", path, name));
-        }
+        let existed = std::path::Path::new(&path).exists();
         let src = crate::game_template(&name);
-        match std::fs::write(&path, &src) {
-            Ok(_) => return plain(&format!(
-                "Wrote {} — a playable game (maze + HUD + enemy AI).\n\
-                 `veldt play {}` to run it; `improve game_step` or \
-                 `evolve` to breed a smarter move policy.", path, name)),
-            Err(e) => return plain(&format!("Couldn't write {}: {}", path, e)),
+        let mut steps = vec![
+            step("plan", format!(
+                "Scaffolding playable game `{}` (maze_gen + canvas + ui HUD + bt_tick AI + grow fn game_step).",
+                name
+            )),
+        ];
+        if !existed {
+            if let Err(e) = std::fs::write(&path, &src) {
+                steps.push(step("err", format!("Couldn't write {}: {}", path, e)));
+            } else {
+                steps.push(step("act", format!("Wrote {}.", path)));
+            }
+        } else {
+            steps.push(step("obs", format!("{} already exists — running and planting its game_step lineage.", path)));
         }
+        let exec = execute_source(&src, veldt);
+        for ev in &exec.events {
+            steps.push(step("obs", ev.clone()));
+        }
+        if exec.success {
+            steps.push(step("ok", format!("Game `{}` ran and planted `game_step` in the garden.", name)));
+        }
+        let reply = format!(
+            "Built playable game `{}` ({}) — maze procgen, HUD, behavior-tree enemy AI, and an evolve-able `game_step` move policy.\n\
+             Run `improve game_step` or click **Evolve AI** in the Canvas viewport to breed a smarter policy.",
+            name, path
+        );
+        return AgentResponse {
+            steps,
+            reply,
+            code: Some(src),
+            ran: true,
+            output: Some(exec.output),
+            success: Some(exec.success),
+            events: exec.events,
+        };
     }
     if let Some(resp) = try_templates(t, words, veldt) {
         return resp;
