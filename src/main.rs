@@ -6088,6 +6088,7 @@ fn verify_family(name: &str, args: &[String]) {
     }
     let mut checked = 0;
     let mut results: Vec<serde_json::Value> = Vec::new();
+    let mut demoted_ids: Vec<u32> = Vec::new();
     for v in &variants {
         if v.id == fittest.id { continue; }
         let mut diverge: Option<String> = None;
@@ -6138,6 +6139,7 @@ fn verify_family(name: &str, args: &[String]) {
                 } else {
                     println!("  {}#{}: DIVERGES {}", name, v.id, d);
                 }
+                demoted_ids.push(v.id);
             }
             None => {
                 if json {
@@ -6148,6 +6150,31 @@ fn verify_family(name: &str, args: &[String]) {
                     println!("  {}#{}: bounded-verified ({} checks)",
                              name, v.id, n_combos);
                 }
+            }
+        }
+    }
+    // --quarantine — a divergent variant can't be trusted for the family's
+    // real signature; demote it to Dying so call_best stops dispatching to it.
+    let quarantine = args.iter().any(|a| a == "--quarantine");
+    if quarantine {
+        if demoted_ids.is_empty() {
+            println!("nothing divergent to quarantine");
+        } else {
+            let mut veldt = veldt::Veldt::new();
+            match veldt.load() {
+                Ok(()) => {
+                    if let Some(vs) = veldt.functions.get_mut(name) {
+                        for v in vs.iter_mut() {
+                            if demoted_ids.contains(&v.id) {
+                                v.health = veldt::Health::Dying;
+                            }
+                        }
+                    }
+                    let _ = veldt.save();
+                    println!("quarantined (Dying): {:?}",
+                             demoted_ids.iter().map(|i| format!("{}#{}", name, i)).collect::<Vec<_>>());
+                }
+                Err(e) => eprintln!("quarantine skipped — garden load: {}", e),
             }
         }
     }
