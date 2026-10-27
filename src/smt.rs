@@ -1304,6 +1304,9 @@ pub fn verify_bodies_exact(
     after: &[Stmt],
     params: &[(String, Type)],
 ) -> Result<Option<Vec<String>>, String> {
+    if params.iter().any(|(_, t)| !param_supported(t)) {
+        return Err("unsupported param type — bail to bounded".into());
+    }
     let empty = veldt::Veldt::new();
     let mut cfg = Config::new();
     cfg.set_param_value("timeout", "250");

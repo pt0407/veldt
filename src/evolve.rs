@@ -2449,10 +2449,25 @@ impl Evolver {
             if c { repaired += 1; changed = true; }
             let idiomed = Self::idiom_rewrite_body(&entry.body);
             if idiomed != entry.body {
-                entry.body = idiomed;
-                // re-trial so fitness/efficiency reflect the new body
-                HealthChecker::check_at_birth_with(&mut entry, veldt, self.use_vm);
-                repaired += 1; changed = true;
+                // --exact: only apply rewrites Z3 proves semantics-
+                // preserving (same gate as `veldt rewrite --exact`).
+                let proven = if std::env::args().any(|a| a == "--exact") {
+                    #[cfg(feature = "smt")]
+                    {
+                        let params: Vec<(String, crate::ast::Type)> = entry.params.iter()
+                            .map(|p| (p.name.clone(), p.typ.clone())).collect();
+                        matches!(crate::smt::verify_bodies_exact(
+                            &entry.body, &idiomed, &params), Ok(None))
+                    }
+                    #[cfg(not(feature = "smt"))]
+                    { false }
+                } else { true };
+                if proven {
+                    entry.body = idiomed;
+                    // re-trial so fitness/efficiency reflect the new body
+                    HealthChecker::check_at_birth_with(&mut entry, veldt, self.use_vm);
+                    repaired += 1; changed = true;
+                }
             }
             if changed {
                 if let Some(vs) = veldt.functions.get_mut(&name) {

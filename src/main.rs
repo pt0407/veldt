@@ -2288,7 +2288,18 @@ fn main() {
                 let mut entry = veldt.functions[&name].iter()
                     .find(|e| e.id == id).cloned().unwrap();
                 let nb = evolve::Evolver::idiom_rewrite_body(&entry.body);
-                if nb != entry.body {
+                let proven = if args.iter().any(|a| a == "--exact") {
+                    #[cfg(feature = "smt")]
+                    {
+                        let params: Vec<(String, ast::Type)> = entry.params.iter()
+                            .map(|p| (p.name.clone(), p.typ.clone())).collect();
+                        matches!(smt::verify_bodies_exact(
+                            &entry.body, &nb, &params), Ok(None))
+                    }
+                    #[cfg(not(feature = "smt"))]
+                    { false }
+                } else { true };
+                if nb != entry.body && proven {
                     entry.body = nb;
                     // re-trial so fitness/efficiency reflect the new body
                     health::HealthChecker::check_at_birth_with(&mut entry, &veldt, false);
