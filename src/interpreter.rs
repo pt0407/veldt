@@ -1095,6 +1095,16 @@ impl Interpreter {
         }
     }
 
+    /// is the cell at (x,y) of a canvas/map dict solid? Solid = any
+    /// non-floor char — walls/platforms/terrain; out-of-bounds is solid.
+    fn cell_solid(d: &im::HashMap<String, Value>, x: i64, y: i64) -> bool {
+        let Some(Value::List(rows)) = d.get("cells") else { return true };
+        if y < 0 || y as usize >= rows.len() { return true }
+        let Value::List(r) = &rows[y as usize] else { return true };
+        if x < 0 || x as usize >= r.len() { return true }
+        !matches!(&r[x as usize], Value::Str(s) if s.as_ref() == " " || s.as_ref() == ".")
+    }
+
     fn values_eq(&self, l: &Value, r: &Value) -> bool {
         match (l, r) {
             (Value::Int(a), Value::Int(b)) => a == b,
@@ -2729,6 +2739,97 @@ impl Interpreter {
                 let by = Self::num_f(b.get("y").unwrap_or(&Value::Int(0)))?;
                 let hit = (ax - bx).abs() < 1.0 && (ay - by).abs() < 1.0;
                 Ok(Some(Value::Bool(hit)))
+            }
+            "tile_at" => {
+                // tile_at(map, x, y) → the cell char at floor(x), floor(y)
+                let (d, x, y) = match (args.get(0), args.get(1), args.get(2)) {
+                    (Some(Value::Dict(d)), Some(x), Some(y)) =>
+                        (d, Self::num_f(x)? as i64, Self::num_f(y)? as i64),
+                    _ => return Err("tile_at(map, x, y) expects dict + 2 nums".into()),
+                };
+                let Some(Value::List(rows)) = d.get("cells") else { return Ok(Some(Value::Str(" ".into()))) };
+                if y < 0 || y as usize >= rows.len() { return Ok(Some(Value::Str("#".into()))) }
+                let Value::List(r) = &rows[y as usize] else { return Ok(Some(Value::Str("#".into()))) };
+                if x < 0 || x as usize >= r.len() { return Ok(Some(Value::Str("#".into()))) }
+                Ok(Some(r[x as usize].clone()))
+            }
+            "tile_solid" => {
+                // tile_solid(map, x, y) → is the cell at floor(x),floor(y) solid?
+                // Solid = not floor-space — walls, platforms, terrain
+                let (d, x, y) = match (args.get(0), args.get(1), args.get(2)) {
+                    (Some(Value::Dict(d)), Some(x), Some(y)) =>
+                        (d, Self::num_f(x)? as i64, Self::num_f(y)? as i64),
+                    _ => return Err("tile_solid(map, x, y) expects dict + 2 nums".into()),
+                };
+                Ok(Some(Value::Bool(Self::cell_solid(d, x, y))))
+            }
+            "collide_tile" => {
+                // collide_tile(e, map) → is the entity inside a solid cell?
+                let (e, d) = match (args.get(0), args.get(1)) {
+                    (Some(Value::Dict(e)), Some(Value::Dict(d))) => (e, d),
+                    _ => return Err("collide_tile(e, map) expects entity dict + map dict".into()),
+                };
+                let ex = Self::num_f(e.get("x").unwrap_or(&Value::Int(0)))? as i64;
+                let ey = Self::num_f(e.get("y").unwrap_or(&Value::Int(0)))? as i64;
+                Ok(Some(Value::Bool(Self::cell_solid(d, ex, ey))))
+            }
+            "on_ground" => {
+                // on_ground(e, map) → the cell directly below the entity is solid
+                let (e, d) = match (args.get(0), args.get(1)) {
+                    (Some(Value::Dict(e)), Some(Value::Dict(d))) => (e, d),
+                    _ => return Err("on_ground(e, map) expects entity dict + map dict".into()),
+                };
+                let ex = Self::num_f(e.get("x").unwrap_or(&Value::Int(0)))? as i64;
+                let ey = Self::num_f(e.get("y").unwrap_or(&Value::Int(0)))? as i64;
+                Ok(Some(Value::Bool(Self::cell_solid(d, ex, ey + 1))))
+            }
+            "physics_tick" => {
+                // physics_tick(e, map, grav) — apply gravity to e.vy, move e.y,
+                // resolve tile collision (land = zero vy + clamp above the cell).
+                // Returns the ticked entity dict.
+                let (e, d, grav) = match (args.get(0), args.get(1), args.get(2)) {
+                    (Some(Value::Dict(e)), Some(Value::Dict(d)), Some(g)) =>
+                        (e, d, Self::num_f(g)?),
+                    _ => return Err("physics_tick(e, map, grav) expects dict + dict + num".into()),
+                };
+                let mut e2 = e.clone();
+                let vy0 = Self::num_f(e.get("vy").unwrap_or(&Value::Int(0)))?;
+                let ey0 = Self::num_f(e.get("y").unwrap_or(&Value::Int(0)))?;
+                let ex = Self::num_f(e.get("x").unwrap_or(&Value::Int(0)))? as i64;
+                // resting on the ground = cell below solid + not launching up —
+                // don't accumulate gravity (kills the rest-bounce)
+                let resting = vy0 <= 0.0
+                    && Self::cell_solid(d, ex, ey0 as i64 + 1);
+                let mut vy = if resting { 0.0 } else { vy0 + grav };
+                let mut ey = ey0 + vy;
+                if vy > 0.0 {
+                    // falling — scan the traversed rows for the FIRST solid
+                    // cell; land on the open row above it (no tunneling)
+                    let mut r = ey0 as i64 + 1;
+                    while r <= ey as i64 {
+                        if Self::cell_solid(d, ex, r) {
+                            vy = 0.0;
+                            ey = (r - 1) as f64;
+                            break;
+                        }
+                        r += 1;
+                    }
+                } else if vy < 0.0 {
+                    // rising — scan up for the first solid cell; stop just
+                    // below it
+                    let mut r = ey0 as i64 - 1;
+                    while r >= ey as i64 {
+                        if Self::cell_solid(d, ex, r) {
+                            vy = 0.0;
+                            ey = (r + 1) as f64;
+                            break;
+                        }
+                        r -= 1;
+                    }
+                }
+                e2.insert("y".into(), Value::Float(ey));
+                e2.insert("vy".into(), Value::Float(vy));
+                Ok(Some(Value::Dict(e2)))
             }
             "keys" => {
                 // keys() → list of held keys from the session input queue
