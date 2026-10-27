@@ -62,6 +62,7 @@ pub async fn start_server(port: u16) {
         .route("/api/call", post(call_fn))
         .route("/api/adopt", post(adopt_variant))
         .route("/api/verify", post(verify_family))
+        .route("/api/verified", get(verified_census))
         .route("/api/quarantine", post(quarantine_family))
         .route("/api/compare", post(compare_engines))
         .route("/api/lineage", get(lineage_family))
@@ -961,6 +962,30 @@ async fn game_stop(
         }
         None => Json(serde_json::json!({ "ok": false, "error": "no such session" })),
     }
+}
+
+/// /api/verified — the garden-wide trust census: how many
+/// multi-variant families pass bounded verification (vs divergent,
+/// vs single-variant = trivially safe). The 'how much of the garden
+/// is proven' answer as JSON.
+async fn verified_census(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
+    let veldt = state.veldt.lock().unwrap().clone();
+    let mut interp = crate::interpreter::Interpreter::new();
+    veldt.load_into_interpreter(&mut interp);
+    let (mut verified, mut divergent, mut single) = (0usize, 0usize, 0usize);
+    let mut div_names: Vec<String> = Vec::new();
+    for name in veldt.functions.keys() {
+        if veldt.functions[name].len() < 2 { single += 1; continue; }
+        match crate::verify_on_interp(&mut interp, name, false) {
+            Some(_) => { divergent += 1; div_names.push(name.clone()); }
+            None => verified += 1,
+        }
+    }
+    Json(serde_json::json!({
+        "verified": verified, "divergent": divergent,
+        "single_variant": single, "families": veldt.functions.len(),
+        "divergent_families": div_names,
+    }))
 }
 
 async fn stats(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
