@@ -2868,6 +2868,10 @@ fn main() {
                     }
                 }
             }
+            // --sim <game> --until-win: keep evolving until a variant actually
+            // WINS the game — the real 'evolution wins a game' loop
+            let until_win = args.iter().any(|a| a == "--until-win");
+            let mut sim_won = false;
             // --sim <game>: generational playthrough-fitness — every cycle,
             // the family's healthy variants play the game (sim --pin) and
             // the winner's fitness reflects the real outcome, so the next
@@ -2901,6 +2905,7 @@ fn main() {
                     {
                         eprintln!("[SIM] best playthrough: {}#{} — score {} won {}",
                                   fam, id, score, won);
+                        if *won { sim_won = true; }
                         if let Some(vs) = veldt.functions.get_mut(&fam) {
                             if let Some(e) = vs.iter_mut().find(|e| e.id == *id) {
                                 let sim_fit = *score + if *won { 1000.0 } else { 0.0 };
@@ -2911,6 +2916,12 @@ fn main() {
                         }
                     }
                 }
+            }
+            // a variant actually WON the game — stop evolving, that's the goal
+            if until_win && sim_won {
+                eprintln!("[SIM] a variant won the game — {} is a genuine winner. Stopping.",
+                          fam_scope.map(|s| s.as_str()).unwrap_or("the policy"));
+                break;
             }
             if dry {
                 eprintln!("[EVOLVE] dry run complete — garden unchanged");
