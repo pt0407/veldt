@@ -34,11 +34,21 @@ fn get_i(i: &Interpreter, name: &str) -> Option<Value> {
 }
 
 fn parity(src: &str, names: &[&str]) {
-    let i = interp_vars(src);
-    let v = vm_globals(src);
-    for n in names {
-        assert_eq!(get_i(&i, n), get_vm(&v, n), "var {} diverged", n);
-    }
+    // VM frames + JIT'd recursion consume far more native stack per
+    // level than the tree-walker — Rust test threads default to ~2MB
+    // vs the CLI's 8MB main stack, so fib(15)-depth recursion
+    // overflowed the harness (the CLI itself ran fine). Run the
+    // comparison on a generously-stacked thread instead.
+    let src = src.to_string();
+    let names: Vec<String> = names.iter().map(|s| s.to_string()).collect();
+    std::thread::Builder::new().stack_size(64 * 1024 * 1024)
+        .spawn(move || {
+            let i = interp_vars(&src);
+            let v = vm_globals(&src);
+            for n in &names {
+                assert_eq!(get_i(&i, n), get_vm(&v, n), "var {} diverged", n);
+            }
+        }).unwrap().join().unwrap();
 }
 
 #[test]
@@ -174,10 +184,27 @@ fn vm_all_examples_run() {
         let src = std::fs::read_to_string(p).unwrap_or_default();
         !src.contains("grow ")
     });
+    // hello.veldt is the documented garden bootstrap ("run hello.veldt
+    // first") — but it's also a provider itself (grow fn double), so the
+    // alphabetical provider pass runs ecosystem BEFORE it and shout is
+    // missing. Seed it explicitly first.
+    let hello = paths.iter().find(|p| p.ends_with("hello.veldt"))
+        .map(|p| p.clone());
+    if let Some(h) = &hello {
+        let _ = std::process::Command::new(veldt)
+            .args(["run", h.to_str().unwrap(), "--vm",
+                   "--steps", "500000000"])
+            .output().expect("seed hello.veldt");
+    }
+    // data_pipeline reads /tmp/pipeline_in.txt — a fixture the repo
+    // doesn't ship; write it so the example actually runs
+    let _ = std::fs::write("/tmp/pipeline_in.txt",
+        "alpha\nbeta\ngamma\nbeta\nalpha\nalpha\n");
     for p in paths {
         // skip examples that need stdin/args/serve-loop
         let name = p.file_name().unwrap().to_str().unwrap();
         if matches!(name, "web_server.veldt") { continue; }
+        if hello.as_ref().map(|h| *p == *h).unwrap_or(false) { continue; }
         let out = std::process::Command::new(veldt)
             .args(["run", p.to_str().unwrap(), "--vm",
                    "--steps", "500000000"])
@@ -191,4 +218,17 @@ fn vm_all_examples_run() {
     }
     assert!(failures.is_empty(),
         "examples failing under --vm:\n{}", failures.join("\n"));
+}
+
+#[test]
+fn jit_recursion_result_not_sentinel() {
+    // Regression: a JIT-compiled recursive fn returned Int(4294967295)
+    // — the nok() -1 sentinel leaking as a boxed Value instead of the
+    // callee's real result (in fib it feeds back into `n` → unbounded
+    // recursion → stack overflow). Depth >64 so the JIT actually
+    // engages. Left failing until the JIT lane fixes the leak.
+    parity(r#"
+        fn count(n: int) { if n > 200 { return n } return count(n+1) }
+        let f = count(0)
+    "#, &["f"]);
 }

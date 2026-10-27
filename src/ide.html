@@ -491,6 +491,8 @@
     <button class="btn" id="swarmBtn" title="bidirectional genome gossip with a peer">Swarm</button>
     <button class="btn" id="playBtn" title="run a bundled game demo">Play</button>
     <button class="btn" id="statsBtn" title="garden census + histograms">Stats</button>
+    <button class="btn" id="lintBtn" title="strict-lint census across the garden">Lint</button>
+    <button class="btn" id="fixBtn" title="mechanically repair dead code in the buffer">Fix</button>
     <button class="btn" id="gameBtn" title="run the editor as a game program">Game</button>
     <button class="btn danger" id="clearBtn">Clear Garden</button>
     <button class="btn primary" id="runBtn">▶ Run</button>
@@ -539,6 +541,8 @@
             <button class="chip" onclick="askAgent('surprise me')">surprise me</button>
             <button class="chip" onclick="askAgent('show fib')">show fib</button>
             <button class="chip" onclick="askAgent('tend the garden')">tend the garden</button>
+            <button class="chip" onclick="askAgent('code health')">code health</button>
+            <button class="chip" onclick="askAgent('lint fib')">lint fib</button>
             <button class="chip" onclick="askAgent('obituaries')">obituaries</button>
             <button class="chip" onclick="askAgent('what\'s alive?')">what's alive?</button>
           </div>
@@ -556,6 +560,7 @@
 <script>
 const API = '';
 let gardenData = null;
+let lintData = null;
 let lastAgentCode = null;
 let selectedVariant = null;
 let editor = null;
@@ -700,8 +705,10 @@ grow fn double(x: int) test double(3) == 6 {
 // --- API calls ---
 
 async function fetchGarden() {
-  const res = await fetch(API + '/api/garden');
-  gardenData = await res.json();
+  const [gres, lres] = await Promise.all([
+    fetch(API + '/api/garden'), fetch(API + '/api/lint').catch(() => null)]);
+  gardenData = await gres.json();
+  lintData = lres && lres.ok ? await lres.json() : null;
   renderGarden();
 }
 
@@ -907,6 +914,94 @@ async function openFile(path) {
   const res = await fetch(path);
   const text = await res.text();
   editor.setValue(text);
+  lintEditor();
+}
+
+// --- Editor lint — /api/check squiggles, same anchor heuristic
+// as the LSP: fn-name prefix -> def line, then scan the body for
+// the warning's subject (let x / f( / x = / keyword).
+function warnAnchorJS(text, w) {
+  const findDefs = (name) => {
+    const out = [];
+    text.split('\n').forEach((l, i) => {
+      const t = l.trimStart();
+      if ((t.startsWith('fn ') || t.startsWith('grow fn '))
+          && t.replace(/^grow /, '').replace(/^fn /, '').startsWith(name + '('))
+        out.push(i);
+    });
+    return out;
+  };
+  const warnTok = (msg) => {
+    const li = msg.indexOf('let ');
+    if (li >= 0) {
+      const m = msg.slice(li + 4).match(/^[A-Za-z_][A-Za-z_0-9]*/);
+      if (m) return 'let ' + m[0];
+    }
+    const ci = msg.indexOf('()');
+    if (ci > 0) {
+      const m = msg.slice(0, ci).match(/[A-Za-z_][A-Za-z_0-9]*$/);
+      if (m) return m[0] + '(';
+    }
+    const ai = msg.indexOf(' assigned');
+    if (ai > 0) {
+      const m = msg.slice(0, ai).match(/[A-Za-z_][A-Za-z_0-9]*$/);
+      if (m) return m[0] + ' =';
+    }
+    for (const kw of ['match','while','for ','catch','test ','return',
+                      'break','continue','print','if '])
+      if (msg.includes(kw)) return kw.trimEnd();
+    return null;
+  };
+  const sp = w.split(': ');
+  let def = 0, msg = w;
+  if (sp.length > 1 && !sp[0].includes(' ')) {
+    const d = findDefs(sp[0]);
+    if (d.length) { def = d[0]; msg = sp.slice(1).join(': '); }
+  } else {
+    for (const mk of ['grow fn ', 'fn ']) {
+      if (w.startsWith(mk)) {
+        const name = w.slice(mk.length).match(/^[A-Za-z_][A-Za-z_0-9]*/);
+        if (name) { const d = findDefs(name[0]); if (d.length) def = d[0]; }
+      }
+    }
+  }
+  const tok = warnTok(msg);
+  if (tok) {
+    const lines = text.split('\n');
+    for (let i = def + 1; i < lines.length; i++) {
+      const t = lines[i].trimStart();
+      if (t.startsWith('fn ') || t.startsWith('grow fn ')) break;
+      if (lines[i].includes(tok)) return i;
+    }
+  }
+  return def;
+}
+
+let lintTimer = null;
+async function lintEditor() {
+  if (!editor) return;
+  const source = editor.getValue();
+  const model = editor.getModel();
+  if (!model) return;
+  if (!source.trim()) { monaco.editor.setModelMarkers(model, 'veldt', []); return; }
+  try {
+    const res = await fetch(API + '/api/check', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source, strict: true }) });
+    const d = await res.json();
+    if (!d.ok) {
+      monaco.editor.setModelMarkers(model, 'veldt', [{
+        severity: monaco.MarkerSeverity.Error, message: d.error || 'parse error',
+        startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 200 }]);
+      return;
+    }
+    const markers = (d.warnings || []).map(w => {
+      const ln = warnAnchorJS(source, w) + 1;
+      return { severity: monaco.MarkerSeverity.Warning, message: w,
+        startLineNumber: ln, startColumn: 1, endLineNumber: ln, endColumn: 200 };
+    });
+    monaco.editor.setModelMarkers(model, 'veldt', markers);
+  } catch (e) { /* server without /api/check — leave markers stale */ }
 }
 
 // --- Rendering ---
@@ -926,6 +1021,14 @@ function renderGarden() {
     html += `<div style="font-size:11px;opacity:.75;padding:4px 0;border-bottom:1px solid #333;margin-bottom:6px">` +
       `trust ladder: <b style="color:#8ef">${seed}</b> seedling → <b style="color:#fd0">${estab}</b> established → <b style="color:#6f4">${canon}</b> canonical` +
       ` &nbsp;·&nbsp; ${seed + estab + canon} variants · ${probes} probes</div>`;
+  }
+  if (lintData) {
+    const dc = lintData.defects || 0, w = lintData.warnings || 0;
+    const color = dc > 0 ? '#f66' : (w > 0 ? '#fd0' : '#6f4');
+    const label = dc > 0 ? `${dc} defect${dc === 1 ? '' : 's'} · ${w} warnings`
+      : `${w} warnings · lint-clean`;
+    html += `<div style="font-size:11px;opacity:.75;padding:2px 0;border-bottom:1px solid #333;margin-bottom:6px">` +
+      `lint: <b style="color:${color}">${label}</b></div>`;
   }
 
   // Functions — rendered as lineage trees using parent edges
@@ -1247,6 +1350,13 @@ async function sendAgentTask() {
 // --- Event handlers ---
 document.getElementById('tabInspector').addEventListener('click', () => switchTab('inspector'));
 document.getElementById('tabAgent').addEventListener('click', () => switchTab('agent'));
+// debounced re-lint as the user types — the same ~91 checks
+// check --strict runs, as editor squiggles
+editor.onDidChangeModelContent(() => {
+  clearTimeout(lintTimer);
+  lintTimer = setTimeout(lintEditor, 800);
+});
+lintEditor();
 document.getElementById('agentSend').addEventListener('click', sendAgentTask);
 document.getElementById('agentInput').addEventListener('keydown', e => {
   if (e.key === 'Enter') sendAgentTask();
@@ -1284,6 +1394,32 @@ document.getElementById('statsBtn').addEventListener('click', async () => {
     `fitness by source: ${fmt(d.fitness_by_source)}\n` +
     `mutation success: ${fmt(d.mutation_success)}\n` +
     `probe coverage: ${fmt(d.probe_coverage)}` + '</pre>';
+});
+document.getElementById('lintBtn').addEventListener('click', async () => {
+  const res = await fetch(API + '/api/lint');
+  const d = await res.json();
+  const fams = (d.families || []).map(f =>
+    `  ${f.family}: ${f.warnings}w${f.defects ? ` (${f.defects} defect)` : ''}`).join('\n');
+  document.getElementById('output').innerHTML = '<pre style="color:#8ef;margin:0">' +
+    `lint: ${d.warnings} warnings · ${d.defects} defect-class\n` +
+    (fams || '  lint-clean — no warnings') + '</pre>';
+});
+document.getElementById('fixBtn').addEventListener('click', async () => {
+  const source = editor.getValue();
+  const res = await fetch(API + '/api/fix', { method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ source }) });
+  const d = await res.json();
+  const out = document.getElementById('output');
+  if (d.ok && d.changed) {
+    editor.setValue(d.source);
+    out.innerHTML = '<pre style="color:#6f4;margin:0">fixed — dead code removed</pre>';
+    lintEditor();
+  } else if (d.ok) {
+    out.innerHTML = '<pre style="color:#8ef;margin:0">nothing to repair</pre>';
+  } else {
+    out.innerHTML = '<pre style="color:#f66;margin:0">' + (d.error || 'parse error') + '</pre>';
+  }
 });
 document.getElementById('playBtn').addEventListener('click', async () => {
   const demo = prompt('Demo', 'dungeon');

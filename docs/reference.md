@@ -153,6 +153,46 @@ dispatch overhead, not making ops faster).
 | `veldt export` `veldt import [url]` | share gardens |
 | `veldt stats` | ecosystem dashboard |
 
+## Diagnostics & lint
+
+`veldt check <file> --strict` runs ~91 static checks over the AST —
+dead code, arity mismatches, shadowing, unbound reads, impossible
+match arms, empty containers that never grow, and more. Warnings are
+one line each; `--json` emits machine-readable objects for tooling.
+
+| Command | What it does |
+|---|---|
+| `veldt check <file> [--strict] [--json]` | parse + strict lint of a source file |
+| `veldt check - --strict` | same, reading the program from stdin |
+| `veldt check <file> --watch` | re-lint on file save |
+| `veldt check --garden [family]` | strict-lint every variant body (synthetic `grow fn` wrap) |
+| `veldt check --garden --bugs` | defect-class warnings only — the real-bug subset |
+| `veldt check --garden --fix` | mechanically repair dead code in variant bodies, then re-lint |
+| `veldt check --garden --fix --verify` | also re-trial every repaired variant, write health back |
+| `veldt check --suppress <s>` | drop warnings containing `<s>` (repeatable; works with --json) |
+| `veldt fix <file>` | same repairs applied to a source file, in-place + reformatted |
+| `veldt fix <file> --check` | dry-run gate — exits 1 if repairable dead code exists |
+| `veldt stats --lint` | garden-wide warning census: defect-class split + top warning kinds |
+| `veldt evolve --tend` | self-maintaining cycles — heal sick + clean dead code each cycle |
+| `veldt adopt <name#N> --lint` | refuse to promote a variant carrying defect-class warnings |
+| `veldt tend [family]` | heal sick variants on demand (mechanical repair, then healer-merge) |
+
+The repair passes are conservative rewrites that preserve semantics:
+statements after the first `return` in every block are truncated,
+`let x = <pure>` never used again is dropped (calls/method calls keep
+a dead binding since they may side-effect), and a trailing `continue`
+inside a loop body is removed.
+
+Evolution uses the same machinery: every mutation candidate is
+normalized (repairs) then lint-gated — a child that introduces
+defect-class warnings its parent didn't carry is rejected at birth
+with a `[LINT]` event. `veldt check --garden --fix` applies the same
+repairs to the whole garden.
+
+`veldt lsp` publishes lint warnings as editor diagnostics (severity 2)
+anchored to the enclosing fn — the same checks `check --strict` runs,
+live in the editor.
+
 ## Errors & control
 
 `try { } catch e { }` — `e` is the error string.

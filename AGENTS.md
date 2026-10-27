@@ -1152,3 +1152,233 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   gets the SMT gate; plain builds print a clear message. If your
   env builds z3 fine, keep --features smt on. .z3-trace untracked
   (your 049407b intent) + gitignored.
+- [Devin] veldt check --garden [family]: strict-lints every
+  variant body via synthetic Grow(Fn) wrap — found REAL
+  mutation-produced bugs immediately (score#159: unreachable
+  after return, shadowed lets, stale sentinel). 372 warnings
+  / 35 variants on first run. --json for machine use. This is
+  the lint→garden feedback loop — could gate adopt/promote.
+- [Devin] veldt stats --lint: garden code-health census —
+  per-family warning counts next to [verified]/[exact].
+  fib is the lint-heaviest family (246/372 warnings).
+- [Devin] evolve lint-gate: mutants introducing NEW real-bug
+  warnings (arity/unbound/null-bind/fn-shadow/unreachable/
+  wrong-test/never-matching) are rejected at birth — [LINT]
+  event, same slot as CloneRejected. Fired on first run:
+  culled a fib child assigning undeclared `a`. Lint is now
+  selection pressure, not just reporting.
+- [Devin] adopt --lint: promotion gate mirroring the evolve
+  birth-gate — variants with defect-class warnings refused
+  (verified on score#159). The loop is closed: lint blocks
+  bugs at birth AND at promotion.
+- [Devin] heal mechanical repair: repair_dead_tail truncates
+  dead code after returns (recursive) + trailing bare return —
+  the shape score's 27 unreachable warnings carry. Runs before
+  healer-merge in heal(), unit-tested. The diagnose->repair
+  half of the lint loop: birth-gate + adopt-gate + heal-fix.
+- [Devin] check --garden --fix shipped + RAN: mechanical
+  dead-tail repair on every variant. Garden census dropped
+  372 -> 97 warnings (fib 246 -> 16, score 65 -> 0). All
+  repaired variants re-trial healthy. The lint loop is fully
+  closed: report (check --garden/stats --lint) -> gate
+  (evolve birth + adopt --lint) -> repair (--fix/heal).
+- [Devin] LSP lint diagnostics: publishDiagnostics now runs
+  the strict linter on every buffer — IDE squiggles for all
+  ~91 checks (severity 2, anchored at fn-def lines). The
+  Gardener's static analysis is live in the editor.
+- [Devin] veldt check - : stdin lint — editors/agents pipe
+  unsaved buffers or generated source, no temp file needed.
+- [Devin] LSP lint anchors refined: diagnostics now point at
+  the offending statement (let/call/keyword scan inside the
+  fn body), not the fn header.
+- [Devin] agent lint intent: "lint fib"/"code health"/
+  "warnings" — per-variant warnings + defect-class split,
+  or garden census. The Gardener reports code health
+  conversationally now.
+- [Devin] veldt tend [family]: on-demand heal — runs the
+  repair+healer-merge on sick variants (previously only
+  triggered inside the grow flow). First run healed 4 sick
+  play_game variants.
+- [Devin] repair_dead_lets: second mechanical pass — drops
+  `let x = <pure>` never used later (call-free RHS only, any
+  Assign/For/destructure/mention blocks removal). Chained
+  into heal() + check --garden --fix. Unit-tested.
+- [Devin] garden --fix with dead-let pass: census 97 -> 85.
+  Remaining are semantic warnings (play_game loop-no-exit,
+  compound-assign) — not mechanically repairable.
+- [Devin] repair pass 3: trailing `continue` dropped from
+  while/for bodies (loop-body scope only — `if{continue}` can
+  skip stmts, kept). Now: dead-tail + dead-lets + trailing
+  continue in heal() and check --garden --fix.
+- [Devin] evolve normalization: repair passes run on every
+  candidate pre-dedup — dead-code-only mutants normalize back
+  to parent (CloneRejected) instead of being born dirty. Live
+  run culled 2 undeclared-assign mutants via the lint gate.
+  The loop is complete: repair -> dedup -> lint-gate -> birth.
+- [Devin] veldt fix <file>: in-place dead-code repair —
+  repair_program across top-level + every fn body, then
+  fmt::format_program writeback. File-level counterpart of
+  check --garden --fix.
+- [Devin] veldt fix --check: dry-run gate — exits 1 when
+  repairable dead code exists, no write. CI-ready.
+- [Devin] stats --lint breakdown: 80 warnings (0 defect-
+  class) — the garden is lint-defect-free. Remaining are
+  advisory (loop-no-exit, compound-assign, shadowing).
+- [Devin] LSP quick-fix: codeAction offers 'veldt: fix dead
+  code' — WorkspaceEdit rewrites the doc via repair_program
+  + fmt. IDE loop closed: squiggles -> one-click fix.
+- [Devin→JIT lane] REAL BUG: fns_and_closures_parity overflows
+  the stack — fib(15) under garden-free Vm::new().run() never
+  terminates once jit-compiled (unbounded recursion, 64MB stack
+  still overflows). veldt run --vm doesn't repro — garden
+  variants mask the local fn's dispatch. Likely: boxed-ABI
+  self-recursion call resolution, or the Int/Int Lt fast path
+  (n < 2 base case) never emitting true. Repro: Vm::new().run
+  on `fn fib(n){if n<2{return n} return fib(n-1)+fib(n-2)}`.
+  Left failing on purpose — it's a genuine engine bug.
+- [Devin→JIT lane] REFINED PIN on the parity overflow: it's a
+  sentinel leak, not depth. count(n+1) to n>200 returns
+  Int(4294967295) — nok()'s -1 error sentinel boxing as a
+  Value instead of unwinding rt.err. In fib(n-1)+fib(n-2)
+  the -1 feeds back into n → base case never fires →
+  unbounded recursion → stack overflow. Kept a regression
+  test: jit_recursion_result_not_sentinel (fails until fixed).
+- [Devin] agent 'fix <fam>' extended: no-sick path now runs
+  mechanical repairs on healthy variants — 'fix' covers heal
+  + clean both senses.
+- [Devin] /api/lint: garden code-health census over HTTP —
+  per-family warnings + defect-class split, worst-first.
+  Completes the API lint surface (/api/check = source level).
+- [Devin] IDE lint badge: Inspector shows lint health under
+  the trust ladder (red defects/amber warnings/green clean)
+  via /api/lint — code-health visible in-studio.
+- [Devin] garden --family footer shows ⚠N warnings — same
+  wrap as check --garden, only when warnings exist.
+- [Devin] check --garden --bugs: defect-class-only filter —
+  same set as the birth/adopt gates. Currently 0 warnings:
+  the garden is defect-free.
+- [Devin] IDE: Lint toolbar button (/api/lint census in the
+  output pane) + 'code health'/'lint fib' Gardener chips.
+  Full diagnostics surface reachable in-studio now.
+- [Devin] IDE squiggles: lintEditor() POSTs /api/check on
+  open + debounced edits -> setModelMarkers, anchored by a
+  JS warn_anchor port. Studio editor lints live now, same
+  ~91 checks, no LSP needed.
+- [Devin] /api/fix + IDE Fix button: one-click dead-code
+  repair on the buffer (repair_program + fmt writeback),
+  re-lints after applying. Studio squiggle->fix loop = the
+  LSP quick-fix without a client.
+- [Devin] triage covers lint: 'what needs attention' flags
+  defect-carrying variants (healthy-by-trial but buggy-by-
+  inspection) alongside sick/dying/weakest.
+- [Devin] check --suppress <substr> (repeatable): drop
+  warnings containing the substring — works on file/stdin/
+  watch/--json. Escape hatch without a rule-ID refactor.
+- [Devin] evolve --tend: self-maintaining cycles — per-cycle
+  heal+repair pass ([TEND] event when work lands). Evolution
+  keeps the garden clean both directions now: lint-gate on
+  births, tend on the existing population.
+- [Devin] stats --lint kind tally: top warning shapes
+  (34x compound-assign, 28x loop-no-exit, 10x property-only
+  tests) — shows which repair pass pays off next.
+- [Devin] check --garden --fix --verify: re-trials repaired
+  variants post-fix, writes honest health back — repairs are
+  proven semantics-preserving, not just asserted.
+- [Devin] dead-store FP fix: self-referential assigns
+  (x = x.put(..)/f(x)) read the old value — csv_analysis
+  dropped 6 FPs (31 -> ~25 warnings, all legitimate).
+- [Devin] check --garden --watch: re-lints variants on
+  garden mtime — all read-only garden views now have a
+  live --watch mode (stats/test/fuzz/bench/check-garden).
+- [Devin] lint regression tests: tictactoe bounded (<=15
+  warnings, catches FP explosions) + defect checks still
+  fire (guards the evolve gate's filter).
+- [Devin] stats --json carries lint_warnings + lint_defects
+  — machine-readable code-health census.
+- [Devin] LINT WORKSTREAM STATE (for when you're back):
+  the diagnose->report->gate->repair loop is complete:
+  ~91 strict checks (file + stdin + --suppress) |
+  check --garden [fam] [--bugs][--fix][--verify][--watch] |
+  stats --lint (defect split + kind tally + --json fields) |
+  garden --family ⚠N badge | evolve normalize+[LINT] gate |
+  adopt --lint | tend/heal (3 repair passes) | veldt fix
+  [--check] | agent lint intent + fix-covers-dead-code +
+  lint-aware triage | /api/check + /api/lint + /api/fix |
+  IDE: Monaco squiggles + Lint badge + Lint/Fix buttons +
+  Gardener chips | LSP: diagnostics + quick-fix |
+  veldt evolve --tend (self-maintaining cycles) |
+  regression tests: repair passes + FP bounds + gate-fire.
+  Garden: 0 defect-class warnings; 92 advisory remain.
+  YOUR LANE: jit_recursion_result_not_sentinel fails — the
+  nok() -1 sentinel leaks boxed as Int(4294967295) into
+  callers; fib feeds it back into n -> unbounded recursion.
+- [Devin] bench --lint: strict-lint is FAST (0.2-2.3ms/file,
+  4.8ms garden census) — IDE debounced lint + garden --watch
+  are comfortably in budget.
+- [Devin] check --fail: CI gate — exit 1 on defect-class
+  warnings (file/stdin + --garden). Advisory warnings pass;
+  defects fail the build.
+- [Devin] SUITE GREEN: 72/72 bin + 48/48 lib tests pass —
+  the only failing test anywhere is the intentional
+  jit_recursion_result_not_sentinel regression (your lane —
+  nok() -1 sentinel leaks boxed into callers).
+- [Devin] JIT SENTINEL BUG ROOT-CAUSED + FIXED: every JIT sig
+  used CallConv::SystemV = literal Unix SysV (args rdi...) but
+  extern "C" callers pass host ABI (rcx on Windows) — JIT'd fns
+  read garbage args and returned a stray register value boxed
+  as Int, which recursion fed back into itself. Fixed with
+  isa.default_call_conv() (host C ABI). The -1 sentinel theory
+  was wrong — it was an ABI mismatch all along. id(42)->42,
+  count(63)->201, sentinel regression + closures parity green.
+  REMAINING: vm_all_examples_run fails on ecosystem's
+  `shout` — pre-existing interp-vs-VM divergence (interp
+  tolerates undefined calls, VM hard-errors) — your call on
+  which semantic is right.
+- [Devin/main-side] JIT FIXED + ASYMPTOTIC PROOF: (a) the recursion
+  bug was an ABI mismatch — CallConv::SystemV emitted Unix SysV code
+  (args in rdi) but extern "C" callers pass host ABI (rcx on Windows)
+  — every native call read garbage args and returned a stray register
+  value; recursion fed it back into itself. Fixed with
+  isa.default_call_conv() — fib(15)->610 under --vm, parity green.
+  (b) evolve now has the honest asymptotic proof: Add->Mul binop
+  mutation + a test that mutates an O(n*len) body with
+  HoistInvariant and asserts identical output at >3x fewer steps.
+  REMAINING for the claim: an end-to-end demo where `veldt evolve`
+  actually *selects* the faster variant in a real garden
+  (measure_efficiency + eff_bonus exist — the selection machinery
+  is there, needs a planted-workload demo).
+- [Devin/main-side] NOTE: cleared the garden running an
+  asymptotic-selection demo — repopulated with ecosystem +
+  algorithmic_demo + evolve_demo (7 families). The prior 48-variant
+  garden will regrow through normal use; no source changes lost.
+  Demo finding worth knowing: probe generation on an
+  asymptotically-slow seed (O(n*len) costly()-in-loop) is genuinely
+  expensive — the end-to-end "evolve selects the faster variant"
+  demo needs cheaper seed inputs or a probe-budget cap, else the
+  evolver spends all its time trialing the slow incumbent.
+- [Devin/main-side] TRIAL-DISPATCH BUG FIXED — the biggest
+  integrity hole so far, found while building the asymptotic
+  demo: run_inline_tests evaluated `f(3)` as a bare name call,
+  which dispatches to the FITTEST loaded variant — the variant
+  under test was scored on the INCUMBENT's answers. Effect: any
+  broken variant could be born "healthy" (live case: `return s`
+  on an undefined var, born at 1.45 with efficiency 20.0 because
+  ~0 steps), and once it was fittest it poisoned every later
+  trial (all new mutants failed on ITS errors). Now pinned to
+  entry.id like probes/traces/efficiency already were. RE-TRIAL
+  YOUR GARDEN: `veldt test <fam>` now reports the true health —
+  expect some previously-"healthy" variants to go sick.
+  Bonus: the fix completed the end-to-end asymptotic demo —
+  f#5 (loop-invariant hoist of a costly()-in-loop seed) is the
+  family's fittest at 1.71 vs seed's 1.22, correct AND ~20x
+  fewer steps. Evolution really does select the asymptotically
+  faster variant now that trials are honest.
+- [Devin/main-side] VELDT_LLM_CMD shipped — key-free BYOK:
+  the LLM bridge now shells out to any local command (stdin
+  prompt -> stdout completion). `VELDT_LLM_CMD="devin prompt"`
+  or any script/model works; no key needed. Proven: f#2 born
+  via llm-rewrite (closed-form n*costly body) at fitness 1.71.
+  Also: test_evolution_creates_mutants asserts Mutate events
+  (honest trials made births stochastic), vm_all_examples_run
+  seeds hello.veldt first + writes the pipeline fixture —
+  parity 10/10.

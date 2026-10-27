@@ -223,13 +223,21 @@ impl HealthChecker {
                 .filter_map(|s| serde_json::from_str(s).ok()).collect();
             if args.len() != entry.params.len() { continue; }
             let before = interp.step_count;
-            let _ = Self::call_one(&mut interp, &mut vm, &entry.name, Some(entry.id), args.clone());
-            my_steps += interp.step_count - before;
+            match Self::call_one(&mut interp, &mut vm, &entry.name, Some(entry.id), args.clone()) {
+                Ok(_) => my_steps += interp.step_count - before,
+                // an erroring call isn't cheap — it's a failed run:
+                // count it at the step cap so broken variants can't
+                // inflate their efficiency with near-zero steps
+                Err(_) => my_steps += interp.step_limit,
+            }
             used += 1;
             if let Some(id) = incumbent_id {
                 let before = interp.step_count;
-                let _ = Self::call_one(&mut interp, &mut vm, &entry.name, Some(id), args);
-                base_steps += interp.step_count - before;
+                if Self::call_one(&mut interp, &mut vm, &entry.name, Some(id), args).is_ok() {
+                    base_steps += interp.step_count - before;
+                } else {
+                    base_steps += interp.step_limit;
+                }
             }
         }
         if used == 0 || my_steps == 0 { return 1.0; }
@@ -330,9 +338,32 @@ impl HealthChecker {
 
         for test in &entry.tests {
             total += 1;
+            // The call must hit THE VARIANT UNDER TEST (entry.id), not
+            // name-dispatch to the fittest — else a broken variant
+            // passes on the incumbent's answers, and once it's fittest
+            // it poisons every later trial with its own errors.
+            let call_result = match &test.call {
+                Expr::Call(cname, _, cargs) if cname == &entry.name => {
+                    let mut arg_vals = Vec::with_capacity(cargs.len());
+                    let mut arg_err = None;
+                    for a in cargs {
+                        match interp.eval_expr_in_scope(a) {
+                            Ok(v) => arg_vals.push(v),
+                            Err(e) => { arg_err = Some(e); break; }
+                        }
+                    }
+                    match arg_err {
+                        Some(e) => Err(format!("Test arg failed: {}", e)),
+                        None => Self::call_one(&mut interp, &mut vm,
+                                               &entry.name, Some(entry.id),
+                                               arg_vals),
+                    }
+                }
+                _ => interp.eval_expr_in_scope(&test.call),
+            };
             match &test.expected {
                 Some(expected) => {
-                    match (interp.eval_expr_in_scope(&test.call),
+                    match (call_result,
                            interp.eval_expr_in_scope(expected)) {
                         (Ok(call_val), Ok(expected_val)) => {
                             if Self::values_equal(&call_val, &expected_val) {
@@ -344,7 +375,7 @@ impl HealthChecker {
                     }
                 }
                 None => {
-                    match interp.eval_expr_in_scope(&test.call) {
+                    match call_result {
                         Ok(v) => {
                             if Self::is_truthy_pub(&v) { passed += 1; }
                         }
@@ -473,9 +504,223 @@ impl HealthChecker {
     // === Healing ===
 
     /// Attempt to heal a sick function. Returns true if healed.
+    /// Truncate statements after the first `return` in every block
+    /// (recursively), and drop a trailing bare `return` — the dead
+    /// code mutations splice in. Returns true if anything changed.
+    pub(crate) fn repair_dead_tail(stmts: &mut Vec<Stmt>) -> bool {
+        let mut changed = false;
+        for s in stmts.iter_mut() {
+            changed |= Self::repair_in_stmt(s);
+        }
+        if let Some(pos) = stmts.iter().position(|s| matches!(s, Stmt::Return(_))) {
+            if pos + 1 < stmts.len() {
+                stmts.truncate(pos + 1);
+                changed = true;
+            }
+        }
+        if matches!(stmts.last(), Some(Stmt::Return(None))) && stmts.len() > 1 {
+            stmts.pop();
+            changed = true;
+        }
+        changed
+    }
+
+    fn repair_in_stmt(s: &mut Stmt) -> bool {
+        match s {
+            Stmt::If(_, a, b) => {
+                let mut c = Self::repair_dead_tail(a);
+                if let Some(b) = b { c |= Self::repair_dead_tail(b); }
+                c
+            }
+            Stmt::While(_, b) | Stmt::For(_, _, b) => {
+                let mut c = Self::repair_dead_tail(b);
+                // trailing `continue` in a loop body is dead — control
+                // loops anyway (only safe here: a continue inside an
+                // `if` can skip statements, so bodies must be loops)
+                while matches!(b.last(), Some(Stmt::Continue)) {
+                    b.pop();
+                    c = true;
+                }
+                c
+            }
+            Stmt::Try(a, _, c) =>
+                Self::repair_dead_tail(a) | Self::repair_dead_tail(c),
+            Stmt::Match(_, arms, els) => {
+                let mut c = false;
+                for (_, b) in arms.iter_mut() { c |= Self::repair_dead_tail(b); }
+                if let Some(b) = els { c |= Self::repair_dead_tail(b); }
+                c
+            }
+            _ => false,
+        }
+    }
+
+    /// Remove `let x = <pure>` where x is never used again — dead
+    /// weight mutations leave behind. Only pure RHS (calls and
+    /// method calls can side-effect — keep those even when the
+    /// binding is unused) and only when nothing later reads,
+    /// writes, or rebinds the name in this block.
+    pub(crate) fn repair_dead_lets(stmts: &mut Vec<Stmt>) -> bool {
+        let mut changed = false;
+        for s in stmts.iter_mut() { changed |= Self::repair_lets_in(s); }
+        let mut i = 0;
+        while i < stmts.len() {
+            let dead = match &stmts[i] {
+                Stmt::Let(name, e) => !name.starts_with('_')
+                    && Self::expr_pure(e)
+                    && !stmts.iter().skip(i + 1)
+                        .any(|s| Self::stmt_uses(s, name)),
+                _ => false,
+            };
+            if dead { stmts.remove(i); changed = true; } else { i += 1; }
+        }
+        changed
+    }
+
+    fn repair_lets_in(s: &mut Stmt) -> bool {
+        match s {
+            Stmt::If(_, a, b) => {
+                let mut c = Self::repair_dead_lets(a);
+                if let Some(b) = b { c |= Self::repair_dead_lets(b); }
+                c
+            }
+            Stmt::While(_, b) | Stmt::For(_, _, b) => Self::repair_dead_lets(b),
+            Stmt::Try(a, _, c) =>
+                Self::repair_dead_lets(a) | Self::repair_dead_lets(c),
+            Stmt::Match(_, arms, els) => {
+                let mut c = false;
+                for (_, b) in arms.iter_mut() { c |= Self::repair_dead_lets(b); }
+                if let Some(b) = els { c |= Self::repair_dead_lets(b); }
+                c
+            }
+            _ => false,
+        }
+    }
+
+    /// Repair a whole parsed program — top-level dead code plus
+    /// each fn/grow-fn body (the per-block repairs don't recurse
+    /// into function definitions, so this walks them directly).
+    pub(crate) fn repair_program(stmts: &mut Vec<Stmt>) -> bool {
+        let mut changed = Self::repair_dead_tail(stmts);
+        changed |= Self::repair_dead_lets(stmts);
+        for s in stmts.iter_mut() {
+            match s {
+                Stmt::FnDef(_, _, b)
+                | Stmt::Grow(GrowItem::Fn(_, _, b, _)) => {
+                    changed |= Self::repair_dead_tail(b);
+                    changed |= Self::repair_dead_lets(b);
+                }
+                _ => {}
+            }
+        }
+        changed
+    }
+
+    /// no calls — construction of a value that can't side-effect
+    fn expr_pure(e: &Expr) -> bool {
+        match e {
+            Expr::Call(..) | Expr::MethodCall(..) => false,
+            Expr::SafeGet(o, _, args) => args.is_none() && Self::expr_pure(o),
+            Expr::BinOp(a, _, b) | Expr::Index(a, b) =>
+                Self::expr_pure(a) && Self::expr_pure(b),
+            Expr::UnaryOp(_, a) | Expr::FieldAccess(a, _) => Self::expr_pure(a),
+            Expr::List(items) | Expr::Interp(items) =>
+                items.iter().all(|i| Self::expr_pure(i)),
+            Expr::StructLit(_, fs) => fs.iter().all(|(_, v)| Self::expr_pure(v)),
+            Expr::Slice(o, lo, hi) => Self::expr_pure(o)
+                && lo.as_ref().map(|e| Self::expr_pure(e)).unwrap_or(true)
+                && hi.as_ref().map(|e| Self::expr_pure(e)).unwrap_or(true),
+            Expr::ListComp(x, _, it, c) => Self::expr_pure(x)
+                && Self::expr_pure(it)
+                && c.as_ref().map(|e| Self::expr_pure(e)).unwrap_or(true),
+            _ => true,
+        }
+    }
+
+    /// any read, write, or rebind of `name` — conservatively counts
+    /// binding positions (Assign/For/destructure targets) as uses so
+    /// removal can never create an undeclared-assign or a shadow bug
+    fn stmt_uses(s: &Stmt, name: &str) -> bool {
+        match s {
+            Stmt::Let(n, e) | Stmt::Assign(n, e) =>
+                n == name || Self::expr_uses(e, name),
+            Stmt::LetDestructure(ns, e) =>
+                ns.iter().any(|n| n == name) || Self::expr_uses(e, name),
+            Stmt::FieldAssign(o, _, v) =>
+                Self::expr_uses(o, name) || Self::expr_uses(v, name),
+            Stmt::IndexAssign(o, i, v) => Self::expr_uses(o, name)
+                || Self::expr_uses(i, name) || Self::expr_uses(v, name),
+            Stmt::ExprStmt(e) | Stmt::Print(e)
+            | Stmt::Return(Some(e)) => Self::expr_uses(e, name),
+            Stmt::If(c, a, b) => Self::expr_uses(c, name)
+                || a.iter().any(|s| Self::stmt_uses(s, name))
+                || b.as_ref().map(|v| v.iter().any(|s| Self::stmt_uses(s, name)))
+                    .unwrap_or(false),
+            Stmt::While(c, b) => Self::expr_uses(c, name)
+                || b.iter().any(|s| Self::stmt_uses(s, name)),
+            Stmt::For(v, it, b) => v == name || Self::expr_uses(it, name)
+                || b.iter().any(|s| Self::stmt_uses(s, name)),
+            Stmt::Try(a, _, c) => a.iter().any(|s| Self::stmt_uses(s, name))
+                || c.iter().any(|s| Self::stmt_uses(s, name)),
+            Stmt::Match(scrut, arms, els) => Self::expr_uses(scrut, name)
+                || arms.iter().any(|(p, b)| Self::expr_uses(p, name)
+                    || b.iter().any(|s| Self::stmt_uses(s, name)))
+                || els.as_ref().map(|v| v.iter().any(|s| Self::stmt_uses(s, name)))
+                    .unwrap_or(false),
+            Stmt::FnDef(_, params, b) => params.iter().any(|p| p.name == name)
+                || b.iter().any(|s| Self::stmt_uses(s, name)),
+            Stmt::Grow(GrowItem::Fn(_, params, b, _)) =>
+                params.iter().any(|p| p.name == name)
+                    || b.iter().any(|s| Self::stmt_uses(s, name)),
+            Stmt::Grow(GrowItem::Let(n, e)) =>
+                n == name || Self::expr_uses(e, name),
+            _ => false,
+        }
+    }
+
+    fn expr_uses(e: &Expr, name: &str) -> bool {
+        match e {
+            Expr::Var(v) => v == name,
+            Expr::BinOp(a, _, b) | Expr::Index(a, b) =>
+                Self::expr_uses(a, name) || Self::expr_uses(b, name),
+            Expr::UnaryOp(_, a) | Expr::FieldAccess(a, _) =>
+                Self::expr_uses(a, name),
+            Expr::Call(_, _, args) => args.iter().any(|a| Self::expr_uses(a, name)),
+            Expr::MethodCall(o, _, args) => Self::expr_uses(o, name)
+                || args.iter().any(|a| Self::expr_uses(a, name)),
+            Expr::List(items) | Expr::Interp(items) =>
+                items.iter().any(|i| Self::expr_uses(i, name)),
+            Expr::StructLit(_, fs) => fs.iter().any(|(_, v)| Self::expr_uses(v, name)),
+            Expr::Slice(o, lo, hi) => Self::expr_uses(o, name)
+                || lo.as_ref().map(|e| Self::expr_uses(e, name)).unwrap_or(false)
+                || hi.as_ref().map(|e| Self::expr_uses(e, name)).unwrap_or(false),
+            Expr::SafeGet(o, _, args) => Self::expr_uses(o, name)
+                || args.as_ref().map(|a| a.iter().any(|e| Self::expr_uses(e, name)))
+                    .unwrap_or(false),
+            Expr::Lambda(params, b) => params.iter().any(|p| p.name == name)
+                || b.iter().any(|s| Self::stmt_uses(s, name)),
+            Expr::ListComp(x, v, it, c) => v == name
+                || Self::expr_uses(x, name) || Self::expr_uses(it, name)
+                || c.as_ref().map(|e| Self::expr_uses(e, name)).unwrap_or(false),
+            _ => false,
+        }
+    }
+
     pub fn heal(entry: &mut FunctionEntry, veldt: &Veldt) -> bool {
         let attempt = format!("Healing attempt for {}#{}", entry.name, entry.id);
         entry.healing_attempts.push(attempt);
+
+        // Mechanical repair first — truncate dead code after
+        // returns and drop pure dead lets: the defect shapes
+        // mutations splice in and the linter flags.
+        let mut repaired = Self::repair_dead_tail(&mut entry.body);
+        repaired |= Self::repair_dead_lets(&mut entry.body);
+        if repaired {
+            entry.healing_attempts.push(format!(
+                "mechanical repair: cleaned dead code in {}#{}",
+                entry.name, entry.id));
+            return true;
+        }
 
         // Find a healthy healer in the same lineage (same-purpose)
         let same_purpose_healer = Self::find_same_purpose_healer(entry, veldt);
@@ -600,6 +845,86 @@ mod tests {
         let mut entry = veldt.functions.get(name).unwrap()[0].clone();
         HealthChecker::check_at_birth(&mut entry, veldt);
         veldt.functions.get_mut(name).unwrap()[0] = entry;
+    }
+
+    #[test]
+    fn repair_dead_tail_truncates_after_return() {
+        // top-level: stmts after first return are cut
+        let mut body = vec![
+            Stmt::Return(Some(Expr::Int(1))),
+            Stmt::Print(Expr::Int(2)),
+            Stmt::Assign("x".into(), Expr::Int(3)),
+        ];
+        assert!(HealthChecker::repair_dead_tail(&mut body));
+        assert_eq!(body.len(), 1);
+
+        // nested: unreachable code inside an if body is cut too
+        let mut body = vec![
+            Stmt::If(Expr::Bool(true), vec![
+                Stmt::Return(Some(Expr::Int(1))),
+                Stmt::Print(Expr::Int(2)),
+            ], None),
+            Stmt::Print(Expr::Int(9)),
+        ];
+        assert!(HealthChecker::repair_dead_tail(&mut body));
+        if let Stmt::If(_, then, _) = &body[0] { assert_eq!(then.len(), 1); }
+
+        // trailing bare `return` gets dropped
+        let mut body = vec![
+            Stmt::Print(Expr::Int(1)),
+            Stmt::Return(None),
+        ];
+        assert!(HealthChecker::repair_dead_tail(&mut body));
+        assert_eq!(body.len(), 1);
+
+        // clean body — nothing to repair
+        let mut body = vec![
+            Stmt::Print(Expr::Int(1)),
+            Stmt::Return(Some(Expr::Int(2))),
+        ];
+        assert!(!HealthChecker::repair_dead_tail(&mut body));
+    }
+
+    #[test]
+    fn repair_dead_lets_removes_pure_unread() {
+        // let y = <pure> never used → removed
+        let mut body = vec![
+            Stmt::Let("y".into(), Expr::Int(1)),
+            Stmt::Return(Some(Expr::Int(2))),
+        ];
+        assert!(HealthChecker::repair_dead_lets(&mut body));
+        assert_eq!(body.len(), 1);
+
+        // let f = call() never used → KEPT (call may side-effect)
+        let mut body = vec![
+            Stmt::Let("f".into(), Expr::Call("side".into(), None, vec![])),
+            Stmt::Return(Some(Expr::Int(2))),
+        ];
+        assert!(!HealthChecker::repair_dead_lets(&mut body));
+
+        // let x read later → kept
+        let mut body = vec![
+            Stmt::Let("x".into(), Expr::Int(1)),
+            Stmt::Return(Some(Expr::Var("x".into()))),
+        ];
+        assert!(!HealthChecker::repair_dead_lets(&mut body));
+
+        // let x assigned later → kept (removal would break the assign)
+        let mut body = vec![
+            Stmt::Let("x".into(), Expr::Int(1)),
+            Stmt::Assign("x".into(), Expr::Int(2)),
+        ];
+        assert!(!HealthChecker::repair_dead_lets(&mut body));
+
+        // nested dead let inside a while body → removed
+        let mut body = vec![
+            Stmt::While(Expr::Bool(true), vec![
+                Stmt::Let("tmp".into(), Expr::Int(9)),
+                Stmt::Print(Expr::Int(1)),
+            ]),
+        ];
+        assert!(HealthChecker::repair_dead_lets(&mut body));
+        if let Stmt::While(_, b) = &body[0] { assert_eq!(b.len(), 1); }
     }
 
     #[test]

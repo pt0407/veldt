@@ -38,6 +38,8 @@ pub async fn start_server(port: u16) {
         .route("/api/absorb", post(absorb))
         .route("/api/stats", get(stats))
         .route("/api/check", post(check_source))
+        .route("/api/fix", post(fix_source))
+        .route("/api/lint", get(garden_lint))
         .route("/api/tournament", post(tournament))
         .route("/api/swarm", post(swarm))
         .route("/api/play", post(play_demo))
@@ -951,6 +953,61 @@ async fn check_source(
         }
         Err(e) => Json(serde_json::json!({"ok": false, "error": e})),
     }
+}
+
+async fn fix_source(
+    Json(req): Json<CheckRequest>,
+) -> Json<serde_json::Value> {
+    // mechanical dead-code repair on the posted source — the
+    // IDE's one-click fix (same passes as veldt fix / --garden --fix)
+    let mut lx = crate::lexer::Lexer::new(&req.source);
+    let res = lx.tokenize().map_err(|e| format!("lex: {}", e))
+        .and_then(|t| {
+            let mut p = crate::parser::Parser::new_with_lines(t, lx.token_lines.clone());
+            p.parse_program().map_err(|e| format!("parse: {}", e))
+        });
+    match res {
+        Ok(mut stmts) => {
+            let changed = crate::health::HealthChecker::repair_program(&mut stmts);
+            Json(serde_json::json!({
+                "ok": true, "changed": changed,
+                "source": if changed { crate::fmt::format_program(&stmts) }
+                          else { req.source },
+            }))
+        }
+        Err(e) => Json(serde_json::json!({"ok": false, "error": e})),
+    }
+}
+
+async fn garden_lint(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
+    // strict-lint every variant body — per-family warning counts
+    // with the defect-class split, for the IDE's code-health view
+    let veldt = state.veldt.lock().unwrap();
+    let mut per_fam = Vec::new();
+    let (mut total, mut bugs) = (0usize, 0usize);
+    for (name, vs) in &veldt.functions {
+        let (mut fw, mut fb) = (0usize, 0usize);
+        for e in vs {
+            let wrapped = crate::ast::Stmt::Grow(crate::ast::GrowItem::Fn(
+                name.clone(), e.params.clone(),
+                e.body.clone(), e.tests.clone()));
+            for w in crate::lint(&[wrapped]) {
+                if w.contains("defined but never called")
+                    || w.contains("no top-level statements") { continue; }
+                fw += 1;
+                if crate::evolve::is_realbug_warning(&w) { fb += 1; }
+            }
+        }
+        if fw > 0 {
+            per_fam.push(serde_json::json!({
+                "family": name, "warnings": fw, "defects": fb}));
+        }
+        total += fw;
+        bugs += fb;
+    }
+    per_fam.sort_by(|a, b| b["warnings"].as_u64().cmp(&a["warnings"].as_u64()));
+    Json(serde_json::json!({
+        "warnings": total, "defects": bugs, "families": per_fam}))
 }
 
 async fn absorb(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {

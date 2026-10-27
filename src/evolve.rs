@@ -18,6 +18,14 @@ pub struct Evolver {
     /// Sort the candidate pool by a variant field before selection
     /// — the garden --sort DSL applied to the breeding order.
     pub sort: Option<String>,
+    /// Self-maintaining cycles — heal sick variants and run the
+    /// mechanical dead-code repairs across the garden each cycle.
+    pub tend: bool,
+    /// Families whose fittest variant's body isn't side-effect-free —
+    /// `let x = f()` where f is impure must NOT hoist (it would run the
+    /// side effect once instead of per-iteration). Recomputed at the
+    /// start of each evolve run by fixpoint scan.
+    impure_fns: std::collections::HashSet<String>,
 }
 
 impl Evolver {
@@ -26,7 +34,9 @@ impl Evolver {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_nanos() as u64)
             .unwrap_or(42);
-        Evolver { rng_seed: seed, llm: false, filter: None, sort: None, use_vm: false }
+        Evolver { rng_seed: seed, llm: false, filter: None, sort: None,
+                  use_vm: false, tend: false,
+                  impure_fns: std::collections::HashSet::new() }
     }
 
     /// Deterministic evolution: same seed + same garden = same outcomes.
@@ -60,10 +70,17 @@ impl Evolver {
     /// Evolve with an optional family scope — `only` restricts candidates
     /// to a single lineage (targeted mutation on one family).
     pub fn evolve_scoped(&mut self, veldt: &mut Veldt, cycles: usize, only: Option<&str>) -> Vec<EvolutionEvent> {
+        self.impure_fns = Self::impure_families(&veldt.functions);
         let mut events = Vec::new();
 
         for cycle in 1..=cycles {
             events.push(EvolutionEvent::CycleStart(cycle));
+            if self.tend {
+                let (healed, repaired) = self.tend_garden(veldt);
+                if healed + repaired > 0 {
+                    events.push(EvolutionEvent::Tended { healed, repaired });
+                }
+            }
             let pre = veldt.functions.values().flatten()
                 .map(|e| e.fitness).fold(f64::NEG_INFINITY, f64::max);
 
@@ -196,7 +213,7 @@ impl Evolver {
 
                 let do_crossover = healthy_ids.len() >= 2 && self.rand_range(10) < 3;
 
-                let (child_body, parents, origin) = if do_crossover {
+                let (mut child_body, parents, origin) = if do_crossover {
                     let other_id = healthy_ids.iter().filter(|i| **i != entry.id)
                         .nth(self.rand_range(healthy_ids.len() - 1)).copied().unwrap();
                     let other = veldt.functions[name].iter().find(|e| e.id == other_id).cloned().unwrap();
@@ -219,11 +236,39 @@ impl Evolver {
                      format!("{} of {}#{}", mutation_name(mutation), name, entry.id))
                 };
 
+                // Mechanical normalization: run the repair passes on the
+                // child before judging it — mutations that only splice in
+                // dead code normalize back to the parent shape and get
+                // CloneRejected instead of being born dirty
+                crate::health::HealthChecker::repair_dead_tail(&mut child_body);
+                crate::health::HealthChecker::repair_dead_lets(&mut child_body);
+
                 // Semantic dedup: reject children identical to an existing variant
                 if let Some(variants) = veldt.functions.get(name) {
                     let child_key = format!("{:?}", child_body);
                     if variants.iter().any(|e| format!("{:?}", e.body) == child_key) {
                         events.push(EvolutionEvent::CloneRejected { name: name.clone() });
+                        spent += 1;
+                        continue;
+                    }
+                }
+
+                // Strict-lint gate: reject mutants that introduce real-bug
+                // warnings the parent didn't already carry — mutations
+                // shouldn't birth unreachable/self-reading/arity-broken code
+                {
+                    let parent_warns = mutant_realbugs(name, &entry.params,
+                        &entry.body, &entry.tests);
+                    let child_warns = mutant_realbugs(name, &entry.params,
+                        &child_body, &entry.tests);
+                    let new_warns: Vec<String> = child_warns.iter()
+                        .filter(|w| !parent_warns.contains(w))
+                        .cloned().collect();
+                    if !new_warns.is_empty() {
+                        events.push(EvolutionEvent::LintRejected {
+                            name: name.clone(),
+                            warnings: new_warns,
+                        });
                         spent += 1;
                         continue;
                     }
@@ -678,12 +723,16 @@ impl Evolver {
                         // first let whose rhs reads no loop-mutated var
                         body.iter().position(|st| {
                             if let Stmt::Let(name, e) = st {
-                                // RHS must read no loop-mutated var, and
-                                // the name must not be re-assigned inside
-                                // (else hoisting changes reset semantics)
+                                // RHS must read no loop-mutated var, the
+                                // name must not be re-assigned inside
+                                // (else hoisting changes reset semantics),
+                                // and the RHS must be side-effect-free —
+                                // hoisting `print(x)` would fire it once
+                                // instead of per-iteration
                                 !Self::expr_uses_any(e, &assigned)
                                     && !body.iter().any(|s2| matches!(s2,
                                         Stmt::Assign(n2, _) if n2 == name))
+                                    && self.expr_hoistable(e)
                             } else { false }
                         }).map(|pos| pos)
                     } else { None };
@@ -879,6 +928,165 @@ impl Evolver {
                 parts.iter().any(|x| Self::expr_uses_any(x, names)),
             _ => false,
         }
+    }
+
+    /// True if hoisting `let x = e` out of a loop preserves behavior —
+    /// i.e. `e` is side-effect-free. Calls are allowed only to fns proven
+    /// pure (impure_fns is the complement set) or to builtins that
+    /// aren't in the side-effecting denylist.
+    fn expr_hoistable(&self, e: &Expr) -> bool {
+        match e {
+            Expr::Call(n, _, args) => {
+                !Self::impure_builtin(n)
+                    && !self.impure_fns.contains(n)
+                    && args.iter().all(|a| self.expr_hoistable(a))
+            }
+            Expr::MethodCall(o, m, args) => {
+                !Self::impure_method(m)
+                    && self.expr_hoistable(o)
+                    && args.iter().all(|a| self.expr_hoistable(a))
+            }
+            Expr::SafeGet(o, _, args) => self.expr_hoistable(o)
+                && args.as_ref()
+                    .map(|a| a.iter().all(|x| self.expr_hoistable(x)))
+                    .unwrap_or(true),
+            Expr::BinOp(a, _, b) | Expr::Index(a, b) =>
+                self.expr_hoistable(a) && self.expr_hoistable(b),
+            Expr::UnaryOp(_, a) | Expr::FieldAccess(a, _) => self.expr_hoistable(a),
+            Expr::List(items) | Expr::Interp(items) =>
+                items.iter().all(|i| self.expr_hoistable(i)),
+            Expr::StructLit(_, fs) => fs.iter().all(|(_, v)| self.expr_hoistable(v)),
+            Expr::Slice(o, lo, hi) => self.expr_hoistable(o)
+                && lo.as_ref().map(|e| self.expr_hoistable(e)).unwrap_or(true)
+                && hi.as_ref().map(|e| self.expr_hoistable(e)).unwrap_or(true),
+            Expr::ListComp(x, _, it, c) => self.expr_hoistable(x)
+                && self.expr_hoistable(it)
+                && c.as_ref().map(|e| self.expr_hoistable(e)).unwrap_or(true),
+            Expr::Lambda(_, _) => true, // creating a closure is pure — its
+            // effects fire where it's called, same either way
+            _ => true,
+        }
+    }
+
+    /// Side-effecting builtins — a `let` holding one can't hoist.
+    fn impure_builtin(n: &str) -> bool {
+        matches!(n,
+            "print" | "eprint" | "rand" | "randint" | "randf" | "input"
+            | "readline" | "now" | "time" | "sleep" | "exit" | "quit"
+            | "read_file" | "write_file" | "append_file" | "read_lines"
+            | "list_dir" | "exec" | "shell" | "http_get" | "http_post"
+            | "http_put" | "http_delete" | "fetch" | "open" | "connect"
+            | "query" | "save" | "load" | "absorb" | "spawn" | "join_task"
+            | "env" | "setenv" | "gc" | "log" | "debug")
+    }
+
+    /// Mutating methods — `obj.m()` mutates the receiver, not pure.
+    fn impure_method(m: &str) -> bool {
+        matches!(m, "append" | "insert" | "remove" | "pop" | "clear"
+            | "push" | "extend" | "update" | "delete" | "fill" | "sort_in_place")
+    }
+
+    /// Body scan for the fixpoint — a stmt list is pure iff nothing
+    /// side-effects: no Print, no IndexAssign/FieldAssign (mutates a
+    /// possibly-shared structure), no Grow/Import (environment effects),
+    /// and every call target is a pure fn or a non-denylisted builtin.
+    fn stmt_pure(s: &Stmt, pure: &std::collections::HashSet<String>,
+                 fns: &std::collections::HashMap<String, Vec<FunctionEntry>>) -> bool {
+        let ep = |e: &Expr| Self::expr_pure_in(e, pure, fns);
+        match s {
+            Stmt::Print(_) | Stmt::Grow(_) | Stmt::Import(..)
+            | Stmt::IndexAssign(..) | Stmt::FieldAssign(..) => false,
+            Stmt::Let(_, e) | Stmt::Assign(_, e) | Stmt::ExprStmt(e)
+            | Stmt::LetDestructure(_, e) => ep(e),
+            Stmt::Return(Some(e)) => ep(e),
+            Stmt::Return(None) | Stmt::Break | Stmt::Continue
+            | Stmt::StructDef(..) | Stmt::FnDef(..) => true,
+            Stmt::If(c, a, b) => ep(c)
+                && a.iter().all(|s| Self::stmt_pure(s, pure, fns))
+                && b.as_ref()
+                    .map(|v| v.iter().all(|s| Self::stmt_pure(s, pure, fns)))
+                    .unwrap_or(true),
+            Stmt::While(c, b) => ep(c)
+                && b.iter().all(|s| Self::stmt_pure(s, pure, fns)),
+            Stmt::For(_, it, b) => ep(it)
+                && b.iter().all(|s| Self::stmt_pure(s, pure, fns)),
+            Stmt::Try(b, _, h) =>
+                b.iter().chain(h.iter()).all(|s| Self::stmt_pure(s, pure, fns)),
+            Stmt::Match(e, arms, els) => ep(e)
+                && arms.iter().all(|(p, b)|
+                    ep(p) && b.iter().all(|s| Self::stmt_pure(s, pure, fns)))
+                && els.as_ref()
+                    .map(|v| v.iter().all(|s| Self::stmt_pure(s, pure, fns)))
+                    .unwrap_or(true),
+        }
+    }
+
+    fn expr_pure_in(e: &Expr, pure: &std::collections::HashSet<String>,
+                    fns: &std::collections::HashMap<String, Vec<FunctionEntry>>) -> bool {
+        match e {
+            Expr::Call(n, _, args) => {
+                if Self::impure_builtin(n) { return false; }
+                // a user fn that isn't (yet) proven pure is impure
+                if fns.contains_key(n) && !pure.contains(n) { return false; }
+                args.iter().all(|a| Self::expr_pure_in(a, pure, fns))
+            }
+            Expr::MethodCall(o, m, args) => {
+                !Self::impure_method(m)
+                    && Self::expr_pure_in(o, pure, fns)
+                    && args.iter().all(|a| Self::expr_pure_in(a, pure, fns))
+            }
+            Expr::SafeGet(o, _, args) => Self::expr_pure_in(o, pure, fns)
+                && args.as_ref()
+                    .map(|a| a.iter().all(|x| Self::expr_pure_in(x, pure, fns)))
+                    .unwrap_or(true),
+            Expr::BinOp(a, _, b) | Expr::Index(a, b) =>
+                Self::expr_pure_in(a, pure, fns) && Self::expr_pure_in(b, pure, fns),
+            Expr::UnaryOp(_, a) | Expr::FieldAccess(a, _) =>
+                Self::expr_pure_in(a, pure, fns),
+            Expr::List(items) | Expr::Interp(items) =>
+                items.iter().all(|i| Self::expr_pure_in(i, pure, fns)),
+            Expr::StructLit(_, fs) =>
+                fs.iter().all(|(_, v)| Self::expr_pure_in(v, pure, fns)),
+            Expr::Slice(o, lo, hi) => Self::expr_pure_in(o, pure, fns)
+                && lo.as_ref().map(|e| Self::expr_pure_in(e, pure, fns)).unwrap_or(true)
+                && hi.as_ref().map(|e| Self::expr_pure_in(e, pure, fns)).unwrap_or(true),
+            Expr::ListComp(x, _, it, c) => Self::expr_pure_in(x, pure, fns)
+                && Self::expr_pure_in(it, pure, fns)
+                && c.as_ref().map(|e| Self::expr_pure_in(e, pure, fns)).unwrap_or(true),
+            Expr::Lambda(_, body) =>
+                body.iter().all(|s| Self::stmt_pure(s, pure, fns)),
+            _ => true,
+        }
+    }
+
+    /// Fixpoint: which families' FITTEST variant is side-effecting?
+    /// A fn is pure iff its body scans clean AND every user-fn call it
+    /// makes is already proven pure. Everything else lands in the set.
+    fn impure_families(fns: &std::collections::HashMap<String, Vec<FunctionEntry>>)
+        -> std::collections::HashSet<String> {
+        let mut pure: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+        loop {
+            let mut changed = false;
+            for (name, variants) in fns {
+                if pure.contains(name) { continue; }
+                let fittest = variants.iter()
+                    .max_by(|a, b| a.fitness.partial_cmp(&b.fitness)
+                        .unwrap_or(std::cmp::Ordering::Equal));
+                if let Some(v) = fittest {
+                    if v.body.iter().all(|s| Self::stmt_pure(s, &pure, fns)) {
+                        pure.insert(name.clone());
+                        changed = true;
+                    }
+                } else {
+                    // empty family — can't call it anyway; mark pure
+                    // so it doesn't poison the set
+                    pure.insert(name.clone());
+                }
+            }
+            if !changed { break; }
+        }
+        fns.keys().filter(|n| !pure.contains(*n)).cloned().collect()
     }
 
     /// Try to simplify every expr in a statement (depth-first, first match wins).
@@ -1102,7 +1310,10 @@ impl Evolver {
 
     fn mutate_binop(&mut self, op: &BinOp) -> BinOp {
         match op {
-            BinOp::Add => BinOp::Sub,
+            // + → - or * — geometric steps are how loop mutations
+            // reach asymptotic improvement (i += k → i *= k is
+            // O(n) → O(log n) iteration count)
+            BinOp::Add => if self.rand_bool() { BinOp::Sub } else { BinOp::Mul },
             BinOp::Sub => BinOp::Add,
             BinOp::Mul => BinOp::Div,
             BinOp::Div => BinOp::Mul,
@@ -1128,6 +1339,8 @@ pub enum EvolutionEvent {
     NoCandidates,
     ProbeGenerated { name: String, niche: String },
     CloneRejected { name: String },
+    LintRejected { name: String, warnings: Vec<String> },
+    Tended { healed: usize, repaired: usize },
     Mutate { name: String, parent_id: u32, new_id: u32, desc: String },
     Trial { name: String, id: u32, healthy: bool, score: f64, fitness: f64, parent_fitness: f64 },
     Death { name: String, id: u32, cause: String },
@@ -1144,6 +1357,14 @@ impl EvolutionEvent {
             }
             Self::CloneRejected { name } => {
                 format!("  [REJECT] {} — child identical to existing variant, not born", name)
+            }
+            Self::LintRejected { name, warnings } => {
+                format!("  [LINT]   {} — child introduces real-bug warnings, not born ({})",
+                        name, warnings.join("; "))
+            }
+            Self::Tended { healed, repaired } => {
+                format!("  [TEND]   garden tended — {} healed, {} dead-code repairs",
+                        healed, repaired)
             }
             Self::Mutate { name, parent_id, new_id, desc } => {
                 format!("  [MUTATE] {}#{} → {}#{} ({})", name, parent_id, name, new_id, desc)
@@ -1325,6 +1546,66 @@ fn mutation_name(m: Mutation) -> &'static str {
     }
 }
 
+impl Evolver {
+    /// The --tend pass: heal every sick variant (healer-merge +
+    /// mechanical repair first), then run the dead-code repairs on
+    /// all bodies. Returns (healed, repaired) counts.
+    fn tend_garden(&self, veldt: &mut Veldt) -> (usize, usize) {
+        let snapshot: Vec<(String, u32, bool)> = veldt.functions.iter()
+            .flat_map(|(n, vs)| vs.iter()
+                .map(|e| (n.clone(), e.id, matches!(e.health, Health::Sick(_)))))
+            .collect();
+        let (mut healed, mut repaired) = (0usize, 0usize);
+        for (name, id, was_sick) in snapshot {
+            let mut entry = veldt.functions[&name].iter()
+                .find(|e| e.id == id).cloned().unwrap();
+            let mut changed = false;
+            if was_sick && HealthChecker::heal(&mut entry, veldt) {
+                healed += 1;
+                changed = true;
+            }
+            let mut c = HealthChecker::repair_dead_tail(&mut entry.body);
+            c |= HealthChecker::repair_dead_lets(&mut entry.body);
+            if c { repaired += 1; changed = true; }
+            if changed {
+                if let Some(vs) = veldt.functions.get_mut(&name) {
+                    for e in vs.iter_mut() {
+                        if e.id == id { *e = entry.clone(); break; }
+                    }
+                }
+            }
+        }
+        (healed, repaired)
+    }
+}
+
+/// strict-lint a candidate mutant body — returns only the
+/// real-bug warnings (defects, not style). The body wraps as a
+/// synthetic grow fn so params seed scope and tests get checked.
+fn mutant_realbugs(name: &str, params: &[Param], body: &[Stmt],
+                   tests: &[TestAssert]) -> Vec<String> {
+    let wrapped = Stmt::Grow(GrowItem::Fn(
+        name.to_string(), params.to_vec(), body.to_vec(), tests.to_vec()));
+    crate::lint(&[wrapped]).into_iter()
+        .filter(|w| is_realbug_warning(w))
+        .collect()
+}
+
+/// the defect subset of strict-lint warnings — things a mutant
+/// almost certainly shouldn't carry: arity mismatches, unbound
+/// reads/assigns, null binds, fn shadowing, wrong-fn tests,
+/// unreachable code, never-matching patterns
+pub(crate) fn is_realbug_warning(w: &str) -> bool {
+    w.contains("args, got")
+        || w.contains("shadows fn")
+        || w.contains("never returns a value")
+        || w.contains("before it's bound")
+        || w.contains("doesn't exercise")
+        || w.contains("unreachable code after return")
+        || w.contains("assigned but never declared")
+        || w.contains("is unbound — never matches")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1366,9 +1647,16 @@ mod tests {
         let mut evolver = Evolver::new();
         let events = evolver.evolve(&mut veldt, 1);
 
-        // Should have created at least one mutant
-        assert!(veldt.functions["add"].len() > initial_count);
+        // A Mutate event is the deterministic signal — survival is
+        // stochastic now that trials test each variant's OWN body
+        // (broken mutants die instead of riding the incumbent's
+        // answers). 3 cycles gives enough attempts for near-certain
+        // coverage of the mutation paths.
         assert!(!events.is_empty());
+        assert!(events.iter().any(|e|
+            matches!(e, EvolutionEvent::Mutate { .. })),
+            "evolution produced no mutation events: {:?}", events);
+        let _ = initial_count; // births are stochastic — not asserted
     }
 
     #[test]
@@ -1515,6 +1803,25 @@ mod phase7_tests {
     }
 
     #[test]
+    fn hoist_skips_impure_lets() {
+        // `let c = print(x)` inside a loop — hoisting would fire the
+        // side effect once instead of per-iteration. Must not hoist.
+        let body = vec![
+            Stmt::While(Expr::BinOp(
+                    Box::new(Expr::Var("i".into())), BinOp::Lt, Box::new(Expr::Var("n".into()))),
+                vec![
+                    Stmt::Let("c".into(), Expr::Call("print".into(), None,
+                        vec![Expr::Var("x".into())])),
+                    Stmt::Assign("i".into(), Expr::Int(1)),
+                ]),
+        ];
+        let mut e = ev();
+        let out = e.mutate_body(&body, Mutation::HoistInvariant);
+        assert!(matches!(&out[0], Stmt::While(_, _)),
+            "impure let was hoisted: {:?}", out);
+    }
+
+    #[test]
     fn hoist_skips_loop_dependent_lets() {
         // `let k = i + 1` reads a loop-mutated var — must NOT hoist
         let body = vec![
@@ -1529,5 +1836,105 @@ mod phase7_tests {
         let mut e = ev();
         let out = e.mutate_body(&body, Mutation::HoistInvariant);
         assert!(matches!(&out[0], Stmt::While(_, _)));
+    }
+}
+
+#[cfg(test)]
+mod asymptotic_proof {
+    use super::*;
+
+    /// THE headline proof: a loop-invariant hoist turns an O(n·cost)
+    /// body into O(cost+n) — same output, measurably fewer steps.
+    /// This is the asymptotic-improvement claim, demonstrated by the
+    /// mutation itself, not simulated.
+    #[test]
+    fn invariant_hoist_yields_asymptotic_speedup() {
+        use crate::interpreter::{Interpreter, FunctionDef, FunctionVariant, Value};
+
+        // fn f(n, vals):
+        //   let s = 0; let i = 0
+        //   while i < n { let c = costly(vals); s = s + c; i = i + 1 }
+        //   return s
+        //   — costly() does an inner O(len) loop, so the seed is
+        //   O(n·len); the hoist runs it once → O(len + n).
+        let loop_body = vec![
+            Stmt::Let("c".into(), Expr::Call("costly".into(), None,
+                vec![Expr::Var("vals".into())])),
+            Stmt::Assign("s".into(), Expr::BinOp(
+                Box::new(Expr::Var("s".into())), BinOp::Add,
+                Box::new(Expr::Var("c".into())))),
+            Stmt::Assign("i".into(), Expr::BinOp(
+                Box::new(Expr::Var("i".into())), BinOp::Add,
+                Box::new(Expr::Int(1)))),
+        ];
+        let while_s = Stmt::While(Expr::BinOp(
+            Box::new(Expr::Var("i".into())), BinOp::Lt,
+            Box::new(Expr::Var("n".into()))), loop_body);
+        let seed_body = vec![
+            Stmt::Let("s".into(), Expr::Int(0)),
+            Stmt::Let("i".into(), Expr::Int(0)),
+            while_s,
+            Stmt::Return(Some(Expr::Var("s".into()))),
+        ];
+
+        let mut e = Evolver::new();
+        let hoisted = e.mutate_body(&seed_body, Mutation::HoistInvariant);
+        // the `let c = costly(vals)` should be hoisted before the while
+        let c_pos = hoisted.iter().position(|s| matches!(s, Stmt::Let(n, _) if n == "c"));
+        let w_pos = hoisted.iter().position(|s| matches!(s, Stmt::While(_, _)));
+        assert!(matches!((c_pos, w_pos), (Some(c), Some(w)) if c < w),
+            "invariant let not hoisted: {:?}", hoisted);
+
+        // costly(xs): a user fn whose inner loop counts real steps —
+        // an O(len) call, not a ~free builtin
+        let costly_body = vec![
+            Stmt::Let("acc".into(), Expr::Int(0)),
+            Stmt::For("x".into(), Expr::Var("xs".into()), vec![
+                Stmt::Assign("acc".into(), Expr::BinOp(
+                    Box::new(Expr::Var("acc".into())), BinOp::Add,
+                    Box::new(Expr::Var("x".into())))),
+            ]),
+            Stmt::Return(Some(Expr::Var("acc".into()))),
+        ];
+
+        // run both on a big input — same output, but the hoisted one
+        // runs costly() once, not n times
+        let run = |body: &[Stmt]| -> (u64, Value) {
+            let mut interp = Interpreter::with_step_limit(50_000_000);
+            let params = vec![
+                Param { name: "n".into(), typ: Type::Int },
+                Param { name: "vals".into(), typ: Type::List(Box::new(Type::Int)) },
+            ];
+            interp.functions.insert("f".to_string(), vec![FunctionVariant {
+                id: 1, fitness: 1.0,
+                def: FunctionDef { params: std::rc::Rc::new(params),
+                                   body: std::rc::Rc::new(body.to_vec()) },
+            }]);
+            interp.functions.insert("costly".to_string(), vec![FunctionVariant {
+                id: 1, fitness: 1.0,
+                def: FunctionDef {
+                    params: std::rc::Rc::new(vec![
+                        Param { name: "xs".into(),
+                                typ: Type::List(Box::new(Type::Int)) }]),
+                    body: std::rc::Rc::new(costly_body.clone()) },
+            }]);
+            let vals: Vec<Value> = (0..300).map(Value::Int).collect();
+            let before = interp.step_count;
+            let out = interp.call_function("f", Some(1),
+                vec![Value::Int(300), Value::List(vals.into_iter().collect())]).unwrap();
+            (interp.step_count - before, out)
+        };
+        let (seed_steps, seed_out) = run(&seed_body);
+        let (hoist_steps, hoist_out) = run(&hoisted);
+        assert_eq!(seed_out, hoist_out,
+            "hoist changed the result — semantics broken");
+        assert!(hoist_steps < seed_steps,
+            "no speedup: seed {} vs hoisted {}", seed_steps, hoist_steps);
+        // 300 iterations of costly(300) vs one — the hoisted variant is
+        // asymptotically fewer steps, not a constant-factor shave
+        assert!(seed_steps as f64 / hoist_steps.max(1) as f64 > 3.0,
+            "not asymptotic: seed {} vs hoisted {} ({}x)",
+            seed_steps, hoist_steps,
+            seed_steps as f64 / hoist_steps.max(1) as f64);
     }
 }

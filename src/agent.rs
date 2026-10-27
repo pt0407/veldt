@@ -338,6 +338,10 @@ pub fn respond(task: &str, editor_source: &str, veldt: &mut Veldt) -> AgentRespo
     if hasw(&["why"]) && !has(&["obituar", "why did", "why'd"]) {
         return why_intent(&words, veldt);
     }
+    if hasw(&["lint", "warnings", "bugs"])
+        || has(&["code health", "code quality", "static analysis", "lint report"]) {
+        return lint_intent(&words, veldt);
+    }
     if has(&["dead code", "deadcode", "unreachable", "stripped"]) {
         return dead_intent(veldt);
     }
@@ -486,6 +490,7 @@ fn help_intent() -> AgentResponse {
          • \"fib#216 siblings\" — shared-parent variants\n\
          • \"what's stale\" · \"forgotten\" — dormant variants\n\
          • \"dead code\" — dead-code-removal variants\n\
+         • \"lint fib\" · \"code health\" — strict-lint warnings per variant\n\
          • \"who's winning\" · \"best fib\" — fitness leaderboard\n\
          • \"what's proven\" · \"production-ready\" — deployment subset\n\
          • \"what's risky\" · \"experimental\" — untested + unstable\n\
@@ -754,22 +759,35 @@ fn family_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
 }
 
 /// Triage — the variants that need attention across the whole garden.
+/// Sick/dying by trial, weakest by fitness, AND defect-carrying by
+/// lint — a variant can pass every trial and still be buggy by
+/// inspection.
 fn triage_intent(veldt: &Veldt) -> AgentResponse {
     let mut sick: Vec<(&String, &FunctionEntry)> = Vec::new();
     let mut dying: Vec<(&String, &FunctionEntry)> = Vec::new();
     let mut weakest: Vec<(&String, &FunctionEntry)> = Vec::new();
+    let mut lint_bad: Vec<(&String, &FunctionEntry, Vec<String>)> = Vec::new();
     for (name, vs) in &veldt.functions {
         for e in vs {
             if matches!(e.health, Health::Sick(_)) { sick.push((name, e)); }
             if matches!(e.health, Health::Dying) { dying.push((name, e)); }
+            let wrapped = crate::ast::Stmt::Grow(crate::ast::GrowItem::Fn(
+                name.clone(), e.params.clone(),
+                e.body.clone(), e.tests.clone()));
+            let bugs: Vec<String> = crate::lint(&[wrapped]).into_iter()
+                .filter(|w| crate::evolve::is_realbug_warning(w)
+                    && !w.contains("defined but never called")
+                    && !w.contains("no top-level statements"))
+                .collect();
+            if !bugs.is_empty() { lint_bad.push((name, e, bugs)); }
         }
         if let Some(w) = vs.iter().min_by(|a, b| a.fitness.partial_cmp(&b.fitness)
             .unwrap_or(std::cmp::Ordering::Equal)) {
             weakest.push((name, w));
         }
     }
-    if sick.is_empty() && dying.is_empty() {
-        return plain("Nothing needs attention — the garden is healthy.");
+    if sick.is_empty() && dying.is_empty() && lint_bad.is_empty() {
+        return plain("Nothing needs attention — the garden is healthy and lint-clean.");
     }
     let mut text = String::from("Triage:\n");
     for (n, e) in &dying {
@@ -781,6 +799,14 @@ fn triage_intent(veldt: &Veldt) -> AgentResponse {
     }
     if sick.len() > 10 {
         text.push_str(&format!("  ... {} more sick\n", sick.len() - 10));
+    }
+    for (n, e, bugs) in lint_bad.iter().take(8) {
+        text.push_str(&format!("  lint {}#{} — {} defect warning{}: {}\n",
+            n, e.id, bugs.len(), if bugs.len() == 1 { "" } else { "s" },
+            bugs[0]));
+    }
+    if lint_bad.len() > 8 {
+        text.push_str(&format!("  ... {} more lint-flagged\n", lint_bad.len() - 8));
     }
     weakest.sort_by(|a, b| a.1.fitness.partial_cmp(&b.1.fitness)
         .unwrap_or(std::cmp::Ordering::Equal));
@@ -1411,6 +1437,74 @@ fn dead_intent(veldt: &Veldt) -> AgentResponse {
     plain(&text)
 }
 
+/// Lint — "lint fib" / "code health" — strict-lint variant bodies:
+/// per-family warning counts, defect-class called out, or a
+/// garden-wide census when no family is named.
+fn lint_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
+    let lint_entry = |name: &str, e: &FunctionEntry| -> Vec<String> {
+        let wrapped = crate::ast::Stmt::Grow(crate::ast::GrowItem::Fn(
+            name.to_string(), e.params.clone(),
+            e.body.clone(), e.tests.clone()));
+        crate::lint(&[wrapped]).into_iter()
+            .filter(|w| !w.contains("defined but never called")
+                && !w.contains("no top-level statements"))
+            .collect()
+    };
+    if let Some(name) = find_lineage(words, veldt) {
+        let vs = match veldt.functions.get(&name) {
+            Some(v) => v,
+            None => return plain(&format!("No lineage called '{}'.", name)),
+        };
+        let mut bugs = 0usize;
+        let mut total = 0usize;
+        let mut text = String::new();
+        for e in vs {
+            let warns = lint_entry(&name, e);
+            if warns.is_empty() { continue; }
+            total += warns.len();
+            let n_bugs = warns.iter()
+                .filter(|w| crate::evolve::is_realbug_warning(w)).count();
+            bugs += n_bugs;
+            text.push_str(&format!("  {}#{} — {} warnings ({} defect-class)\n",
+                                   name, e.id, warns.len(), n_bugs));
+            for w in warns.iter().take(3) {
+                text.push_str(&format!("    ⚠ {}\n", w));
+            }
+        }
+        if total == 0 {
+            return plain(&format!("{} is lint-clean — no warnings across {} variant(s).",
+                                  name, vs.len()));
+        }
+        return plain(&format!("{}: {} warnings ({} defect-class) across the family:\n{}",
+                              name, total, bugs, text));
+    }
+    // garden-wide census — worst families first
+    let mut per_fam: Vec<(&String, usize, usize)> = Vec::new();
+    let mut total = 0usize;
+    let mut bugs = 0usize;
+    for (name, vs) in &veldt.functions {
+        let (mut fw, mut fb) = (0usize, 0usize);
+        for e in vs {
+            for w in lint_entry(name, e) {
+                fw += 1;
+                if crate::evolve::is_realbug_warning(&w) { fb += 1; }
+            }
+        }
+        if fw > 0 { per_fam.push((name, fw, fb)); }
+        total += fw;
+        bugs += fb;
+    }
+    if total == 0 {
+        return plain("The whole garden is lint-clean — zero warnings.");
+    }
+    per_fam.sort_by(|a, b| b.1.cmp(&a.1));
+    let mut text = format!("Garden lint: {} warnings ({} defect-class):\n", total, bugs);
+    for (n, w, b) in per_fam.iter().take(8) {
+        text.push_str(&format!("  {} — {} warnings ({} defect)\n", n, w, b));
+    }
+    plain(&text)
+}
+
 /// Best — "who's winning" / "leaderboard" — fitness ranking.
 fn best_intent(words: &[&str], veldt: &Veldt) -> AgentResponse {
     if let Some(name) = find_lineage(words, veldt) {
@@ -1636,9 +1730,23 @@ fn fix_intent(words: &[&str], veldt: &mut Veldt) -> AgentResponse {
             .map(|e| e.id).collect())
         .unwrap_or_default();
     if sick.is_empty() {
-        return match want_id {
-            Some(id) => plain(&format!("{}#{} isn't sick (or doesn't exist).", name, id)),
-            None => plain(&format!("No sick variants in the {} lineage — it's healthy.", name)),
+        // nothing sick — try mechanical dead-code repair on the
+        // (healthy) variants instead; "fix fib" covers both senses
+        let mut cleaned = 0usize;
+        if let Some(vs) = veldt.functions.get_mut(&name) {
+            for e in vs.iter_mut()
+                .filter(|e| want_id.map(|i| i == e.id).unwrap_or(true)) {
+                let mut c = HealthChecker::repair_dead_tail(&mut e.body);
+                c |= HealthChecker::repair_dead_lets(&mut e.body);
+                if c { cleaned += 1; }
+            }
+        }
+        return match (want_id, cleaned) {
+            (Some(id), 0) => plain(&format!("{}#{} isn't sick and has no repairable dead code.", name, id)),
+            (Some(id), n) => plain(&format!("{}#{} isn't sick — cleaned dead code from it.", name, id)),
+            (None, 0) => plain(&format!("{} isn't sick and has no repairable dead code — the lineage is healthy.", name)),
+            (None, n) => plain(&format!("No sick variants in {} — but cleaned dead code from {} variant{}.",
+                                        name, n, if n == 1 { "" } else { "s" })),
         };
     }
     let mut steps = vec![step("plan", format!("Attempting hybrid-merge heal on {} sick variant{} of {}.", sick.len(), if sick.len() == 1 { "" } else { "s" }, name))];

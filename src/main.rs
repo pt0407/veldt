@@ -483,6 +483,39 @@ fn main() {
                 }
             }
         }
+        // veldt fix <file> — mechanically repair dead code in-place:
+        // same conservative passes as check --garden --fix (dead-tail
+        // truncation, pure dead lets, trailing loop continue), then
+        // re-format the file
+        "fix" => {
+            if args.len() < 3 {
+                eprintln!("Usage: veldt fix <file.veldt>");
+                process::exit(1);
+            }
+            let path = &args[2];
+            let src = std::fs::read_to_string(path)
+                .unwrap_or_else(|e| { eprintln!("Error reading {}: {}", path, e); process::exit(1); });
+            let mut lx = lexer::Lexer::new(&src);
+            let toks = lx.tokenize()
+                .unwrap_or_else(|e| { eprintln!("Lex error: {}", e); process::exit(1); });
+            let mut p = parser::Parser::new_with_lines(toks, lx.token_lines.clone());
+            let mut stmts = p.parse_program()
+                .unwrap_or_else(|e| { eprintln!("Parse error: {}", e); process::exit(1); });
+            if health::HealthChecker::repair_program(&mut stmts) {
+                // --check: dry-run — report but don't write, exit 1
+                // like fmt --check so CI can gate on it
+                if args.iter().any(|a| a == "--check") {
+                    println!("{} — has repairable dead code", path);
+                    process::exit(1);
+                }
+                let out = fmt::format_program(&stmts);
+                std::fs::write(path, &out)
+                    .unwrap_or_else(|e| { eprintln!("Error writing {}: {}", path, e); process::exit(1); });
+                println!("{} — repaired dead code, reformatted", path);
+            } else {
+                println!("{} — nothing to repair", path);
+            }
+        }
         "check" => {
             if args.len() < 3 {
                 eprintln!("Usage: veldt check <file.veldt>");
@@ -491,13 +524,156 @@ fn main() {
             let json_out = args.iter().any(|a| a == "--json");
             let strict = args.iter().any(|a| a == "--strict");
             let watch = args.iter().any(|a| a == "--watch");
+            // veldt check --garden [family] — strict-lint every variant
+            // body in the garden; mutations can produce the exact bug
+            // shapes the linter catches, so gate on it before adopting
+            if args.iter().any(|a| a == "--garden") {
+                let fam = args.iter().position(|a| a == "--garden")
+                    .and_then(|i| args.get(i + 1))
+                    .filter(|s| !s.starts_with("--"));
+                let fix = args.iter().any(|a| a == "--fix");
+                let verify = args.iter().any(|a| a == "--verify");
+                let bugs_only = args.iter().any(|a| a == "--bugs");
+                let watch = args.iter().any(|a| a == "--watch");
+                let mut last_mtime = None;
+                loop {
+                let mut v = veldt::Veldt::new();
+                if v.load().is_err() {
+                    eprintln!("no garden found (nothing to lint)");
+                    process::exit(1);
+                }
+                if let Some(f) = fam {
+                    if !v.functions.contains_key(f.as_str()) {
+                        eprintln!("no family '{}' in the garden", f);
+                        if !watch { return; }
+                    }
+                }
+                if watch {
+                    let gp = v.garden_path.join("veldt.json");
+                    let mtime = std::fs::metadata(&gp)
+                        .and_then(|m| m.modified()).ok();
+                    if last_mtime == mtime {
+                        std::thread::sleep(std::time::Duration::from_secs(2));
+                        continue;
+                    }
+                    last_mtime = mtime;
+                    print!("\x1b[2J\x1b[H");
+                }
+                let mut total = 0usize;
+                let mut flagged = 0usize;
+                let mut repaired = 0usize;
+                let mut defects = 0usize;
+                let mut repaired_ids: Vec<(String, u32)> = Vec::new();
+                for (name, entries) in v.functions.iter_mut() {
+                    if let Some(f) = fam { if name != f { continue; } }
+                    for e in entries.iter_mut() {
+                        if fix && (health::HealthChecker::repair_dead_tail(&mut e.body)
+                                | health::HealthChecker::repair_dead_lets(&mut e.body)) {
+                            repaired += 1;
+                            repaired_ids.push((name.clone(), e.id));
+                            if !json_out {
+                                eprintln!("  [FIX] {}#{} — removed dead code", name, e.id);
+                            }
+                        }
+                        let wrapped = ast::Stmt::Grow(ast::GrowItem::Fn(
+                            name.clone(), e.params.clone(),
+                            e.body.clone(), e.tests.clone()));
+                        // drop program-level noise — a wrapped body is a
+                        // module of one fn by construction; the garden
+                        // calls it dynamically, nothing here does
+                        let warns: Vec<String> = lint(&[wrapped])
+                            .into_iter()
+                            .filter(|w| !w.contains("defined but never called")
+                                && !w.contains("no top-level statements"))
+                            .filter(|w| !bugs_only
+                                || crate::evolve::is_realbug_warning(w))
+                            .collect();
+                        if warns.is_empty() { continue; }
+                        flagged += 1;
+                        total += warns.len();
+                        defects += warns.iter()
+                            .filter(|w| crate::evolve::is_realbug_warning(w))
+                            .count();
+                        if json_out {
+                            println!("{}", serde_json::json!({
+                                "family": name, "variant": e.id,
+                                "warnings": warns}));
+                        } else {
+                            for w in &warns {
+                                eprintln!("  ⚠ {}#{}: {}", name, e.id,
+                                    w.strip_prefix(format!("{}: ", name).as_str())
+                                        .unwrap_or(w.as_str()));
+                            }
+                        }
+                    }
+                }
+                if json_out {
+                    println!("{}", serde_json::json!({"summary": {
+                        "warnings": total, "defects": defects,
+                        "variants_flagged": flagged,
+                        "repaired": repaired}}));
+                }
+                // --verify: re-trial every repaired variant — proves the
+                // mechanical passes preserved semantics; writes back the
+                // honest post-repair health/fitness
+                if fix && verify && !repaired_ids.is_empty() {
+                    let mut failed = 0usize;
+                    for (name, id) in &repaired_ids {
+                        let mut entry = v.functions[name].iter()
+                            .find(|e| e.id == *id).cloned().unwrap();
+                        health::HealthChecker::check_at_birth_with(&mut entry, &v, false);
+                        if !matches!(entry.health, veldt::Health::Healthy) {
+                            failed += 1;
+                            eprintln!("  ⚠ {}#{} — re-trial FAILED after repair (score {:.2})",
+                                name, id, entry.trial_score);
+                        }
+                        if let Some(vs) = v.functions.get_mut(name) {
+                            for e in vs.iter_mut() {
+                                if e.id == *id { *e = entry.clone(); break; }
+                            }
+                        }
+                    }
+                    if failed == 0 && !json_out {
+                        println!("  verify: {} repaired variant(s) re-trialed healthy", repaired_ids.len());
+                    }
+                }
+                if fix && repaired > 0 { let _ = v.save(); }
+                if !json_out {
+                    if fix {
+                        println!("garden lint — repaired {} variant(s)", repaired);
+                    }
+                    println!("garden lint — {} warnings across {} variant(s)",
+                             total, flagged);
+                }
+                // --fail — CI gate: exit 1 when defect-class warnings exist
+                if !watch && args.iter().any(|a| a == "--fail") && defects > 0 {
+                    process::exit(1);
+                }
+                if !watch { break; }
+                std::thread::sleep(std::time::Duration::from_secs(2));
+                }
+                return;
+            }
+            // --fail — CI gate: exit 1 when defect-class warnings exist
+            let fail = args.iter().any(|a| a == "--fail");
+            // --suppress <substr> (repeatable) — pragmatic escape
+            // hatch: drop any warning containing the substring
+            let suppresses: Vec<String> = args.iter().enumerate()
+                .filter_map(|(i, a)| (a == "--suppress")
+                    .then(|| args.get(i + 1)).flatten().cloned())
+                .collect();
             let run = |src: &str| -> Result<(usize, Vec<String>), String> {
                 let mut lx = lexer::Lexer::new(src);
                 let toks = lx.tokenize().map_err(|e| format!("Lex error: {}", e))?;
                 let mut p = parser::Parser::new_with_lines(toks, lx.token_lines.clone());
                 let stmts = p.parse_program().map_err(|e| format!("Parse error: {}", e))?;
                 let n = stmts.len();
-                if strict { Ok((n, lint(&stmts))) } else { Ok((n, vec![])) }
+                if strict {
+                    let warns = lint(&stmts).into_iter()
+                        .filter(|w| !suppresses.iter().any(|s| w.contains(s.as_str())))
+                        .collect();
+                    Ok((n, warns))
+                } else { Ok((n, vec![])) }
             };
             let print = |path: &str, src: &str| {
                 match run(src) {
@@ -508,6 +684,10 @@ fn main() {
                             } else {
                                 for w in &warnings { eprintln!("  ⚠ {}", w); }
                                 println!("{} — ok ({} statements, {} warnings)", path, n, warnings.len());
+                            }
+                            if fail && warnings.iter()
+                                .any(|w| crate::evolve::is_realbug_warning(w)) {
+                                process::exit(1);
                             }
                         } else if json_out {
                             println!("{}", serde_json::json!({"file": path, "ok": true, "statements": n}));
@@ -542,9 +722,22 @@ fn main() {
                     std::thread::sleep(std::time::Duration::from_secs(2));
                 }
             } else {
-                let src = std::fs::read_to_string(&path)
-                    .unwrap_or_else(|e| { eprintln!("Error reading {}: {}", path, e); process::exit(1); });
-                print(&path, &src);
+                // `veldt check -` — read the program from stdin
+                // (editors/IDEs pipe unsaved buffers; Gardener pipes
+                // generated source without a temp file)
+                let (label, src) = if path == "-" {
+                    let mut buf = String::new();
+                    use std::io::Read;
+                    if std::io::stdin().read_to_string(&mut buf).is_err() {
+                        eprintln!("Error reading stdin"); process::exit(1);
+                    }
+                    ("<stdin>".to_string(), buf)
+                } else {
+                    let src = std::fs::read_to_string(&path)
+                        .unwrap_or_else(|e| { eprintln!("Error reading {}: {}", path, e); process::exit(1); });
+                    (path.clone(), src)
+                };
+                print(&label, &src);
             }
         }
         "diff" => {
@@ -848,8 +1041,22 @@ fn main() {
                     let peak = vs.iter().map(|e| e.fitness).fold(f64::NEG_INFINITY, f64::max);
                     let probes = veldt.probes.get(fam).map(|p| p.len()).unwrap_or(0);
                     let deaths = veldt.obituaries.iter().filter(|o| o.name == *fam).count();
-                    println!("  — {} variants · {} healthy | {} seed {} estab {} canon | peak {:.2} | {} probes · {} deaths",
-                        vs.len(), healthy, seed, estab, canon, peak, probes, deaths);
+                    // lint health — the same wrap as check --garden;
+                    // only surfaced when the family carries warnings
+                    let warns: usize = vs.iter().map(|e| {
+                        let wrapped = ast::Stmt::Grow(ast::GrowItem::Fn(
+                            fam.to_string(), e.params.clone(),
+                            e.body.clone(), e.tests.clone()));
+                        lint(&[wrapped]).into_iter()
+                            .filter(|w| !w.contains("defined but never called")
+                                && !w.contains("no top-level statements"))
+                            .count()
+                    }).sum();
+                    let lint_str = if warns > 0 {
+                        format!(" | ⚠{} warnings", warns)
+                    } else { String::new() };
+                    println!("  — {} variants · {} healthy | {} seed {} estab {} canon | peak {:.2} | {} probes · {} deaths{}",
+                        vs.len(), healthy, seed, estab, canon, peak, probes, deaths, lint_str);
                 }
                 // --detail — the full per-family dashboard (same panel as stats --family --top)
                 if args.iter().any(|a| a == "--detail") {
@@ -1723,6 +1930,60 @@ fn main() {
                 }
             }
         }
+        // veldt tend [family] — on-demand healing: run the healer on
+        // every sick variant (or one family's). Same machinery as the
+        // grow-flow pass: mechanical dead-code repair first, then
+        // healer-merge — and re-trials the healed entry so health is
+        // honest, not just asserted.
+        "tend" | "heal" => {
+            let fam = args.get(2).filter(|s| !s.starts_with("--"));
+            let mut veldt = veldt::Veldt::new();
+            if let Err(e) = veldt.load() { eprintln!("Error: {}", e); process::exit(1); }
+            let sick: Vec<(String, u32)> = veldt.functions.iter()
+                .flat_map(|(name, vs)| vs.iter()
+                    .filter(|e| matches!(e.health, veldt::Health::Sick(_)))
+                    .filter(|_| fam.map(|f| *name == *f).unwrap_or(true))
+                    .map(|e| (name.clone(), e.id)))
+                .collect();
+            if sick.is_empty() {
+                match fam {
+                    Some(f) => println!("{}: no sick variants to tend", f),
+                    None => println!("no sick variants — the garden is healthy"),
+                }
+            }
+            let mut healed = 0usize;
+            for (name, id) in sick {
+                let mut entry = veldt.functions[&name].iter()
+                    .find(|e| e.id == id).cloned().unwrap();
+                if health::HealthChecker::heal(&mut entry, &veldt) {
+                    healed += 1;
+                    eprintln!("[TEND] {}#{} — healed", name, id);
+                    // residual lint — the healed body may still carry
+                    // warnings; report the honest code-health state
+                    let wrapped = ast::Stmt::Grow(ast::GrowItem::Fn(
+                        name.clone(), entry.params.clone(),
+                        entry.body.clone(), entry.tests.clone()));
+                    let w = lint(&[wrapped]).into_iter()
+                        .filter(|w| !w.contains("defined but never called")
+                            && !w.contains("no top-level statements")).count();
+                    if w > 0 {
+                        eprintln!("         {}#{} — {} warning{} remain",
+                            name, id, w, if w == 1 { "" } else { "s" });
+                    }
+                    if let Some(vs) = veldt.functions.get_mut(&name) {
+                        for e in vs.iter_mut() {
+                            if e.id == id { *e = entry.clone(); break; }
+                        }
+                    }
+                } else {
+                    eprintln!("[TEND] {}#{} — no healer found, still sick", name, id);
+                }
+            }
+            if healed > 0 {
+                let _ = veldt.save();
+                println!("tend: healed {} sick variant(s)", healed);
+            }
+        }
         "prune" => {
             if args.len() < 3 {
                 eprintln!("Usage: veldt prune <name#N>");
@@ -1955,10 +2216,27 @@ fn main() {
                 } else {
                     serde_json::Map::new()
                 };
+                // lint census for the JSON consumer — warnings +
+                // defect-class counts, same wrap as check --garden
+                let (mut lint_w, mut lint_d) = (0usize, 0usize);
+                for (name, vs) in &veldt.functions {
+                    for e in vs {
+                        let wrapped = ast::Stmt::Grow(ast::GrowItem::Fn(
+                            name.clone(), e.params.clone(),
+                            e.body.clone(), e.tests.clone()));
+                        for w in lint(&[wrapped]) {
+                            if w.contains("defined but never called")
+                                || w.contains("no top-level statements") { continue; }
+                            lint_w += 1;
+                            if crate::evolve::is_realbug_warning(&w) { lint_d += 1; }
+                        }
+                    }
+                }
                 let mut base = serde_json::json!({
                     "lineages": veldt.functions.len(), "variants": total,
                     "healthy": healthy, "sick": sick, "dying": dying,
                     "seedling": seed, "established": estab, "canonical": canon,
+                    "lint_warnings": lint_w, "lint_defects": lint_d,
                     "probes": veldt.probes.values().map(|v| v.len()).sum::<usize>(),
                     "deaths": veldt.obituaries.len(), "runs": veldt.run_count,
                     "builtin_usage": use_count.iter().map(|(b, c)| serde_json::json!({(*b): c})).collect::<Vec<_>>(),
@@ -2016,7 +2294,69 @@ fn main() {
                 }
                 #[cfg(not(feature = "smt"))]
                 {
-                    eprintln!("--exact requires building with `--features smt`");
+                    eprintln!("[exact] requires the smt feature (cargo build --features smt)");
+                }
+            }
+            // --lint — strict-lint census: how clean is the garden's
+            // code? per-family warning counts, worst offenders first
+            if args.iter().any(|a| a == "--lint") {
+                let mut total = 0usize;
+                let mut flagged = 0usize;
+                let mut bugs = 0usize;
+                let mut per_fam: Vec<(&String, usize)> = Vec::new();
+                // warning-kind tally in the same pass — the advice tail
+                // after " — " is stable per rule; else mask call-names
+                // and digits so same-shape warnings group
+                let kind_of = |w: &str| -> String {
+                    // drop the "name: " fn-scope prefix so the same
+                    // check groups across families
+                    let w = match w.split_once(": ") {
+                        Some((h, m)) if !h.contains(' ') => m,
+                        _ => w,
+                    };
+                    if let Some((_, tail)) = w.split_once(" — ") {
+                        return tail.to_string();
+                    }
+                    w.split_whitespace().map(|t| {
+                        if t.chars().all(|c| c.is_ascii_digit()) { "N".to_string() }
+                        else if t.ends_with("()") { "V()".to_string() }
+                        else { t.to_string() }
+                    }).collect::<Vec<_>>().join(" ")
+                };
+                let mut kinds: std::collections::HashMap<String, usize> =
+                    std::collections::HashMap::new();
+                for (name, entries) in &veldt.functions {
+                    let mut fam_warns = 0usize;
+                    for e in entries {
+                        let wrapped = ast::Stmt::Grow(ast::GrowItem::Fn(
+                            name.clone(), e.params.clone(),
+                            e.body.clone(), e.tests.clone()));
+                        let warns: Vec<String> = lint(&[wrapped]).into_iter()
+                            .filter(|w| !w.contains("defined but never called")
+                                && !w.contains("no top-level statements"))
+                            .collect();
+                        if !warns.is_empty() { flagged += 1; }
+                        fam_warns += warns.len();
+                        for w in &warns {
+                            if crate::evolve::is_realbug_warning(w) { bugs += 1; }
+                            *kinds.entry(kind_of(w)).or_default() += 1;
+                        }
+                    }
+                    total += fam_warns;
+                    if fam_warns > 0 { per_fam.push((name, fam_warns)); }
+                }
+                per_fam.sort_by(|a, b| b.1.cmp(&a.1));
+                println!("[lint] {} warnings ({} defect-class) across {} variant(s) — garden code-health",
+                         total, bugs, flagged);
+                for (f, n) in per_fam.iter().take(5) {
+                    eprintln!("  {} — {} warnings", f, n);
+                }
+                let mut kinds: Vec<(String, usize)> = kinds.into_iter().collect();
+                kinds.sort_by(|a, b| b.1.cmp(&a.1));
+                if !kinds.is_empty() {
+                    let line: Vec<String> = kinds.iter().take(5)
+                        .map(|(k, n)| format!("{}×{}", n, k)).collect();
+                    eprintln!("  top: {}", line.join(" · "));
                 }
             }
             // --watch — re-render on a 2s poll until interrupted
@@ -2031,6 +2371,43 @@ fn main() {
             }
         }
         "bench" => {
+            // veldt bench --lint — how fast is strict-lint, per file +
+            // garden-wide? (the IDE's debounced lintEditor + check
+            // --garden --watch depend on this staying sub-50ms)
+            if args.iter().any(|a| a == "--lint") {
+                for entry in std::fs::read_dir("bench").unwrap() {
+                    let p = entry.unwrap().path();
+                    if p.extension().and_then(|e| e.to_str())
+                        != Some("veldt") { continue; }
+                    let src = std::fs::read_to_string(&p).unwrap();
+                    let t0 = std::time::Instant::now();
+                    let mut lx = lexer::Lexer::new(&src);
+                    let toks = lx.tokenize().unwrap();
+                    let mut pa = parser::Parser::new_with_lines(toks, lx.token_lines.clone());
+                    let stmts = pa.parse_program().unwrap();
+                    let n = lint(&stmts).len();
+                    println!("{:>18} {:>8.1}ms {:>4} warnings",
+                             p.file_name().unwrap().to_str().unwrap(),
+                             t0.elapsed().as_secs_f64() * 1000.0, n);
+                }
+                let mut v = veldt::Veldt::new();
+                if v.load().is_ok() {
+                    let t0 = std::time::Instant::now();
+                    let mut total = 0usize;
+                    for (name, vs) in &v.functions {
+                        for e in vs {
+                            let w = ast::Stmt::Grow(ast::GrowItem::Fn(
+                                name.clone(), e.params.clone(),
+                                e.body.clone(), e.tests.clone()));
+                            total += lint(&[w]).len();
+                        }
+                    }
+                    println!("{:>18} {:>8.1}ms {:>4} warnings",
+                             "garden census",
+                             t0.elapsed().as_secs_f64() * 1000.0, total);
+                }
+                return;
+            }
             // veldt bench <file.veldt> — single-workload timing (N reps)
             if let Some(file) = args.get(2).filter(|a| a.ends_with(".veldt")) {
                 let reps: usize = args.iter().position(|a| a == "--reps")
@@ -2188,6 +2565,7 @@ fn main() {
             let mut evolver = evolve::Evolver::new();
             evolver.llm = args.iter().any(|a| a == "--llm");
             evolver.use_vm = args.iter().any(|a| a == "--vm");
+            evolver.tend = args.iter().any(|a| a == "--tend");
             evolver.filter = args.iter().position(|a| a == "--filter")
                 .and_then(|p| args.get(p + 1)).cloned();
             evolver.sort = args.iter().position(|a| a == "--sort")
@@ -2381,7 +2759,8 @@ fn print_help(topic: Option<&str>) {
         "registry" => "veldt registry [port] — host a garden pool · veldt push <url> · veldt pull <url> [--merge]\n  veldt search <url> <name> · veldt tournament <url> — pull, trial, push winners back\n  veldt import <file|url> [--merge] · veldt export [file] — garden JSON",
         "sandbox" => "veldt run --sandbox <file> · veldt watch <file> --sandbox — Stage-0 caps (fs/net/proc denied)\n  sandbox_run(\"fn\", args) builtin · shadow_call(\"fn\", args) — all variants run sandboxed\n  Trials/probes/fuzz already run sandboxed — untrusted code can't touch the host",
         "filter" => "--filter <expr> — the variant query DSL (usable in garden/evolve/stats/test/fuzz/find/lineage/adopt/diff/verify/bench/tournament/absorb + /api/filter)\n  fields: fitness age usage size args lifespan last_used niches born trial_score\n          efficiency parents healing health trust origin calls family niche:<name>\n  ops: > < >= <= == != ~ (contains) | connectors: && (AND) || (OR) | prefix ! or 'not ' (NOT)\n  e.g. --filter \"family == fib && fitness > 1.5\" · \"niche:int:big > 0.5\" · \"!health == sick\"\n  --sort <field> — sort variants (garden/stats/lineage/find/evolve + /api/filter?sort=)\n  fields: fitness age usage size args lifespan last_used niches fit_rate usage_rate\n          size_rate efficiency niche_score id origin health trust born trial_score\n          efficiency parents healing niche:<name> | e.g. --sort fit_rate",
-        _ => "veldt help <topic> — run, repl, agent, evolve, garden, builtins, strings, lists, types, registry, sandbox, filter",
+        "lint" | "check" => "veldt check <file> [--strict] [--json|--watch|--fail] — parse + ~91-check lint\n  veldt check - --strict — read the program from stdin\n  veldt check --suppress <s> — drop warnings containing <s> (repeatable)\n  veldt check --garden [family] — lint every variant body\n  veldt check --garden --bugs — defect-class warnings only\n  veldt check --garden --fix [--verify] — repair dead code (+ re-trial)\n  veldt check --garden --watch — re-lint on garden saves\n  veldt fix <file> [--check] — same repairs on a source file (in-place + fmt)\n  veldt stats --lint — garden census (defect split + top warning kinds)\n  veldt adopt <name#N> --lint — refuse to promote defect-carrying variants\n  veldt tend [family] — heal sick variants on demand\n  veldt evolve --tend — self-maintaining cycles (heal + clean per cycle)\n  veldt bench --lint — strict-lint timing per file + garden census\n  evolve rejects mutants introducing defect warnings ([LINT] events)",
+        _ => "veldt help <topic> — run, repl, agent, evolve, garden, builtins, strings, lists, types, registry, sandbox, filter, lint",
     };
     println!("{}", text);
 }
@@ -3867,11 +4246,15 @@ fn lint_block(stmts: &[ast::Stmt], out: &mut Vec<String>,
                         }
                     }
                 }
-                // dead store — next mention of the var is another assign, not a read
-                let next = stmts.iter().skip(i + 1)
-                    .find(|s| stmt_mentions(s, name) || matches!(s, Stmt::Assign(n, _) if n == name));
-                if matches!(next, Some(Stmt::Assign(n, _)) if n == name) {
-                    out.push(format!("{} overwritten before being read — dead store", name));
+                // dead store — next mention of the var is another assign, not
+                // a read. A self-referential RHS (x = x.put(..), x = f(x))
+                // reads the old value itself — never a dead store.
+                if !expr_mentions(e, name) {
+                    let next = stmts.iter().skip(i + 1)
+                        .find(|s| stmt_mentions(s, name) || matches!(s, Stmt::Assign(n, _) if n == name));
+                    if matches!(next, Some(Stmt::Assign(n, _)) if n == name) {
+                        out.push(format!("{} overwritten before being read — dead store", name));
+                    }
                 }
             }
             Stmt::If(cond, a, b) => {
@@ -5407,6 +5790,26 @@ fn adopt_variant(target: &str) {
                          name, id);
             }
         }
+        // --lint: strict-lint the variant's body — refuse to promote
+        // code carrying defect-class warnings (same filter as the
+        // evolve birth-gate)
+        if std::env::args().any(|a| a == "--lint") {
+            if let Some(entry) = veldt.functions.get(name)
+                .and_then(|vs| vs.iter().find(|e| e.id == id)) {
+                let wrapped = ast::Stmt::Grow(ast::GrowItem::Fn(
+                    name.to_string(), entry.params.clone(),
+                    entry.body.clone(), entry.tests.clone()));
+                let bugs: Vec<String> = lint(&[wrapped]).into_iter()
+                    .filter(|w| crate::evolve::is_realbug_warning(w))
+                    .collect();
+                if !bugs.is_empty() {
+                    println!("{}#{} carries {} defect-class warning(s) — NOT promoting:", name, id, bugs.len());
+                    for b in &bugs { eprintln!("  ⚠ {}", b); }
+                    return;
+                }
+                println!("{}#{} lint-clean — safe to promote", name, id);
+            }
+        }
         let json = std::env::args().any(|a| a == "--json");
         if let Some(variants) = veldt.functions.get_mut(name) {
             let mut found = false;
@@ -6506,5 +6909,40 @@ fn print_family_detail(veldt: &veldt::Veldt, fam: &String, vs: &[veldt::Function
                 println!("    {:<20} {} probes", niche, n);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod lint_tests {
+    use super::*;
+
+    fn lint_src(src: &str) -> Vec<String> {
+        let mut lx = lexer::Lexer::new(src);
+        let toks = lx.tokenize().unwrap();
+        let mut p = parser::Parser::new_with_lines(toks, lx.token_lines.clone());
+        lint(&p.parse_program().unwrap())
+    }
+
+    #[test]
+    fn tictactoe_warnings_bounded() {
+        // regression guard — real-bug checks must not explode into
+        // false positives on the canonical example (11 today;
+        // headroom for legitimate new checks only)
+        let src = std::fs::read_to_string("examples/tictactoe.veldt").unwrap();
+        let warns = lint_src(&src);
+        assert!(warns.len() <= 15,
+            "tictactoe warnings exploded to {}: {:?}", warns.len(), warns);
+    }
+
+    #[test]
+    fn arity_and_undeclared_still_fire() {
+        // the defect-class checks must keep firing — a regression
+        // here would silently un-gate the evolve birth-gate
+        let warns = lint_src(
+            "fn add(a: int, b: int) { return a + b }\nfn main() { let x = add(1)\ny = 2 }");
+        assert!(warns.iter().any(|w| w.contains("add() wants 2 args, got 1")),
+            "arity check silent: {:?}", warns);
+        assert!(warns.iter().any(|w| w.contains("assigned but never declared")),
+            "undeclared-assign check silent: {:?}", warns);
     }
 }

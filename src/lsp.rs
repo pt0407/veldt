@@ -69,7 +69,8 @@ pub fn run_lsp() {
                             "legend": {"tokenTypes": ["keyword","function","variable","string","number","comment","property","operator"], "tokenModifiers": []},
                             "full": true,
                         },
-                        "completionProvider": {"triggerCharacters": [".", ":"]}
+                        "completionProvider": {"triggerCharacters": [".", ":"]},
+                        "codeActionProvider": true
                     },
                     "serverInfo": {"name": "veldt-lsp", "version": env!("CARGO_PKG_VERSION")}
                 })),
@@ -87,6 +88,7 @@ pub fn run_lsp() {
                 "textDocument/codeLens" => code_lens(params, &docs),
                 "textDocument/semanticTokens/full" => semantic_tokens(params, &docs),
                 "textDocument/foldingRange" => folding_range(params, &docs),
+                "textDocument/codeAction" => code_action(params, &docs),
                 _ => None,
             };
 
@@ -143,15 +145,21 @@ fn write_msg(w: &mut impl Write, v: &Value) {
 /// "Line N:" prefixes we surface as the diagnostic range.
 fn publish_diag(w: &mut impl Write, uri: &str, text: &str) {
     let mut lx = crate::lexer::Lexer::new(text);
-    let err = match lx.tokenize() {
-        Err(e) => Some(e.to_string()),
+    enum Diag { Err(String), Warn(Vec<String>) }
+    let diag = match lx.tokenize() {
+        Err(e) => Diag::Err(e.to_string()),
         Ok(tokens) => {
             let mut p = crate::parser::Parser::new_with_lines(tokens, lx.token_lines.clone());
-            p.parse_program().err().map(|e| e.to_string())
+            match p.parse_program() {
+                Err(e) => Diag::Err(e.to_string()),
+                // strict-lint warnings — the ~91-check pass from
+                // check --strict, surfaced as editor squiggles
+                Ok(stmts) => Diag::Warn(crate::lint(&stmts)),
+            }
         }
     };
-    let diags = match err {
-        Some(e) => {
+    let diags = match diag {
+        Diag::Err(e) => {
             let line = e.split("Line ").nth(1)
                 .and_then(|s| s.split(|c: char| !c.is_ascii_digit()).next())
                 .and_then(|s| s.parse::<u32>().ok())
@@ -162,7 +170,14 @@ fn publish_diag(w: &mut impl Write, uri: &str, text: &str) {
                 "severity": 1, "source": "veldt", "message": e
             })]
         }
-        None => vec![],
+        Diag::Warn(warns) => warns.iter().map(|w| {
+            let line = warn_anchor(text, w);
+            json!({
+                "range": {"start": {"line": line, "character": 0},
+                          "end": {"line": line, "character": 200}},
+                "severity": 2, "source": "veldt-lint", "message": w
+            })
+        }).collect(),
     };
     write_msg(w, &json!({"jsonrpc": "2.0", "method": "textDocument/publishDiagnostics",
         "params": {"uri": uri, "diagnostics": diags}}));
@@ -183,6 +198,67 @@ fn word_at(text: &str, line: u32, ch: u32) -> String {
 
 fn doc_of<'a>(params: &Value, docs: &'a HashMap<String, Doc>) -> Option<&'a Doc> {
     docs.get(params["textDocument"]["uri"].as_str()?)
+}
+
+/// Anchor a lint warning as close to the offending statement as
+/// we can get without source spans: fn-scoped warnings ("name:
+/// msg") resolve to the fn's def line, then we scan forward for
+/// the warning's subject — `let x`, `f(`, `x =`, or a keyword —
+/// stopping at the next top-level fn. Program-level warnings
+/// mention "grow fn name" / "fn name". Fallback: top of file.
+fn warn_anchor(text: &str, w: &str) -> u32 {
+    let (fname, msg) = match w.split_once(": ") {
+        Some((h, m)) if !h.contains(' ') => (h, m),
+        _ => ("", w),
+    };
+    let def = if !fname.is_empty() {
+        find_defs(text, fname).first().copied()
+    } else { None };
+    let def = def.or_else(|| {
+        for marker in ["grow fn ", "fn "] {
+            if let Some(rest) = w.strip_prefix(marker) {
+                let name = rest.split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+                    .next().unwrap_or("");
+                return find_defs(text, name).first().copied();
+            }
+        }
+        None
+    }).unwrap_or(0);
+    if let Some(tok) = warn_token(msg) {
+        for (i, l) in text.lines().enumerate().skip(def as usize + 1) {
+            let t = l.trim_start();
+            if t.starts_with("fn ") || t.starts_with("grow fn ") { break; }
+            if l.contains(&tok) { return i as u32; }
+        }
+    }
+    def
+}
+
+/// The searchable subject of a warning message — `let x`, `f(`,
+/// `x =`, or the construct keyword. First hit wins.
+fn warn_token(msg: &str) -> Option<String> {
+    if let Some(i) = msg.find("let ") {
+        let name: String = msg[i + 4..].chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
+        if !name.is_empty() { return Some(format!("let {}", name)); }
+    }
+    if let Some(i) = msg.find("()") {
+        let name: String = msg[..i].chars().rev()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+            .collect::<String>().chars().rev().collect();
+        if !name.is_empty() { return Some(format!("{}(", name)); }
+    }
+    if let Some(i) = msg.find(" assigned") {
+        let name: String = msg[..i].chars().rev()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+            .collect::<String>().chars().rev().collect();
+        if !name.is_empty() { return Some(format!("{} =", name)); }
+    }
+    for kw in ["match", "while", "for ", "catch", "test ", "return",
+               "break", "continue", "print", "if "] {
+        if msg.contains(kw) { return Some(kw.trim_end().to_string()); }
+    }
+    None
 }
 
 /// `fn name(` / `grow fn name(` definitions in the doc → line numbers.
@@ -550,4 +626,35 @@ fn completion(params: &Value, docs: &HashMap<String, Doc>) -> Option<Value> {
         }
     }
     Some(json!({"isIncomplete": false, "items": items}))
+}
+
+/// "veldt: fix dead code" — offers a whole-document WorkspaceEdit
+/// when the mechanical repair passes would change anything.
+fn code_action(params: &Value, docs: &HashMap<String, Doc>) -> Option<Value> {
+    let doc = doc_of(params, docs)?;
+    let mut lx = crate::lexer::Lexer::new(&doc.text);
+    let toks = lx.tokenize().ok()?;
+    let mut p = crate::parser::Parser::new_with_lines(toks, lx.token_lines.clone());
+    let mut stmts = p.parse_program().ok()?;
+    if !crate::health::HealthChecker::repair_program(&mut stmts) {
+        return Some(json!([]));
+    }
+    let new_text = crate::fmt::format_program(&stmts);
+    let end_line = doc.text.lines().count() as u32;
+    let uri = params["textDocument"]["uri"].as_str()?;
+    Some(json!([{
+        "title": "veldt: fix dead code",
+        "kind": "quickfix",
+        "edit": {
+            "changes": {
+                uri: [{
+                    "range": {
+                        "start": {"line": 0, "character": 0},
+                        "end": {"line": end_line, "character": 0}
+                    },
+                    "newText": new_text
+                }]
+            }
+        }
+    }]))
 }
