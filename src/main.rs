@@ -1195,6 +1195,12 @@ fn main() {
                     "aabb", "smoothstep", "bezier", "point_in_poly", "convex",
                     "ease", "bounce", "line_points", "turn", "fsm", "book",
                     "svc_", "robot", "edge", "game_loop", "dist_stats",
+                    // the 2D engine — real-time game builtins
+                    "game_", "entity", "ent_", "scene_", "spawn", "collide",
+                    "tile_", "on_ground", "physics_", "integrate", "camera_",
+                    "keys", "sfx", "beep", "anim", "emit", "particle",
+                    "key_pressed", "in_radius", "move_toward", "bullet",
+                    "cooldown", "game_over", "ui_menu", "ui_prompt",
                 ];
                 let mut filtered = veldt::Veldt::new();
                 filtered.probes = veldt.probes.clone();
@@ -3106,6 +3112,10 @@ fn print_stats(veldt: &veldt::Veldt) {
         "lerp", "clamp", "dist", "aabb", "smoothstep", "bezier", "point_in_poly",
         "convex", "ease", "bounce", "line_points", "turn", "fsm", "book", "svc",
         "robot", "edge", "game_loop", "dist_stats",
+        "game_", "entity", "ent_", "scene_", "spawn", "collide", "tile_",
+        "on_ground", "physics_", "integrate", "camera_", "keys", "sfx", "beep",
+        "anim", "emit", "particle", "key_pressed", "in_radius", "move_toward",
+        "bullet", "cooldown", "game_over", "ui_menu", "ui_prompt",
     ];
     let mut use_count: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
     for vs in veldt.functions.values() {
