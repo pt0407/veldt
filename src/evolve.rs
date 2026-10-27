@@ -979,7 +979,73 @@ impl Evolver {
         }
         if let Some(r) = Self::accum_window(win) { return Some(r); }
         if let Some(r) = Self::linsearch_window(win) { return Some(r); }
-        Self::dedup_window(win)
+        if let Some(r) = Self::dedup_window(win) { return Some(r); }
+        Self::cse_window(win)
+    }
+
+    /// `let dy = E` where an earlier `let dx = E` (identical pure
+    /// expr) already exists and `dx` is never reassigned in the window:
+    /// drop the redundant let and rename `dy` -> `dx` downstream.
+    /// Restricted to pure exprs (no calls / no mutations) so renaming
+    /// can't skip a side effect. Window spans the whole block —
+    /// searches every earlier let, not just win[0].
+    fn cse_window(win: &[Stmt]) -> Option<(usize, Vec<Stmt>)> {
+        fn pure(e: &Expr) -> bool {
+            match e {
+                Expr::Int(_) | Expr::Float(_) | Expr::Str(_)
+                | Expr::Bool(_) | Expr::Var(_) | Expr::Null => true,
+                Expr::BinOp(l, _, r) => pure(l) && pure(r),
+                Expr::UnaryOp(_, x) => pure(x),
+                Expr::Index(o, i) => pure(o) && pure(i),
+                Expr::List(xs) => xs.iter().all(pure),
+                Expr::MethodCall(o, m, a) =>
+                    matches!(m.as_str(),
+                        "len"|"contains"|"index_of"|"first"|"last"|"sum"
+                        |"min"|"max"|"product"|"get")
+                    && pure(o) && a.iter().all(pure),
+                _ => false,
+            }
+        }
+        // find (earlier-let-name, shared-expr) pairs where the same
+        // expr is rebound later in the block
+        for i in 1..win.len() {
+            let (name, expr) = match &win[i] {
+                Stmt::Let(n, e) if pure(e) => (n.clone(), e.clone()),
+                _ => continue,
+            };
+            let mut earlier: Option<String> = None;
+            let mut shadowed = false;
+            for st in &win[..i] {
+                match st {
+                    Stmt::Let(n, e) => {
+                        if format!("{:?}", e) == format!("{:?}", expr) && *n != name {
+                            earlier = Some(n.clone());
+                        }
+                        if *n == name { shadowed = true; } // same name rebound — bail
+                    }
+                    Stmt::Assign(n, _) => {
+                        if Some(n) == earlier.as_ref() { earlier = None; }
+                    }
+                    _ => {}
+                }
+            }
+            if shadowed { continue; }
+            if let Some(dx) = earlier {
+                // rewrite: keep win[..i], drop the redundant let, rename
+                let mut out: Vec<Stmt> = win[..i].to_vec();
+                for st in &win[i+1..] {
+                    out.push(subst_var_stmt(st, &name, &dx));
+                }
+                // dx must not be reassigned later either — if it is,
+                // the rename is still safe (dx's value at use-site may
+                // differ). Check: bail when dx assigned in tail.
+                let reassigns = out.iter().any(|st|
+                    matches!(st, Stmt::Assign(n, _) if *n == dx));
+                if reassigns { continue; }
+                return Some((win.len(), out));
+            }
+        }
+        None
     }
 
     /// O(n^2) hand-rolled dedup -> `xs.unique()`:
@@ -1988,6 +2054,86 @@ fn collect_assigned(stmts: &[Stmt]) -> std::collections::HashSet<String> {
 
 /// Does `e` read any variable in `vars`? Conservative — unknown
 /// composite exprs count as "uses" (never hoist what we can't prove).
+/// Rename free occurrences of `from` to `to` inside an expression
+/// (stops at fn/lambda/match-arm boundaries — captured scopes keep
+/// their own name).
+fn subst_var_expr(e: &Expr, from: &str, to: &str) -> Expr {
+    match e {
+        Expr::Var(n) => if n == from { Expr::Var(to.into()) } else { e.clone() },
+        Expr::BinOp(l, op, r) => Expr::BinOp(
+            Box::new(subst_var_expr(l, from, to)), op.clone(),
+            Box::new(subst_var_expr(r, from, to))),
+        Expr::UnaryOp(op, x) => Expr::UnaryOp(
+            op.clone(), Box::new(subst_var_expr(x, from, to))),
+        Expr::Index(o, i) => Expr::Index(
+            Box::new(subst_var_expr(o, from, to)),
+            Box::new(subst_var_expr(i, from, to))),
+        Expr::Slice(o, lo, hi) => Expr::Slice(
+            Box::new(subst_var_expr(o, from, to)),
+            lo.as_ref().map(|x| Box::new(subst_var_expr(x, from, to))),
+            hi.as_ref().map(|x| Box::new(subst_var_expr(x, from, to)))),
+        Expr::Call(f, v, a) => Expr::Call(f.clone(), *v,
+            a.iter().map(|x| subst_var_expr(x, from, to)).collect()),
+        Expr::MethodCall(o, m, a) => Expr::MethodCall(
+            Box::new(subst_var_expr(o, from, to)), m.clone(),
+            a.iter().map(|x| subst_var_expr(x, from, to)).collect()),
+        Expr::List(xs) => Expr::List(
+            xs.iter().map(|x| subst_var_expr(x, from, to)).collect()),
+        Expr::Interp(xs) => Expr::Interp(
+            xs.iter().map(|x| subst_var_expr(x, from, to)).collect()),
+        Expr::FieldAccess(o, f) => Expr::FieldAccess(
+            Box::new(subst_var_expr(o, from, to)), f.clone()),
+        Expr::StructLit(n, f) => Expr::StructLit(n.clone(),
+            f.iter().map(|(k, v)| (k.clone(), subst_var_expr(v, from, to))).collect()),
+        Expr::SafeGet(o, n, a) => Expr::SafeGet(
+            Box::new(subst_var_expr(o, from, to)), n.clone(),
+            a.as_ref().map(|xs| xs.iter().map(|y| subst_var_expr(y, from, to)).collect())),
+        Expr::Lambda(p, b) => {
+            if p.iter().any(|x| x.name == from) { e.clone() } // captured name
+            else { Expr::Lambda(p.clone(),
+                b.iter().map(|st| subst_var_stmt(st, from, to)).collect()) }
+        }
+        Expr::ListComp(h, v, i, c) => {
+            let (i2, c2) = (subst_var_expr(i, from, to),
+                c.as_ref().map(|x| Box::new(subst_var_expr(x, from, to))));
+            let h2 = if v == from { h.clone() } else { Box::new(subst_var_expr(h, from, to)) };
+            Expr::ListComp(h2, v.clone(), Box::new(i2), c2)
+        }
+        _ => e.clone(),
+    }
+}
+
+fn subst_var_stmt(s: &Stmt, from: &str, to: &str) -> Stmt {
+    let sub = |e: &Expr| subst_var_expr(e, from, to);
+    let subs = |xs: &Vec<Stmt>| xs.iter().map(|x| subst_var_stmt(x, from, to)).collect();
+    match s {
+        Stmt::Let(n, e) => Stmt::Let(n.clone(), sub(e)),
+        Stmt::Assign(n, e) => Stmt::Assign(n.clone(), sub(e)),
+        Stmt::Print(e) => Stmt::Print(sub(e)),
+        Stmt::ExprStmt(e) => Stmt::ExprStmt(sub(e)),
+        Stmt::Return(e) => Stmt::Return(e.as_ref().map(|x| sub(x))),
+        Stmt::If(c, t, b) => Stmt::If(sub(c), subs(t),
+            b.as_ref().map(|x| subs(x))),
+        Stmt::While(c, b) => Stmt::While(sub(c), subs(b)),
+        Stmt::For(v, i, b) => {
+            if v == from { s.clone() } // shadowed inside the loop
+            else { Stmt::For(v.clone(), sub(i), subs(b)) }
+        }
+        Stmt::Try(t, v, c) => {
+            let c2 = if v == from { c.clone() } else { subs(c) };
+            Stmt::Try(subs(t), v.clone(), c2)
+        }
+        Stmt::Match(e, arms, els) => Stmt::Match(sub(e),
+            arms.iter().map(|(p, b)| (p.clone(), subs(b))).collect(),
+            els.as_ref().map(|x| subs(x))),
+        Stmt::FnDef(n, p, b) => {
+            if p.iter().any(|x| x.name == from) { s.clone() }
+            else { Stmt::FnDef(n.clone(), p.clone(), subs(b)) }
+        }
+        _ => s.clone(),
+    }
+}
+
 fn expr_uses(e: &Expr, vars: &std::collections::HashSet<String>) -> bool {
     match e {
         Expr::Var(n) => vars.contains(n),
@@ -2582,6 +2728,30 @@ mod asymptotic_proof {
         let out = evolver.mutate_body(&body, Mutation::IdiomRewrite);
         let src = crate::fmt::format_program(&out);
         assert!(src.contains("for"), "unsafe rewrite:\n{}", src);
+    }
+
+    #[test]
+    fn idiom_rewrite_cse_dedups_shared_pure_expr() {
+        let mut evolver = Evolver::new();
+        // let dy = <same expr as dx> -> dy uses become dx, let dropped
+        let body = parse_fn_body(
+            "let dx = a + b\nlet dy = a + b\nreturn dx * dy");
+        let out = evolver.mutate_body(&body, Mutation::IdiomRewrite);
+        let src = crate::fmt::format_program(&out);
+        assert!(src.contains("dx * dx") && !src.contains("let dy"),
+            "CSE not applied:\n{}", src);
+        // different expr -> no rewrite
+        let body = parse_fn_body(
+            "let dx = a + b\nlet dy = a - b\nreturn dx * dy");
+        let out = evolver.mutate_body(&body, Mutation::IdiomRewrite);
+        let src = crate::fmt::format_program(&out);
+        assert!(src.contains("let dy"), "unsafe CSE:\n{}", src);
+        // impure expr (call) -> must NOT dedup
+        let body = parse_fn_body(
+            "let dx = rand()\nlet dy = rand()\nreturn dx + dy");
+        let out = evolver.mutate_body(&body, Mutation::IdiomRewrite);
+        let src = crate::fmt::format_program(&out);
+        assert!(src.contains("let dy"), "impure CSE:\n{}", src);
     }
 
     #[test]
