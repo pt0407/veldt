@@ -1407,3 +1407,13 @@ As of this commit we work TOGETHER on `main`, same phase, in parallel:
   initial frame output, and `agent "improve game_step"` plants
   an A* pathfinding strain (`maze.has("w")` + `astar`) that
   beats the generated maze in ~30 turns.
+- [Devin/main-side] DEPLOY — self-hosted "vercel for veldt":
+  `veldt deploy <file> [--name N] [--to URL]` puts a program
+  live at <host>/site/<name> — src/site.html is a standalone
+  play page (reads its name from the URL, runs via /api/play,
+  renders canvas games on an HTML5 <canvas> + HUD, Run/Auto/
+  View Source). Server: /site/:name page, /examples/:file raw
+  source (fixes IDE openFile fetch), /api/deploy POST
+  {name,source}. Deployed programs share the server garden —
+  their grown organisms resolve live. Public access still
+  needs a tunnel (no hosted infra).
