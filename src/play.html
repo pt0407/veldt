@@ -152,6 +152,37 @@ function paint(frame) {
   const meta = Object.entries(hud).map(([k, v]) => `${k} ${v}`).join(' · ');
   document.getElementById('hudMeta').textContent = meta;
   document.getElementById('hudTitle').textContent = NAME.toUpperCase();
+  // overlays — game_over / ui_menu / ui_prompt hud fields draw on the canvas
+  const ov = hud.overlay, menu = hud.menu, prompt = hud.prompt;
+  if (ov || menu || prompt) {
+    ctx.fillStyle = 'rgba(5,10,8,.78)';
+    ctx.fillRect(0, 0, cv.width, cv.height);
+    ctx.textAlign = 'center';
+    if (ov) {
+      ctx.fillStyle = '#f0c674'; ctx.font = 'bold 26px "Cormorant Garamond",serif';
+      ctx.fillText(ov.title || 'GAME OVER', cv.width / 2, cv.height / 2 - 14);
+      ctx.fillStyle = '#b8c8be'; ctx.font = '14px "JetBrains Mono",monospace';
+      ctx.fillText('score ' + (ov.score || '0'), cv.width / 2, cv.height / 2 + 10);
+      ctx.fillStyle = '#5a6b62'; ctx.font = '11px "JetBrains Mono",monospace';
+      ctx.fillText('press R to restart', cv.width / 2, cv.height / 2 + 34);
+    }
+    if (menu) {
+      ctx.fillStyle = '#8ec5a0'; ctx.font = 'bold 22px "Cormorant Garamond",serif';
+      ctx.fillText(menu.title || 'MENU', cv.width / 2, cv.height / 2 - 30);
+      const items = menu.items || [];
+      items.forEach((it, i) => {
+        const sel = (menu.sel === i);
+        ctx.fillStyle = sel ? '#f0c674' : '#b8c8be';
+        ctx.font = '13px "JetBrains Mono",monospace';
+        ctx.fillText((sel ? '▶ ' : '   ') + String(it), cv.width / 2, cv.height / 2 - 4 + i * 18);
+      });
+    }
+    if (prompt) {
+      ctx.fillStyle = '#8ec5a0'; ctx.font = '15px "JetBrains Mono",monospace';
+      ctx.fillText(String(prompt), cv.width / 2, cv.height / 2);
+    }
+    ctx.textAlign = 'left';
+  }
   // sound events — a named tone per sfx() the program emitted this frame
   for (const s of (f.sfx || [])) playSfx(s);
 }

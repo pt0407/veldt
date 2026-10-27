@@ -2968,6 +2968,47 @@ impl Interpreter {
                     _ => im::Vector::new() };
                 Ok(Some(Value::List(out)))
             }
+            "game_over" => {
+                // game_over(title, score) → a hud dict marking the game
+                // ended — the browser renders a win/lose overlay
+                let (title, score) = match (args.get(0), args.get(1)) {
+                    (Some(Value::Str(t)), Some(s)) => (t.to_string(), Self::json_val(s)),
+                    _ => return Err("game_over(title, score) expects str + any".into()),
+                };
+                let mut hud = im::HashMap::new();
+                let mut ov = im::HashMap::new();
+                ov.insert("title".into(), Value::Str(title.into()));
+                ov.insert("score".into(), Value::Str(format!("{}", score).into()));
+                hud.insert("overlay".into(), Value::Dict(ov));
+                hud.insert("done".into(), Value::Bool(true));
+                Ok(Some(Value::Dict(hud)))
+            }
+            "ui_menu" => {
+                // ui_menu(title, items) → a hud dict carrying a menu the
+                // browser renders; keys() up/down/enter select
+                let (title, items) = match (args.get(0), args.get(1)) {
+                    (Some(Value::Str(t)), Some(Value::List(items))) =>
+                        (t.to_string(), items.clone()),
+                    _ => return Err("ui_menu(title, items) expects str + list".into()),
+                };
+                let mut hud = im::HashMap::new();
+                let mut m = im::HashMap::new();
+                m.insert("title".into(), Value::Str(title.into()));
+                m.insert("items".into(), Value::List(items));
+                m.insert("sel".into(), Value::Int(0));
+                hud.insert("menu".into(), Value::Dict(m));
+                Ok(Some(Value::Dict(hud)))
+            }
+            "ui_prompt" => {
+                // ui_prompt(text) → a hud dict carrying a centered prompt
+                let text = match args.get(0) {
+                    Some(Value::Str(t)) => t.to_string(),
+                    _ => return Err("ui_prompt(text) expects a string".into()),
+                };
+                let mut hud = im::HashMap::new();
+                hud.insert("prompt".into(), Value::Str(text.into()));
+                Ok(Some(Value::Dict(hud)))
+            }
             "keys" => {
                 // keys() → list of held keys from the session input queue
                 let pressed: Vec<String> = self.game_io.as_ref()
