@@ -2666,17 +2666,32 @@ fn main() {
                 {
                     let (mut proven, mut div, mut bail, mut single) =
                         (0usize, 0usize, 0usize, 0usize);
+                    let mut reasons: std::collections::HashMap<String, usize> =
+                        std::collections::HashMap::new();
                     for name in veldt.functions.keys() {
                         if veldt.functions[name].len() < 2 { single += 1; continue; }
                         match smt::verify_exact_on_veldt(&veldt, name) {
                             Ok(Some((id, cex))) => { div += 1;
                                 eprintln!("  {}#{} diverges at {}", name, id, cex.join(",")); }
                             Ok(None) => { proven += 1; }
-                            Err(_) => { bail += 1; }
+                            Err(why) => {
+                                bail += 1;
+                                // bucket by the lead reason (before first ";" or "#")
+                                let key = why.split(';').next().unwrap_or(&why)
+                                    .split('#').next().unwrap_or(&why)
+                                    .trim_end_matches(':').trim().to_string();
+                                *reasons.entry(key).or_insert(0) += 1;
+                            }
                         }
                     }
                     println!("[exact] {} proven-equivalent, {} divergent, {} bail-to-bounded, {} single-variant",
                              proven, div, bail, single);
+                    if !reasons.is_empty() {
+                        let mut r: Vec<(&String, &usize)> = reasons.iter().collect();
+                        r.sort_by(|a, b| b.1.cmp(a.1));
+                        println!("[exact] top bail reasons:");
+                        for (k, n) in r.iter().take(5) { println!("   {:>2}× {}", n, k); }
+                    }
                 }
                 #[cfg(not(feature = "smt"))]
                 {
@@ -3247,7 +3262,8 @@ fn print_help(topic: Option<&str>) {
         "types" => "int float str bool list dict set null fn — types are advisory docs\n  `x in xs` membership · `??` null-coalesce · `?.` safe access · `|>` pipe",
         "registry" => "veldt registry [port] — host a garden pool · veldt push <url> · veldt pull <url> [--merge]\n  veldt search <url> <name> · veldt tournament <url> — pull, trial, push winners back\n  veldt import <file|url> [--merge] · veldt export [file] — garden JSON\n  veldt deploy <file> [--name N] [--to URL] — live at <host>/site/<name>\n  veldt pack <file> [-o out.veldtpkg] · veldt install <file|url> — project bundles",
         "sandbox" => "veldt run --sandbox <file> · veldt watch <file> --sandbox — Stage-0 caps (fs/net/proc denied)\n  sandbox_run(\"fn\", args) builtin · shadow_call(\"fn\", args) — all variants run sandboxed\n  Trials/probes/fuzz already run sandboxed — untrusted code can't touch the host",
-        "rewrite" => "veldt rewrite <name#N> — deterministic algorithmic idiom rewrite:\n  xs.sort().reverse()[0] / xs.sort()[0] / [-1] / [len-1] -> O(n) for-scan\n  let t=init; for/while loop { t op= k } -> t = init op k*n (closed form)\n  for x in xs { t += x } -> init + xs.sum()\n  hand-rolled linsearch -> xs.index_of(t)\n  membership loop (for or while) -> xs.contains(t)\n  dedup loop -> xs.unique()\n  duplicate let-bindings -> CSE (pure exprs only)\nveldt rewrite <name> — the fittest variant\nveldt rewrite <name#N> --show — preview the rewritten source\nveldt rewrite --all [--dry] — sweep the whole garden (dry = list matches)\nveldt tend — heals sick AND idiom-optimizes healthy variants in place\nagent \"rewrite <name#N>\" — same path via the Gardener",
+        "rewrite" => "veldt rewrite <name#N> — deterministic algorithmic idiom rewrite:\n  xs.sort().reverse()[0] / xs.sort()[0] / [-1] / [len-1] -> O(n) for-scan\n  let t=init; for/while loop { t op= k } -> t = init op k*n (closed form)\n  for x in xs { t += x } -> init + xs.sum()\n  hand-rolled linsearch -> xs.index_of(t)\n  membership loop (for or while) -> xs.contains(t)\n  dedup loop -> xs.unique()\n  duplicate let-bindings -> CSE (pure exprs only)\nveldt rewrite <name> — the fittest variant\nveldt rewrite <name#N> --show — preview the rewritten source\nveldt rewrite --all [--dry] — sweep the whole garden (dry = list matches)
+veldt rewrite <name#N> --exact — only birth if Z3 proves the rewrite sound\nveldt tend — heals sick AND idiom-optimizes healthy variants in place\nagent \"rewrite <name#N>\" — same path via the Gardener",
         "filter" => "--filter <expr> — the variant query DSL (usable in garden/evolve/stats/test/fuzz/find/lineage/adopt/diff/verify/bench/tournament/absorb + /api/filter)\n  fields: fitness age usage size args lifespan last_used niches born trial_score\n          efficiency parents healing health trust origin calls family niche:<name>\n  ops: > < >= <= == != ~ (contains) | connectors: && (AND) || (OR) | prefix ! or 'not ' (NOT)\n  e.g. --filter \"family == fib && fitness > 1.5\" · \"niche:int:big > 0.5\" · \"!health == sick\"\n  --sort <field> — sort variants (garden/stats/lineage/find/evolve + /api/filter?sort=)\n  fields: fitness age usage size args lifespan last_used niches fit_rate usage_rate\n          size_rate efficiency niche_score id origin health trust born trial_score\n          efficiency parents healing niche:<name> | e.g. --sort fit_rate",
         "lint" | "check" => "veldt check <file> [--strict] [--json|--watch|--fail] — parse + ~91-check lint\n  veldt check - --strict — read the program from stdin\n  veldt check --suppress <s> — drop warnings containing <s> (repeatable)\n  veldt check --garden [family] — lint every variant body\n  veldt check --garden --bugs — defect-class warnings only\n  veldt check --garden --fix [--verify] — repair dead code (+ re-trial)\n  veldt check --garden --watch — re-lint on garden saves\n  veldt fix <file> [--check] — same repairs on a source file (in-place + fmt)\n  veldt stats --lint — garden census (defect split + top warning kinds)\n  veldt adopt <name#N> --lint — refuse to promote defect-carrying variants\n  veldt tend [family] — heal sick variants on demand\n  veldt evolve --tend — self-maintaining cycles (heal + clean per cycle)\n  veldt bench --lint — strict-lint timing per file + garden census\n  evolve rejects mutants introducing defect warnings ([LINT] events)",
         _ => "veldt help <topic> — run, repl, agent, evolve, garden, builtins, strings, lists, types, registry, sandbox, filter, lint, rewrite, game",
