@@ -74,6 +74,7 @@ difference to_list`.
 | `fetch` | `fetch(url)` / `fetch(url, dict)` | GET; dict can carry headers/method/body |
 | `post` | `post(url, body)` / `post(url, body, dict)` | POST |
 | `serve` | `serve(port, fn(req) {...})` | blocking HTTP server; req is dict with `method`, `path`, `body`, `headers` |
+| `video_*` | `video_info(p)` `video_cut(s,o,t,d)` `video_scale(s,o,w,h)` `video_speed(s,o,f)` `video_text(s,o,txt)` `video_mute(s,o)` `video_audio_extract(s,o)` `video_gif(s,o)` `video_thumbnail(s,o,t)` `video_frames(s,dir[,fps])` `video_from_frames(dir,o[,fps])` `video_concat(list,o)` | ffmpeg/ffprobe wrappers — dict-returning info + shell ops; `exit` cap (sandbox denies) |
 | `match_path` | `match_path("/u/:id", "/u/5")` | route params → dict or null |
 
 ## Database
