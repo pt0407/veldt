@@ -3344,7 +3344,7 @@ veldt adopt <name#N> --exact — SMT-gated: only promotes if Z3 proves equivalen
 veldt tend --exact — in-place idiom rewrites only when Z3 proves them semantics-preserving
 veldt evolve --tend — self-maintaining cycles",
         "lint" | "check" => "veldt check <file> [--strict] [--json|--watch|--fail] — parse + ~91-check lint\n  veldt check - --strict — read the program from stdin\n  veldt check --suppress <s> — drop warnings containing <s> (repeatable)\n  veldt check --garden [family] — lint every variant body\n  veldt check --garden --bugs — defect-class warnings only\n  veldt check --garden --fix [--verify] — repair dead code (+ re-trial)\n  veldt check --garden --watch — re-lint on garden saves\n  veldt fix <file> [--check] — same repairs on a source file (in-place + fmt)\n  veldt stats --lint — garden census (defect split + top warning kinds)\n  veldt adopt <name#N> --lint — refuse to promote defect-carrying variants\n  veldt tend [family] — heal sick variants on demand\n  veldt evolve --tend — self-maintaining cycles (heal + clean per cycle)\n  veldt bench --lint — strict-lint timing per file + garden census\n  evolve rejects mutants introducing defect warnings ([LINT] events)",
-        _ => "veldt help <topic> — run, repl, agent, evolve, garden, verify, stats, probe, adopt, tend, rewrite, lint, builtins, strings, lists, types, registry, sandbox, filter, game",
+        _ => "veldt help <topic> — run, repl, agent, evolve, garden, verify, stats, probe, adopt, tend, rewrite, lint, builtins, strings, lists, types, registry, sandbox, filter, game, video",
     };
     println!("{}", text);
 }
