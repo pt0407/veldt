@@ -221,6 +221,7 @@ impl Caps {
             "spawn" | "join" | "pmap" | "task" => !self.spawn,
             "env" | "args" | "read_stdin" | "input" | "readline" => !self.env,
             "exit" | "exec" | "system" | "shell" => !self.exit,
+            n if n.starts_with("video_") => !self.exit,
             _ => false,
         }
     }
@@ -5358,6 +5359,120 @@ impl Interpreter {
                 let json = Self::value_to_json(&args[0]);
                 Ok(Some(Value::Str(serde_json::to_string_pretty(&json)
                     .map_err(|e| format!("JSON stringify error: {}", e))?.into())))
+            }
+            // === std:video — ffmpeg/ffprobe wrappers (needs `exit` cap) ===
+            "video_info" => {
+                let path = match args.first() {
+                    Some(Value::Str(s)) => s.to_string(),
+                    _ => return Err("video_info(path)".into()),
+                };
+                let out = std::process::Command::new("ffprobe")
+                    .args(["-v","quiet","-print_format","json",
+                           "-show_format","-show_streams","--",&path])
+                    .output().map_err(|e| format!("ffprobe: {}", e))?;
+                if !out.status.success() {
+                    return Err(format!("ffprobe {}: {}",
+                        path, String::from_utf8_lossy(&out.stderr).trim().to_string()));
+                }
+                let v: serde_json::Value = serde_json::from_slice(&out.stdout)
+                    .map_err(|e| format!("ffprobe json: {}", e))?;
+                Ok(Some(Self::json_to_value(v)))
+            }
+            "video_cut" | "video_scale" | "video_speed" | "video_text"
+            | "video_mute" | "video_audio_extract" | "video_gif"
+            | "video_thumbnail" | "video_frames" | "video_from_frames"
+            | "video_concat" => {
+                fn s_of(v: Option<&Value>) -> Result<String, String> {
+                    match v {
+                        Some(Value::Str(s)) => Ok(s.to_string()),
+                        Some(Value::Int(n)) => Ok(n.to_string()),
+                        Some(Value::Float(f)) => Ok(format!("{}", f)),
+                        _ => Err("video_* expects str/int/float args".into()),
+                    }
+                }
+                let a = |i: usize| -> Result<String, String> { s_of(args.get(i)) };
+                let (mut cmd, out): (Vec<String>, String) = match name {
+                    "video_cut" => (vec!["-i".into(), a(0)?,
+                        "-ss".into(), a(2).unwrap_or_else(|_|"0".into()),
+                        "-t".into(), a(3).unwrap_or_else(|_|"10".into()),
+                        "-c".into(),"copy".into(),"-y".into()], a(1)?),
+                    "video_scale" => (vec!["-i".into(), a(0)?,"-vf".into(),
+                        format!("scale={}:{}", a(2)?, a(3)?),"-y".into()], a(1)?),
+                    "video_speed" => {
+                        let f: f64 = a(2)?.parse().unwrap_or(1.0);
+                        (vec!["-i".into(), a(0)?,"-vf".into(),
+                              format!("setpts={}*PTS", 1.0/f),
+                              "-af".into(),format!("atempo={}",f),"-y".into()], a(1)?)
+                    }
+                    "video_text" => {
+                        let txt = a(2).unwrap_or_else(|_|"text".into())
+                            .replace('\'',"");
+                        (vec!["-i".into(), a(0)?,"-vf".into(),
+                              format!("drawtext=text='{}':x=(w-text_w)/2:y=h-40:fontsize=28:fontcolor=white",
+                                      txt),"-y".into()], a(1)?)
+                    }
+                    "video_mute" => (vec!["-i".into(), a(0)?,
+                        "-an".into(),"-c:v".into(),"copy".into(),"-y".into()], a(1)?),
+                    "video_audio_extract" => (vec!["-i".into(), a(0)?,
+                        "-vn".into(),"-acodec".into(),"copy".into(),"-y".into()], a(1)?),
+                    "video_gif" => (vec!["-i".into(), a(0)?,"-vf".into(),
+                        "fps=10,scale=320:-1:flags=lanczos".into(),"-y".into()], a(1)?),
+                    "video_thumbnail" => (vec!["-ss".into(),
+                        a(2).unwrap_or_else(|_|"0".into()),
+                        "-i".into(), a(0)?,"-frames:v".into(),"1".into(),"-y".into()], a(1)?),
+                    "video_frames" => {
+                        let out = a(1)?;
+                        (vec!["-i".into(), a(0)?,"-vf".into(),
+                              format!("fps={}", a(2).unwrap_or_else(|_|"24".into())),
+                              "-y".into(),
+                              format!("{}/f%05d.png", out.trim_end_matches('/'))],
+                         out)
+                    }
+                    "video_from_frames" => {
+                        let dir = a(0)?;
+                        (vec!["-framerate".into(), a(2).unwrap_or_else(|_|"24".into()),
+                              "-i".into(), format!("{}/f%05d.png", dir.trim_end_matches('/')),
+                              "-c:v".into(),"libx264".into(),"-pix_fmt".into(),"yuv420p".into(),
+                              "-y".into()], a(1)?)
+                    }
+                    "video_concat" => {
+                        let srcs: Vec<String> = match args.first() {
+                            Some(Value::List(xs)) => xs.iter()
+                                .map(|v| match v { Value::Str(s) => Ok::<String,String>(s.to_string()),
+                                                   _ => Err("video_concat expects list of str".into()) })
+                                .collect::<Result<Vec<String>,_>>()?,
+                            _ => return Err("video_concat(list, out)".into()),
+                        };
+                        let out = a(1)?;
+                        let mut tmp = std::env::temp_dir();
+                        tmp.push(format!("veldt_concat_{}.txt", std::process::id()));
+                        std::fs::write(&tmp, srcs.iter()
+                            .map(|s| format!("file '{}'",s)).collect::<Vec<_>>().join("\n"))
+                            .map_err(|e| format!("concat list: {}", e))?;
+                        let r = std::process::Command::new("ffmpeg")
+                            .args(["-f","concat","-safe","0","-i",
+                                   tmp.to_str().ok_or("tmp path")?,
+                                   "-c","copy","-y",&out]).output();
+                        let _ = std::fs::remove_file(&tmp);
+                        match r { Err(e) => return Err(format!("ffmpeg: {}", e)),
+                            Ok(o) if !o.status.success() => return Err(format!(
+                                "ffmpeg: {}", String::from_utf8_lossy(&o.stderr))),
+                            _ => {} }
+                        return Ok(Some(Value::Str(out.into())));
+                    }
+                    _ => unreachable!(),
+                };
+                // for most ops `out` is the final positional arg; the
+                // frame-dump ops already carry their pattern in `cmd`
+                if name != "video_frames" { cmd.push(out.clone()); }
+                let r = std::process::Command::new("ffmpeg")
+                    .args(&cmd).output()
+                    .map_err(|e| format!("ffmpeg: {}", e))?;
+                if !r.status.success() {
+                    return Err(format!("ffmpeg: {}",
+                        String::from_utf8_lossy(&r.stderr).trim().to_string()));
+                }
+                Ok(Some(Value::Str(out.into())))
             }
             _ => Ok(None),
         }

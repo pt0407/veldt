@@ -554,6 +554,7 @@ fn main() {
             push_garden(&url);
             eprintln!("[SWARM] sync complete — both gardens merged");
         }
+        "video" => "veldt video — ffmpeg wrappers (needs `exit` cap; sandbox blocks)\n  video_info(p) dict · video_cut(s,o,t,d) · video_scale(s,o,w,h) · video_speed(s,o,f)\n  video_text(s,o,txt) · video_mute(s,o) · video_audio_extract(s,o) · video_gif(s,o)\n  video_thumbnail(s,o,t) · video_frames(s,dir[,fps]) · video_from_frames(dir,o[,fps])\n  video_concat(list,o) — concat demuxer. Errors pass through (missing filters → honest bail).",
         "game" => {
             // veldt game new <name> — scaffold a complete playable game:
             // maze_gen + canvas render + ui HUD + bt AI + a turn loop,
