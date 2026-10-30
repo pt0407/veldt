@@ -554,7 +554,6 @@ fn main() {
             push_garden(&url);
             eprintln!("[SWARM] sync complete — both gardens merged");
         }
-        "video" => "veldt video — ffmpeg wrappers (needs `exit` cap; sandbox blocks)\n  video_info(p) dict · video_cut(s,o,t,d) · video_scale(s,o,w,h) · video_speed(s,o,f)\n  video_text(s,o,txt) · video_mute(s,o) · video_audio_extract(s,o) · video_gif(s,o)\n  video_thumbnail(s,o,t) · video_frames(s,dir[,fps]) · video_from_frames(dir,o[,fps])\n  video_concat(list,o) — concat demuxer. Errors pass through (missing filters → honest bail).",
         "game" => {
             // veldt game new <name> — scaffold a complete playable game:
             // maze_gen + canvas render + ui HUD + bt AI + a turn loop,
@@ -3303,6 +3302,7 @@ fn print_help(topic: Option<&str>) {
         "evolve" => "veldt evolve [N] [--llm] [--seed N] [--until F|--until-fam name:F]\n  live call traces auto-absorb into probes first — evidence feeds selection",
         "garden" => "veldt garden [--sick|--obituaries|--json|--filter <expr>] — census\n  --family <name> — one lineage's census (+ --detail for the full dashboard)\n  --filter <expr> — composable query: fields fitness age usage size args\n    lifespan last_used niches health trust origin calls; ops > < >= <= == != ~\n    `&&` for AND, `||` for OR. e.g. --filter \"fitness > 1.5 && age < 100\"\n  veldt lineage <name> · veldt stats [--json] [--brief] [--top|--detail] [--family <n>] [--filter <expr>] [--sort <field>] · veldt test <name>|--all\n  veldt adopt <name#N> · veldt fuzz <name>|--all · veldt find <substr>\n  veldt diff <a#n> <b#n> · veldt absorb · veldt tournament <url>",
         "builtins" => "len type str int float print eprint input read_stdin args exit\n  abs max min round floor ceil sqrt pow rand date now sleep env\n  fetch post serve match_path read_file write_file ls exists\n  dict get put has keys values items merge delete get_or\n  re_match re_find re_replace re_split re_captures format\n  canvas_* grid_* ui_* bt_* balance_* astar* bfs los fov turn fsm_next\n  rand* roll dice choice weighted_choice noise2 fbm perlin poisson_disc\n  voronoi delaunay wfc maze_gen flood_fill neighbors lerp clamp dist aabb\n  smoothstep bezier point_in_poly convex_hull ease_* bounce line_points",
+        "video" => "veldt video — ffmpeg wrappers (needs `exit` cap; sandbox blocks)\n  video_info(p) dict · video_cut(s,o,t,d) · video_scale(s,o,w,h) · video_speed(s,o,f)\n  video_text(s,o,txt) · video_mute(s,o) · video_audio_extract(s,o) · video_gif(s,o)\n  video_thumbnail(s,o,t) · video_frames(s,dir[,fps]) · video_from_frames(dir,o[,fps])\n  video_concat(list,o) — concat demuxer. Errors pass through (missing filters → honest bail).",
         "game" | "engine" => "veldt's 2D game engine — real-time playable games\n  \
   WORLD: game_new(w,h) · camera_xy / camera_follow(state,e,dz) scrolling ·\n  \
     tile_at/tile_solid map read · game_frame(state,entities,hud,map?) emit\n  \
