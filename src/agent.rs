@@ -2285,6 +2285,18 @@ pub struct Template {
 pub fn catalog() -> Vec<Template> {
     vec![
         Template {
+            keywords: &["video", "ffmpeg", "clip", "edit"],
+            canonical: "video_edit",
+            desc: "video edit — cut/scale/text/concat via ffmpeg builtins",
+            needs: &[],
+            make: r#"grow fn video_edit(src: str) test video_edit("/tmp/t.mp4") == "/tmp/t_out.mp4" {
+    let o = "/tmp/t_out.mp4"
+    video_cut(src, o, 0, 5)
+    return o
+}
+"#,
+        },
+        Template {
             keywords: &["fib", "fibonacci"],
             canonical: "fib",
             desc: "fibonacci number",
